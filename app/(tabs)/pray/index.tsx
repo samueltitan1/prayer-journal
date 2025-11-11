@@ -1,6 +1,7 @@
 // app/(tabs)/pray/index.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
+import * as FileSystem from "expo-file-system/legacy";
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -252,31 +253,53 @@ export default function PrayScreen() {
   ): Promise<string | null> => {
     try {
       const fileExt = uri.split(".").pop() || "m4a";
-      const path = `${userId}/${Date.now()}.${fileExt}`;
-
-      const file = {
-        uri,
-        name: path,
-        type: `audio/${fileExt}`,
-      } as any;
-
+      const fileName = `${Date.now()}.${fileExt}`;
+      const filePath = `${userId}/${fileName}`;
+  
+      console.log("🟡 Starting upload via FileSystem:", { uri, filePath });
+  
+      // ✅ Read file contents as base64 (works across all SDKs)
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: "base64" });
+  
+      // ✅ Convert base64 → Uint8Array manually (since atob isn’t available natively)
+      const binary = globalThis.atob
+        ? globalThis.atob(base64)
+        : Buffer.from(base64, "base64").toString("binary");
+  
+      const fileBytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        fileBytes[i] = binary.charCodeAt(i);
+      }
+  
+      console.log("🟢 File bytes length:", fileBytes.length);
+  
       const { data, error } = await supabase.storage
-        .from("prayer_audio")
-        .upload(path, file);
-
+        .from("prayer-audio")
+        .upload(filePath, fileBytes, {
+          contentType: `audio/${fileExt}`,
+          upsert: false,
+        });
+  
       if (error) {
-        console.warn("Supabase upload error", error.message);
+        console.warn("❌ Supabase upload error:", error.message);
         return null;
       }
-
-      // If your bucket is private, you can use getPublicUrl or signed URL later
-      const { data: publicData } = supabase.storage
-        .from("prayer_audio")
-        .getPublicUrl(data.path);
-
+  
+      console.log("✅ Uploaded to storage path:", data.path);
+  
+      const { data: publicData, error: urlError } = supabase.storage
+        .from("prayer-audio")
+        .getPublicUrl(filePath);
+  
+      if (urlError) {
+        console.warn("⚠️ URL fetch error:", urlError.message);
+        return null;
+      }
+  
+      console.log("🌍 Public URL generated:", publicData.publicUrl);
       return publicData.publicUrl ?? null;
     } catch (e) {
-      console.warn("Upload failed", e);
+      console.error("💥 Upload failed:", e);
       return null;
     }
   };
@@ -289,35 +312,48 @@ export default function PrayScreen() {
       );
       return;
     }
-
+  
     try {
       setIsProcessing(true);
-
-      // 1️⃣ Upload audio
-      const audioUrl = await uploadAudioToSupabase(userId, draftAudioUri);
-
-      // 2️⃣ Insert prayer row
-      const { error } = await supabase.from("prayers").insert({
+  
+      console.log("🎙 Uploading prayer audio...");
+      const uploadedUrl = await uploadAudioToSupabase(userId, draftAudioUri);
+      console.log("🔗 Uploaded URL:", uploadedUrl);
+  
+      const audioUrl = uploadedUrl ?? null;
+  
+      console.log("📝 Inserting prayer into Supabase:", {
         user_id: userId,
-        prayed_at: new Date().toISOString(),
+        audio_url: audioUrl,
         transcript_text: draftTranscript || null,
         duration_seconds: draftDuration ?? null,
-        audio_url: audioUrl,
       });
-
+  
+      const { error } = await supabase.from("prayers").insert([
+        {
+          user_id: userId,
+          prayed_at: new Date().toISOString(),
+          transcript_text: draftTranscript || null,
+          duration_seconds: draftDuration ?? null,
+          audio_url: audioUrl, // ✅ always included
+        },
+      ]);
+  
       if (error) {
-        console.warn("Insert prayer error", error.message);
+        console.warn("❌ Insert prayer error:", error.message);
         throw error;
       }
-
+  
+      console.log("✅ Prayer saved successfully!");
       setShowEditModal(false);
       setPrayState("saved");
       setShowToast(true);
       setTimeout(() => setShowToast(false), 3000);
     } catch (e: any) {
+      console.error("💥 handleSavePrayer error:", e);
       Alert.alert(
         "Error",
-        e?.message || "We couldn’t save your prayer. Please try again."
+        e?.message || "We couldn't save your prayer. Please try again."
       );
     } finally {
       setIsProcessing(false);

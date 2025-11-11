@@ -34,25 +34,27 @@ interface SettingsModalProps {
 }
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
-const SHEET_HEIGHT = SCREEN_HEIGHT * 0.82; // ~80% screen
+const SHEET_HEIGHT = SCREEN_HEIGHT * 0.82;
 
-export default function SettingsModal({
-  visible,
-  onClose,
-  userId,
-}: SettingsModalProps) {
+export default function SettingsModal({ visible, onClose, userId }: SettingsModalProps) {
   const { theme, setTheme, colors } = useTheme();
   const isDark = theme === "dark";
 
+  // ==========================
+  // State
+  // ==========================
   const [dailyReminderEnabled, setDailyReminderEnabled] = useState(false);
   const [reminderTime, setReminderTime] = useState("08:00");
   const [showTimePicker, setShowTimePicker] = useState(false);
-  const [deleteAudioAfterTranscription, setDeleteAudioAfterTranscription] =
-    useState(false);
+  const [deleteAudioAfterTranscription, setDeleteAudioAfterTranscription] = useState(false);
   const [subscriptionPlan, setSubscriptionPlan] = useState("Core Plan");
   const [version, setVersion] = useState("v1.0.0");
+  const [hasReflectiveSummary, setHasReflectiveSummary] = useState(false);
+  const [loadingSettings, setLoadingSettings] = useState(true);
 
-  // ---- Toast state (for inline feedback) ----------------------------
+  // ==========================
+  // Toast for feedback
+  // ==========================
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
 
@@ -60,112 +62,75 @@ export default function SettingsModal({
     setToastMessage(message);
     toastOpacity.setValue(0);
     Animated.sequence([
-      Animated.timing(toastOpacity, {
-        toValue: 1,
-        duration: 180,
-        useNativeDriver: true,
-      }),
+      Animated.timing(toastOpacity, { toValue: 1, duration: 180, useNativeDriver: true }),
       Animated.delay(2000),
-      Animated.timing(toastOpacity, {
-        toValue: 0,
-        duration: 180,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setToastMessage(null);
-    });
+      Animated.timing(toastOpacity, { toValue: 0, duration: 180, useNativeDriver: true }),
+    ]).start(() => setToastMessage(null));
   };
 
-  // ---- Animated bottom sheet ---------------------------------------
+  // ==========================
+  // Animated bottom sheet setup
+  // ==========================
   const translateY = useRef(new Animated.Value(SHEET_HEIGHT)).current;
-
   const openSheet = () => {
     translateY.setValue(SHEET_HEIGHT);
-    Animated.spring(translateY, {
-      toValue: 0,
-      useNativeDriver: true,
-      damping: 18,
-      stiffness: 150,
-    }).start();
+    Animated.spring(translateY, { toValue: 0, useNativeDriver: true, damping: 18, stiffness: 150 }).start();
   };
-
   const closeSheet = (callback?: () => void) => {
-    Animated.spring(translateY, {
-      toValue: SHEET_HEIGHT,
-      useNativeDriver: true,
-      damping: 20,
-      stiffness: 180,
-    }).start(({ finished }) => {
-      if (finished && callback) callback();
-    });
+    Animated.spring(translateY, { toValue: SHEET_HEIGHT, useNativeDriver: true, damping: 20, stiffness: 180 }).start(
+      ({ finished }) => {
+        if (finished && callback) callback();
+      }
+    );
   };
 
-  // Drag to close (grab handle area)
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gesture) => gesture.dy > 5,
-      onPanResponderMove: (_, gesture) => {
-        if (gesture.dy > 0) {
-          translateY.setValue(gesture.dy);
-        }
-      },
-      onPanResponderRelease: (_, gesture) => {
-        if (gesture.dy > 80) {
-          closeSheet(onClose);
-        } else {
-          Animated.spring(translateY, {
-            toValue: 0,
-            useNativeDriver: true,
-            damping: 18,
-            stiffness: 150,
-          }).start();
-        }
+      onMoveShouldSetPanResponder: (_, g) => g.dy > 5,
+      onPanResponderMove: (_, g) => g.dy > 0 && translateY.setValue(g.dy),
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 80) closeSheet(onClose);
+        else Animated.spring(translateY, { toValue: 0, useNativeDriver: true, damping: 18, stiffness: 150 }).start();
       },
     })
   ).current;
 
-  // ---- Load settings from Supabase when sheet opens ----------------
+  // ==========================
+  // Load settings from Supabase
+  // ==========================
   useEffect(() => {
     if (!visible || !userId) return;
-
     openSheet();
 
     const loadSettings = async () => {
-      const { data, error } = await supabase
-        .from("user_settings")
-        .select("*")
-        .eq("user_id", userId)
-        .single();
-
+      const { data, error } = await supabase.from("user_settings").select("*").eq("user_id", userId).maybeSingle();
       if (!error && data) {
         setDailyReminderEnabled(data.daily_reminder_enabled ?? false);
         setReminderTime(data.reminder_time ?? "08:00");
-        setDeleteAudioAfterTranscription(
-          data.delete_audio_after_transcription ?? false
-        );
+        setDeleteAudioAfterTranscription(data.delete_audio_after_transcription ?? false);
         setSubscriptionPlan(data.subscription_plan ?? "Core Plan");
         setVersion(data.version ?? "v1.0.0");
+        setHasReflectiveSummary(data.has_reflective_summary ?? false);
 
-        // Sync theme from DB if present
-        if (data.dark_mode_preference === "dark" && theme !== "dark") {
-          setTheme("dark");
-        } else if (data.dark_mode_preference === "light" && theme !== "light") {
-          setTheme("light");
+        if (data.dark_mode_preference && data.dark_mode_preference !== theme) {
+          setTheme(data.dark_mode_preference);
         }
       }
+      setLoadingSettings(false);
     };
 
     loadSettings();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, userId]);
 
-  // ---- Save single setting -----------------------------------------
+  // ==========================
+  // Update single setting
+  // ==========================
   const updateSetting = async (key: string, value: any) => {
     if (!userId) return;
     await supabase.from("user_settings").upsert({ user_id: userId, [key]: value });
   };
 
-  // ---- Dark mode toggle --------------------------------------------
+  // Dark Mode Toggle
   const handleDarkModeToggle = async () => {
     const newTheme = isDark ? "light" : "dark";
     setTheme(newTheme);
@@ -173,20 +138,16 @@ export default function SettingsModal({
     showToast(newTheme === "dark" ? "Dark mode enabled" : "Light mode enabled");
   };
 
-  // ---- Daily reminder toggle ---------------------------------------
+  // Daily Reminder Toggle
   const handleReminderToggle = async () => {
     const newValue = !dailyReminderEnabled;
     setDailyReminderEnabled(newValue);
     await updateSetting("daily_reminder_enabled", newValue);
 
     if (newValue) {
-      // Turning ON
       const granted = await requestNotificationPermissions();
       if (!granted) {
-        Alert.alert(
-          "Notifications Disabled",
-          "Enable notifications in Settings to receive your daily prayer reminder."
-        );
+        Alert.alert("Notifications Disabled", "Enable notifications in Settings to receive your daily reminder.");
         setDailyReminderEnabled(false);
         await updateSetting("daily_reminder_enabled", false);
         return;
@@ -194,7 +155,6 @@ export default function SettingsModal({
       await scheduleDailyPrayerNotification(reminderTime);
       showToast(`Daily reminder set for ${reminderTime}`);
     } else {
-      // Turning OFF
       await cancelDailyPrayerNotification();
       showToast("Daily reminder turned off");
     }
@@ -202,7 +162,7 @@ export default function SettingsModal({
     setShowTimePicker(false);
   };
 
-  // ---- Time change – save immediately ------------------------------
+  // Reminder Time Change
   const handleTimeChange = async (_: any, selectedDate?: Date) => {
     if (!selectedDate) return;
     const hours = selectedDate.getHours().toString().padStart(2, "0");
@@ -210,95 +170,83 @@ export default function SettingsModal({
     const timeString = `${hours}:${minutes}`;
     setReminderTime(timeString);
     await updateSetting("reminder_time", timeString);
-
     if (dailyReminderEnabled) {
       await scheduleDailyPrayerNotification(timeString);
       showToast(`Reminder time updated to ${timeString}`);
     }
   };
 
+  // Delete Audio Toggle
   const handleDeleteAudioToggle = async () => {
     const newValue = !deleteAudioAfterTranscription;
     setDeleteAudioAfterTranscription(newValue);
     await updateSetting("delete_audio_after_transcription", newValue);
     showToast(
-      newValue
-        ? "Audio will be deleted after transcription"
-        : "Audio will be kept after transcription"
+      newValue ? "Audio will be deleted after transcription" : "Audio will be kept after transcription"
     );
   };
 
+  // Reflective Summary Toggle
+  const handleReflectiveSummaryToggle = async (value: boolean) => {
+    setHasReflectiveSummary(value);
+    await updateSetting("has_reflective_summary", value);
+    showToast(value ? "Reflective summaries enabled" : "Reflective summaries disabled");
+  };
+
+  // Auth actions
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     closeSheet(onClose);
   };
 
   const handleDeleteAccount = async () => {
-    Alert.alert(
-      "Delete Account",
-      "This will permanently delete your account and all data. Continue?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const { error } = await supabase.rpc("delete_user_and_settings");
-              if (error) throw error;
-              Alert.alert("Account deleted", "Your account has been removed.");
-              await supabase.auth.signOut();
-              closeSheet(onClose);
-            } catch (err: any) {
-              Alert.alert("Error", err.message || "Failed to delete account.");
-            }
-          },
+    Alert.alert("Delete Account", "This will permanently delete all your data. Continue?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const { error } = await supabase.rpc("delete_user_and_settings");
+            if (error) throw error;
+            Alert.alert("Account deleted", "Your account has been removed.");
+            await supabase.auth.signOut();
+            closeSheet(onClose);
+          } catch (err: any) {
+            Alert.alert("Error", err.message || "Failed to delete account.");
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   if (!visible) return null;
 
+  // ==========================
+  // MODAL JSX CONTENT
+  // ==========================
   return (
     <Modal transparent animationType="none" visible={visible}>
-      {/* Backdrop with blur */}
+      {/* Backdrop */}
       <Pressable style={styles.backdrop} onPress={() => closeSheet(onClose)}>
-        <BlurView
-          intensity={40}
-          tint={isDark ? "dark" : "light"}
-          style={StyleSheet.absoluteFill}
-        />
+        <BlurView intensity={40} tint={isDark ? "dark" : "light"} style={StyleSheet.absoluteFill} />
       </Pressable>
 
       {/* Bottom Sheet */}
       <Animated.View
-        style={[
-          styles.sheetContainer,
-          {
-            backgroundColor: colors.background,
-            transform: [{ translateY }],
-          },
-        ]}
+        style={[styles.sheetContainer, { backgroundColor: colors.background, transform: [{ translateY }] }]}
       >
-        {/* Drag handle */}
+        {/* Drag Handle */}
         <View {...panResponder.panHandlers}>
           <View style={styles.handleBar} />
         </View>
 
         {/* Header */}
-        <View
-          style={[
-            styles.headerRow,
-            { borderBottomColor: colors.textSecondary + "22" },
-          ]}
-        >
+        <View style={[styles.headerRow, { borderBottomColor: colors.textSecondary + "22" }]}>
           <View>
-            <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
-              Settings
-            </Text>
+            <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Settings</Text>
             <Text style={[styles.headerSub, { color: colors.textSecondary }]}>
-              Manage your preferences and account settings
+              Manage your preferences and account
             </Text>
           </View>
           <TouchableOpacity onPress={() => closeSheet(onClose)}>
@@ -306,22 +254,14 @@ export default function SettingsModal({
           </TouchableOpacity>
         </View>
 
-        {/* Content */}
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={{ paddingBottom: spacing.xl * 2 }}
-          showsVerticalScrollIndicator={false}
-        >
+        {/* Scrollable content */}
+        <ScrollView style={styles.scroll} contentContainerStyle={{ paddingBottom: spacing.xl * 2 }}>
           {/* === APPEARANCE === */}
-          <Text style={[styles.category, { color: colors.textSecondary }]}>
-            APPEARANCE
-          </Text>
+          <Text style={[styles.category, { color: colors.textSecondary }]}>APPEARANCE</Text>
           <View style={[styles.settingRow, { backgroundColor: colors.card }]}>
             <Ionicons name="sunny-outline" size={20} color={colors.textPrimary} />
             <View style={styles.settingText}>
-              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>
-                Dark Mode
-              </Text>
+              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>Dark Mode</Text>
               <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
                 {isDark ? "Dark theme active" : "Light theme active"}
               </Text>
@@ -330,78 +270,38 @@ export default function SettingsModal({
           </View>
 
           {/* === NOTIFICATIONS === */}
-          <Text style={[styles.category, { color: colors.textSecondary }]}>
-            NOTIFICATIONS
-          </Text>
+          <Text style={[styles.category, { color: colors.textSecondary }]}>NOTIFICATIONS</Text>
           <View style={[styles.settingRow, { backgroundColor: colors.card }]}>
-            <Ionicons
-              name="notifications-outline"
-              size={20}
-              color={colors.textPrimary}
-            />
+            <Ionicons name="notifications-outline" size={20} color={colors.textPrimary} />
             <View style={styles.settingText}>
-              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>
-                Daily Reminder
-              </Text>
-              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
-                Get reminded to pray
-              </Text>
+              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>Daily Reminder</Text>
+              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>Get reminded to pray</Text>
             </View>
-            <Switch
-              value={dailyReminderEnabled}
-              onValueChange={handleReminderToggle}
-            />
+            <Switch value={dailyReminderEnabled} onValueChange={handleReminderToggle} />
           </View>
 
-          {/* Reminder time row */}
-          <View
-            style={[
-              styles.settingRow,
-              {
-                backgroundColor: colors.card,
-                opacity: dailyReminderEnabled ? 1 : 0.4,
-              },
-            ]}
-          >
-            <Ionicons name="time-outline" size={20} color={colors.textPrimary} />
-            <View style={styles.settingText}>
-              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>
-                Reminder Time
-              </Text>
-              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
-                {reminderTime}
-              </Text>
+          {/* Reminder Time */}
+          {dailyReminderEnabled && (
+            <View style={[styles.settingRow, { backgroundColor: colors.card }]}>
+              <Ionicons name="time-outline" size={20} color={colors.textPrimary} />
+              <View style={styles.settingText}>
+                <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>Reminder Time</Text>
+                <Text style={[styles.settingSub, { color: colors.textSecondary }]}>{reminderTime}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowTimePicker((prev) => !prev)}>
+                <Ionicons
+                  name={showTimePicker ? "chevron-up-outline" : "chevron-down-outline"}
+                  size={18}
+                  color={colors.textSecondary}
+                />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              disabled={!dailyReminderEnabled}
-              onPress={() => setShowTimePicker((prev) => !prev)}
-            >
-              <Ionicons
-                name={
-                  showTimePicker ? "chevron-up-outline" : "chevron-down-outline"
-                }
-                size={18}
-                color={colors.textSecondary}
-              />
-            </TouchableOpacity>
-          </View>
-
+          )}
           {dailyReminderEnabled && showTimePicker && (
-            <View
-              style={[
-                styles.timePickerContainer,
-                { backgroundColor: colors.card },
-              ]}
-            >
+            <View style={[styles.timePickerContainer, { backgroundColor: colors.card }]}>
               <DateTimePicker
                 value={
-                  new Date(
-                    2024,
-                    0,
-                    1,
-                    parseInt(reminderTime.split(":")[0] || "8", 10),
-                    parseInt(reminderTime.split(":")[1] || "0", 10)
-                  )
+                  new Date(2024, 0, 1, parseInt(reminderTime.split(":")[0] || "8", 10), parseInt(reminderTime.split(":")[1] || "0", 10))
                 }
                 mode="time"
                 display="spinner"
@@ -412,130 +312,84 @@ export default function SettingsModal({
           )}
 
           {/* === PRIVACY === */}
-          <Text style={[styles.category, { color: colors.textSecondary }]}>
-            PRIVACY
-          </Text>
+          <Text style={[styles.category, { color: colors.textSecondary }]}>PRIVACY</Text>
           <View style={[styles.settingRow, { backgroundColor: colors.card }]}>
             <Ionicons name="trash-outline" size={20} color={colors.textPrimary} />
             <View style={styles.settingText}>
-              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>
-                Delete Audio Files
-              </Text>
+              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>Delete Audio Files</Text>
+              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>Remove after transcription</Text>
+            </View>
+            <Switch value={deleteAudioAfterTranscription} onValueChange={handleDeleteAudioToggle} />
+          </View>
+
+          {/* === REFLECTIVE SUMMARIES === */}
+          <View style={[styles.settingRow, { backgroundColor: colors.card }]}>
+            <Ionicons name="book-outline" size={20} color={colors.textPrimary} />
+            <View style={styles.settingText}>
+              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>Reflective Summaries</Text>
               <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
-                Remove after transcription
+                Generate gentle overviews of your recent prayers
               </Text>
             </View>
             <Switch
-              value={deleteAudioAfterTranscription}
-              onValueChange={handleDeleteAudioToggle}
+              value={hasReflectiveSummary}
+              onValueChange={handleReflectiveSummaryToggle}
+              disabled={loadingSettings}
+              trackColor={{ false: "#777", true: colors.accent }}
+              thumbColor={hasReflectiveSummary ? "#fff" : "#ccc"}
             />
           </View>
+          <Text style={{ fontSize: 13, color: colors.textSecondary, marginBottom: spacing.sm }}>
+            When enabled, Sinai creates short reflective summaries of your own prayers to help you notice recurring
+            themes. This feature is optional and private.
+          </Text>
 
           {/* === SUBSCRIPTION === */}
-          <Text style={[styles.category, { color: colors.textSecondary }]}>
-            SUBSCRIPTION
-          </Text>
-          <View
-            style={[styles.subscriptionBox, { backgroundColor: colors.card }]}
-          >
+          <Text style={[styles.category, { color: colors.textSecondary }]}>SUBSCRIPTION</Text>
+          <View style={[styles.subscriptionBox, { backgroundColor: colors.card }]}>
             <View>
-              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>
-                {subscriptionPlan}
-              </Text>
-              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
-                £2.99/month
-              </Text>
+              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>{subscriptionPlan}</Text>
+              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>£2.99/month</Text>
             </View>
-            <TouchableOpacity
-              style={[
-                styles.manageBtn,
-                { backgroundColor: colors.accent + "22" },
-              ]}
-            >
-              <Text style={[styles.manageText, { color: colors.accent }]}>
-                Manage Subscription
-              </Text>
+            <TouchableOpacity style={[styles.manageBtn, { backgroundColor: colors.accent + "22" }]}>
+              <Text style={[styles.manageText, { color: colors.accent }]}>Manage Subscription</Text>
             </TouchableOpacity>
           </View>
 
           {/* === SUPPORT & LEGAL === */}
-          <Text style={[styles.category, { color: colors.textSecondary }]}>
-            SUPPORT & LEGAL
-          </Text>
-          <TouchableOpacity
-            style={styles.linkRow}
-            onPress={() => Linking.openURL("mailto:info@sinai.global")}
-          >
-            <Ionicons
-              name="help-circle-outline"
-              size={20}
-              color={colors.textPrimary}
-            />
-            <Text style={[styles.linkText, { color: colors.textPrimary }]}>
-              Help & Support
-            </Text>
+          <Text style={[styles.category, { color: colors.textSecondary }]}>SUPPORT & LEGAL</Text>
+          <TouchableOpacity style={styles.linkRow} onPress={() => Linking.openURL("mailto:info@sinai.global")}>
+            <Ionicons name="help-circle-outline" size={20} color={colors.textPrimary} />
+            <Text style={[styles.linkText, { color: colors.textPrimary }]}>Help & Support</Text>
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.linkRow}
-            onPress={() => Linking.openURL("https://sinai.global/privacy")}
-          >
-            <Ionicons
-              name="shield-checkmark-outline"
-              size={20}
-              color={colors.textPrimary}
-            />
-            <Text style={[styles.linkText, { color: colors.textPrimary }]}>
-              Privacy Policy
-            </Text>
+          <TouchableOpacity style={styles.linkRow} onPress={() => Linking.openURL("https://sinai.global/privacy")}>
+            <Ionicons name="shield-checkmark-outline" size={20} color={colors.textPrimary} />
+            <Text style={[styles.linkText, { color: colors.textPrimary }]}>Privacy Policy</Text>
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.linkRow}
-            onPress={() => Linking.openURL("https://sinai.global/terms")}
-          >
-            <Ionicons
-              name="document-text-outline"
-              size={20}
-              color={colors.textPrimary}
-            />
-            <Text style={[styles.linkText, { color: colors.textPrimary }]}>
-              Terms of Service
-            </Text>
+          <TouchableOpacity style={styles.linkRow} onPress={() => Linking.openURL("https://sinai.global/terms")}>
+            <Ionicons name="document-text-outline" size={20} color={colors.textPrimary} />
+            <Text style={[styles.linkText, { color: colors.textPrimary }]}>Terms of Service</Text>
           </TouchableOpacity>
 
           {/* === ACCOUNT === */}
           <TouchableOpacity style={styles.signOut} onPress={handleSignOut}>
-            <Text style={[styles.signOutText, { color: colors.textPrimary }]}>
-              Sign Out
-            </Text>
+            <Text style={[styles.signOutText, { color: colors.textPrimary }]}>Sign Out</Text>
           </TouchableOpacity>
-
           <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteAccount}>
             <Text style={styles.deleteText}>Delete Account</Text>
           </TouchableOpacity>
 
           {/* === VERSION === */}
-          <Text style={[styles.version, { color: colors.textSecondary }]}>
-            Prayer Journal {version}
-          </Text>
+          <Text style={[styles.version, { color: colors.textSecondary }]}>Prayer Journal {version}</Text>
         </ScrollView>
 
         {/* Toast */}
         {toastMessage && (
           <Animated.View
             pointerEvents="none"
-            style={[
-              styles.toast,
-              {
-                opacity: toastOpacity,
-                backgroundColor: colors.card,
-              },
-            ]}
+            style={[styles.toast, { opacity: toastOpacity, backgroundColor: colors.card }]}
           >
-            <Text style={[styles.toastText, { color: colors.textPrimary }]}>
-              {toastMessage}
-            </Text>
+            <Text style={[styles.toastText, { color: colors.textPrimary }]}>{toastMessage}</Text>
           </Animated.View>
         )}
       </Animated.View>
@@ -544,9 +398,7 @@ export default function SettingsModal({
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  backdrop: { ...StyleSheet.absoluteFillObject },
   sheetContainer: {
     position: "absolute",
     left: 0,
@@ -558,14 +410,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingHorizontal: spacing.lg,
   },
-  handleBar: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#CFCFCF",
-    alignSelf: "center",
-    marginBottom: spacing.md,
-  },
+  handleBar: { width: 40, height: 4, borderRadius: 2, backgroundColor: "#CFCFCF", alignSelf: "center", marginBottom: spacing.md },
   headerRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -573,25 +418,10 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  headerTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 18,
-  },
-  headerSub: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    marginTop: 4,
-  },
-  scroll: {
-    flex: 1,
-    marginTop: spacing.md,
-  },
-  category: {
-    fontFamily: fonts.heading,
-    fontSize: 12,
-    marginTop: spacing.lg,
-    marginBottom: spacing.sm,
-  },
+  headerTitle: { fontFamily: fonts.heading, fontSize: 18 },
+  headerSub: { fontFamily: fonts.body, fontSize: 13, marginTop: 4 },
+  scroll: { flex: 1, marginTop: spacing.md },
+  category: { fontFamily: fonts.heading, fontSize: 12, marginTop: spacing.lg, marginBottom: spacing.sm },
   settingRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -600,25 +430,10 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.sm,
   },
-  settingText: {
-    flex: 1,
-    marginLeft: spacing.sm,
-  },
-  settingLabel: {
-    fontFamily: fonts.heading,
-    fontSize: 15,
-  },
-  settingSub: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    marginTop: 2,
-  },
-  timePickerContainer: {
-    borderRadius: 16,
-    paddingVertical: spacing.sm,
-    marginTop: spacing.xs,
-    marginBottom: spacing.sm,
-  },
+  settingText: { flex: 1, marginLeft: spacing.sm },
+  settingLabel: { fontFamily: fonts.heading, fontSize: 15 },
+  settingSub: { fontFamily: fonts.body, fontSize: 13, marginTop: 2 },
+  timePickerContainer: { borderRadius: 16, paddingVertical: spacing.sm, marginTop: spacing.xs, marginBottom: spacing.sm },
   subscriptionBox: {
     borderRadius: 16,
     padding: spacing.md,
@@ -626,49 +441,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
-  manageBtn: {
-    borderRadius: 12,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-  },
-  manageText: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-  },
-  linkRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: spacing.sm,
-  },
-  linkText: {
-    marginLeft: spacing.sm,
-    fontFamily: fonts.body,
-    fontSize: 14,
-  },
-  signOut: {
-    marginTop: spacing.lg,
-    alignItems: "center",
-  },
-  signOutText: {
-    fontFamily: fonts.body,
-    fontSize: 15,
-  },
-  deleteBtn: {
-    marginTop: spacing.sm,
-    alignItems: "center",
-  },
-  deleteText: {
-    color: "#E45858",
-    fontFamily: fonts.body,
-    fontSize: 15,
-  },
-  version: {
-    textAlign: "center",
-    marginTop: spacing.lg,
-    marginBottom: spacing.xl,
-    fontFamily: fonts.body,
-    fontSize: 13,
-  },
+  manageBtn: { borderRadius: 12, paddingHorizontal: spacing.md, paddingVertical: spacing.xs },
+  manageText: { fontFamily: fonts.body, fontSize: 13 },
+  linkRow: { flexDirection: "row", alignItems: "center", marginBottom: spacing.sm },
+  linkText: { marginLeft: spacing.sm, fontFamily: fonts.body, fontSize: 14 },
+  signOut: { marginTop: spacing.lg, alignItems: "center" },
+  signOutText: { fontFamily: fonts.body, fontSize: 15 },
+  deleteBtn: { marginTop: spacing.sm, alignItems: "center" },
+  deleteText: { color: "#E45858", fontFamily: fonts.body, fontSize: 15 },
+  version: { textAlign: "center", marginTop: spacing.lg, marginBottom: spacing.xl, fontFamily: fonts.body, fontSize: 13 },
   toast: {
     position: "absolute",
     left: spacing.lg,
@@ -685,8 +466,5 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  toastText: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-  },
+  toastText: { fontFamily: fonts.body, fontSize: 13 },
 });
