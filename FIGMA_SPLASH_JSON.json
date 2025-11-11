@@ -1,0 +1,159 @@
+{
+  "frame": {
+    "id": "2:778",
+    "name": "Splash",
+    "position": {
+      "x": -1039,
+      "y": 0
+    },
+    "dimensions": {
+      "width": 393,
+      "height": 852
+    },
+    "children": [
+      {
+        "id": "2:779",
+        "name": "tl",
+        "type": "frame",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "dimensions": {
+          "width": 392.7646179199219,
+          "height": 852.3538208007812
+        }
+      },
+      {
+        "id": "2:780",
+        "name": "Container",
+        "type": "frame",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "dimensions": {
+          "width": 392.7646179199219,
+          "height": 852.3538208007812
+        },
+        "children": [
+          {
+            "id": "2:781",
+            "name": "SplashScreen",
+            "type": "frame",
+            "position": {
+              "x": 92.1607666015625,
+              "y": 327.6820983886719
+            },
+            "dimensions": {
+              "width": 208.443115234375,
+              "height": 196.9896240234375
+            },
+            "children": [
+              {
+                "id": "2:782",
+                "name": "Container",
+                "type": "frame",
+                "position": {
+                  "x": 48.2215576171875,
+                  "y": 0
+                },
+                "dimensions": {
+                  "width": 112,
+                  "height": 81
+                },
+                "children": [
+                  {
+                    "id": "2:783",
+                    "name": "Logo",
+                    "type": "frame",
+                    "position": {
+                      "x": 0.00048828125,
+                      "y": 0
+                    },
+                    "dimensions": {
+                      "width": 111.9990005493164,
+                      "height": 111.9990005493164
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "2:809",
+                "name": "Container",
+                "type": "frame",
+                "position": {
+                  "x": 23.993759155273438,
+                  "y": 71
+                },
+                "dimensions": {
+                  "width": 160.45559692382812,
+                  "height": 60.99656677246094
+                },
+                "children": [
+                  {
+                    "id": "2:810",
+                    "name": "SplashScreen",
+                    "type": "frame",
+                    "position": {
+                      "x": 0,
+                      "y": 0
+                    },
+                    "dimensions": {
+                      "width": 160.45559692382812,
+                      "height": 36.00129318237305
+                    },
+                    "children": [
+                      {
+                        "id": "2:811",
+                        "name": "Prayer Journal",
+                        "type": "text",
+                        "position": {
+                          "x": 0,
+                          "y": -0.63623046875
+                        },
+                        "dimensions": {
+                          "width": 161,
+                          "height": 36
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "2:812",
+                    "name": "Paragraph",
+                    "type": "frame",
+                    "position": {
+                      "x": 0,
+                      "y": 39.9967041015625
+                    },
+                    "dimensions": {
+                      "width": 160.45559692382812,
+                      "height": 20.999866485595703
+                    },
+                    "children": [
+                      {
+                        "id": "2:813",
+                        "name": "Speak. Reflect. Grow.",
+                        "type": "text",
+                        "position": {
+                          "x": 7.435272216796875,
+                          "y": -0.63623046875
+                        },
+                        "dimensions": {
+                          "width": 147,
+                          "height": 21
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+

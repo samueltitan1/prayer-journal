@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "Prayer Journal",
+    "slug": "prayer-journal",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/logo.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "infoPlist": {
+        "UIKeyboardDismissModeOnDrag": "YES",
+        "UIKeyboardWillShowNotification": true
+      },
+      "supportsTablet": true,
+      "bundleIdentifier": "com.prayerjournal.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.prayerjournal.app"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "prayer-journal",
+    "plugins": [
+      "expo-router",
+      "expo-font"
+    ]
+  }
+}

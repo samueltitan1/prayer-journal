@@ -1,0 +1,142 @@
+import { useRouter } from 'expo-router';
+import { useEffect } from 'react';
+import { Image, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+export default function SplashScreen() {
+  const router = useRouter();
+
+  useEffect(() => {
+    // Navigate to onboarding after splash
+    const timer = setTimeout(() => {
+      router.replace('/onboarding/1');
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <SafeAreaView style={styles.container} data-name="Splash" data-node-id="2:778">
+      <View style={styles.contentContainer} data-name="Container" data-node-id="2:780">
+        <View style={styles.splashScreen} data-name="SplashScreen" data-node-id="2:781">
+          {/* Logo Container */}
+          <View style={styles.logoContainer} data-name="Container" data-node-id="2:782">
+            <View style={styles.logo} data-name="Logo" data-node-id="2:783">
+              <Image
+                source={require('../assets/logo.png')}
+                style={styles.logoVector}
+                data-name="Vector (Stroke)"
+                data-node-id="83:3698"
+              />
+              <Image
+                source={require('../assets/logo.png')}
+                style={styles.logoVector1}
+                data-name="Vector (Stroke)"
+                data-node-id="83:3699"
+              />
+            </View>
+          </View>
+
+          {/* Text Container */}
+          <View style={styles.textContainer} data-name="Container" data-node-id="2:809">
+            <View style={styles.titleFrame} data-name="SplashScreen" data-node-id="2:810">
+              <Text style={styles.title} data-node-id="2:811">
+                Prayer Journal
+              </Text>
+            </View>
+            <View style={styles.subtitleFrame} data-name="Paragraph" data-node-id="2:812">
+              <Text style={styles.subtitle} data-node-id="2:813">
+                Speak. Reflect. Grow.
+              </Text>
+            </View>
+          </View>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#FAF9F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  contentContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    width: '100%',
+  },
+  splashScreen: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  logoContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  logo: {
+    width: 112,
+    height: 112,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  logoVector: {
+    width: 3,
+    height: 63,
+    resizeMode: 'contain',
+    position: 'absolute',
+    top: 7,
+    left: 54.5,
+  },
+  logoVector1: {
+    width: 112,
+    height: 112,
+    resizeMode: 'contain',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+  },
+  textContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    maxWidth: '90%',
+    marginTop: 24,
+  },
+  titleFrame: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  title: {
+    fontSize: 24,
+    lineHeight: 36,
+    color: '#2F2F2F',
+    textAlign: 'center',
+    fontWeight: '500',
+    letterSpacing: 0.24,
+    fontFamily: 'PlayfairDisplay_500Medium',
+  },
+  subtitleFrame: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    marginTop: 4,
+  },
+  subtitle: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: '#6B6B6B',
+    textAlign: 'center',
+    fontWeight: '400',
+    letterSpacing: 0.28,
+    fontFamily: 'Inter_400Regular',
+  },
+});
+
