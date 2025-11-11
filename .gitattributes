@@ -1,0 +1,48 @@
+# =====================
+# Line endings consistency
+# =====================
+# Auto-normalize line endings to LF (Linux/macOS style)
+* text=auto eol=lf
+
+# Ensure consistent line endings for key text-based files
+*.js text eol=lf
+*.jsx text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.env text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# =====================
+# Treat binary files correctly
+# =====================
+# Prevent Git from trying to diff or alter binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.mp3 binary
+*.wav binary
+*.m4a binary
+*.mp4 binary
+*.mov binary
+*.keystore binary
+*.ttf binary
+*.otf binary
+*.ico binary
+*.pdf binary
+*.zip binary
+
+# =====================
+# Special handling for scripts
+# =====================
+*.sh text eol=lf
+*.bat text eol=crlf
+
+# =====================
+# Supabase Functions
+# =====================
+# Ignore unnecessary diffs in auto-generated build output
+supabase/functions/*/dist/* -diff
