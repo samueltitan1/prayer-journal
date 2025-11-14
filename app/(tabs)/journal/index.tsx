@@ -33,7 +33,8 @@ type Prayer = {
   prayed_at: string;
   transcript_text: string | null;
   duration_seconds: number | null;
-  audio_url: string | null;
+  audio_path: string | null;
+  signed_audio_url: string | null;
 };
 
 type Reflection = {
@@ -106,12 +107,14 @@ export default function JournalScreen() {
     });
   };
 
-  // --- Fetch prayers for the visible month ----------------------------
-  useEffect(() => {
-    if (!userId) return;
+ // --- Fetch prayers for the visible month (with 1-year signed URLs) ---
+useEffect(() => {
+  if (!userId) return;
 
-    const fetchPrayers = async () => {
-      setLoadingPrayers(true);
+  const fetchPrayers = async () => {
+    setLoadingPrayers(true);
+
+    try {
       const start = new Date(
         currentMonth.getFullYear(),
         currentMonth.getMonth(),
@@ -126,7 +129,8 @@ export default function JournalScreen() {
         59
       );
 
-      const { data, error } = await supabase
+      // 1️⃣ Fetch raw prayers
+      const { data: rows, error } = await supabase
         .from("prayers")
         .select("*")
         .eq("user_id", userId)
@@ -137,20 +141,61 @@ export default function JournalScreen() {
       if (error) {
         console.warn("Failed to load prayers:", error.message);
         setPrayers([]);
-      } else {
-        setPrayers((data || []) as Prayer[]);
+        setLoadingPrayers(false);
+        return;
+      }
 
-        // Auto-select today (only once)
-        if (!selectedDate) {
-          const todayKey = formatDateKey(new Date());
-          setSelectedDate(todayKey);
+      const prayersWithUrls: Prayer[] = [];
+
+      // 2️⃣ Generate signed URLs for each prayer
+      for (const p of rows || []) {
+        if (!p.audio_path) {
+          prayersWithUrls.push({
+            ...p,
+            signed_audio_url: null,
+          });
+          continue;
+        }
+
+        // 1-year expiry
+        const expiresIn = 60 * 60 * 24 * 365;
+
+        const { data: signed, error: signErr } = await supabase.storage
+          .from("prayer-audio")
+          .createSignedUrl(p.audio_path, expiresIn);
+
+        if (signErr) {
+          console.warn("Failed to sign URL:", signErr.message);
+          prayersWithUrls.push({
+            ...p,
+            signed_audio_url: null,
+          });
+        } else {
+          prayersWithUrls.push({
+            ...p,
+            signed_audio_url: signed.signedUrl,
+          });
         }
       }
-      setLoadingPrayers(false);
-    };
 
-    fetchPrayers();
-  }, [userId, currentMonth]);
+      // 3️⃣ Save final results
+      setPrayers(prayersWithUrls);
+
+      // Auto-select today's date on first load
+      if (!selectedDate) {
+        const todayKey = formatDateKey(new Date());
+        setSelectedDate(todayKey);
+      }
+    } catch (e) {
+      console.log("Unexpected fetch error:", e);
+      setPrayers([]);
+    } finally {
+      setLoadingPrayers(false);
+    }
+  };
+
+  fetchPrayers();
+}, [userId, currentMonth]);
 
   // --- Reflections ----------------------------------------------------
   useEffect(() => {
@@ -278,15 +323,15 @@ export default function JournalScreen() {
         soundRef.current = null;
       }
 
-      if (!p.audio_url) {
-        console.warn("No audio_url for prayer", p.id);
+      if (!p.signed_audio_url) {
+        console.warn("No signed_audio_url for prayer", p.id);
         return;
       }
 
       setLoadingAudioId(p.id);
 
       const { sound, status } = await Audio.Sound.createAsync({
-        uri: p.audio_url,
+        uri: p.signed_audio_url,
       });
 
       soundRef.current = sound;
@@ -607,7 +652,7 @@ export default function JournalScreen() {
                       </Text>
 
                       {/* Progress bar + times */}
-                      {p.audio_url && (
+                      {p.signed_audio_url && (
                         <View style={styles.playbackMeta}>
                           <View
                             style={[

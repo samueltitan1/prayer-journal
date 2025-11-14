@@ -12,7 +12,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import SettingsModal from "../../../components/SettingsModal";
@@ -184,9 +184,10 @@ export default function PrayScreen() {
         throw new Error("No recording URI");
       }
 
-      const durationSeconds = status.isLoaded && status.durationMillis
-        ? Math.round(status.durationMillis / 1000)
-        : null;
+      const durationSeconds =
+        status.isLoaded && status.durationMillis
+          ? Math.round(status.durationMillis / 1000)
+          : null;
 
       // 1️⃣ Transcribe using Whisper
       const transcript = await transcribeAudioWithWhisper(uri);
@@ -225,7 +226,7 @@ export default function PrayScreen() {
         name: "prayer.m4a",
         type: "audio/m4a",
       } as any);
-  
+
       const res = await fetch(
         `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/transcribe`,
         {
@@ -233,12 +234,12 @@ export default function PrayScreen() {
           body: formData,
         }
       );
-  
+
       if (!res.ok) {
         console.warn("Transcription function error:", await res.text());
         return "";
       }
-  
+
       const json = await res.json();
       return json.text || "";
     } catch (e) {
@@ -247,6 +248,10 @@ export default function PrayScreen() {
     }
   };
 
+  /**
+   * Uploads the recorded audio to the **private** `prayer-audio` bucket
+   * and returns the storage path (to store in `audio_path`).
+   */
   const uploadAudioToSupabase = async (
     userId: string,
     uri: string
@@ -255,49 +260,42 @@ export default function PrayScreen() {
       const fileExt = uri.split(".").pop() || "m4a";
       const fileName = `${Date.now()}.${fileExt}`;
       const filePath = `${userId}/${fileName}`;
-  
+
       console.log("🟡 Starting upload via FileSystem:", { uri, filePath });
-  
-      // ✅ Read file contents as base64 (works across all SDKs)
-      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: "base64" });
-  
-      // ✅ Convert base64 → Uint8Array manually (since atob isn’t available natively)
+
+      // Read file as base64 (legacy API to avoid SDK 54 breakage)
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: "base64",
+      });
+
+      // Convert base64 → Uint8Array
       const binary = globalThis.atob
         ? globalThis.atob(base64)
         : Buffer.from(base64, "base64").toString("binary");
-  
+
       const fileBytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) {
         fileBytes[i] = binary.charCodeAt(i);
       }
-  
+
       console.log("🟢 File bytes length:", fileBytes.length);
-  
+
+      // Upload raw bytes to private bucket
       const { data, error } = await supabase.storage
         .from("prayer-audio")
         .upload(filePath, fileBytes, {
           contentType: `audio/${fileExt}`,
           upsert: false,
         });
-  
+
       if (error) {
         console.warn("❌ Supabase upload error:", error.message);
         return null;
       }
-  
+
       console.log("✅ Uploaded to storage path:", data.path);
-  
-      const { data: publicData, error: urlError } = supabase.storage
-        .from("prayer-audio")
-        .getPublicUrl(filePath);
-  
-      if (urlError) {
-        console.warn("⚠️ URL fetch error:", urlError.message);
-        return null;
-      }
-  
-      console.log("🌍 Public URL generated:", publicData.publicUrl);
-      return publicData.publicUrl ?? null;
+      // We return the storage path (relative) – this goes into `audio_path`
+      return data.path;
     } catch (e) {
       console.error("💥 Upload failed:", e);
       return null;
@@ -312,38 +310,40 @@ export default function PrayScreen() {
       );
       return;
     }
-  
+
     try {
       setIsProcessing(true);
-  
+
       console.log("🎙 Uploading prayer audio...");
-      const uploadedUrl = await uploadAudioToSupabase(userId, draftAudioUri);
-      console.log("🔗 Uploaded URL:", uploadedUrl);
-  
-      const audioUrl = uploadedUrl ?? null;
-  
+      const storagePath = await uploadAudioToSupabase(userId, draftAudioUri);
+      console.log("📁 Storage path returned:", storagePath);
+
+      if (!storagePath) {
+        throw new Error("Audio upload failed — no storage path returned.");
+      }
+
       console.log("📝 Inserting prayer into Supabase:", {
         user_id: userId,
-        audio_url: audioUrl,
+        audio_path: storagePath,
         transcript_text: draftTranscript || null,
         duration_seconds: draftDuration ?? null,
       });
-  
+
       const { error } = await supabase.from("prayers").insert([
         {
           user_id: userId,
           prayed_at: new Date().toISOString(),
           transcript_text: draftTranscript || null,
           duration_seconds: draftDuration ?? null,
-          audio_url: audioUrl, // ✅ always included
+          audio_path: storagePath, // ✅ store storage path (not URL)
         },
       ]);
-  
+
       if (error) {
         console.warn("❌ Insert prayer error:", error.message);
         throw error;
       }
-  
+
       console.log("✅ Prayer saved successfully!");
       setShowEditModal(false);
       setPrayState("saved");
@@ -452,7 +452,6 @@ export default function PrayScreen() {
             ) : prayState === "recording" ? (
               <View style={[styles.stopSquare, { backgroundColor: "#000" }]} />
             ) : (
-              // mic stays black in light & dark
               <Ionicons name="mic-outline" size={32} color="#000" />
             )}
           </TouchableOpacity>
@@ -742,7 +741,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 
-  // Edit modal
+  // Edit modal (kept here for completeness, though layout lives in TranscriptEditor)
   editBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.35)",
