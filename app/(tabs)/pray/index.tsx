@@ -185,7 +185,7 @@ export default function PrayScreen() {
       }
 
       const durationSeconds =
-        status.isLoaded && status.durationMillis
+        status.durationMillis
           ? Math.round(status.durationMillis / 1000)
           : null;
 
@@ -400,7 +400,7 @@ export default function PrayScreen() {
         <View style={styles.leftHeader}>
           <Image
             source={require("../../../assets/Logo2.png")}
-            style={{ width: 48, height: 48, marginRight: 8 }}
+            style={{ width: 44, height: 44, marginRight: 8 }}
             resizeMode="contain"
           />
           <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
