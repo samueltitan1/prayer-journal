@@ -15,6 +15,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
 import SettingsModal from "../../../components/SettingsModal";
 import TranscriptEditor from "../../../components/TranscriptEditor";
 import { useTheme } from "../../../contexts/ThemeContext";
@@ -22,7 +23,7 @@ import { supabase } from "../../../lib/supabaseClient";
 import { fonts, spacing } from "../../../theme/theme";
 
 type PrayState = "idle" | "recording" | "saved";
-const MAX_SECONDS_DEFAULT = 5 * 60; // 5 mins
+const MAX_SECONDS_DEFAULT = 5 * 60;
 
 export default function PrayScreen() {
   const router = useRouter();
@@ -32,15 +33,15 @@ export default function PrayScreen() {
   const [secondsLeft, setSecondsLeft] = useState(MAX_SECONDS_DEFAULT);
 
   const [showToast, setShowToast] = useState(false);
-  const [dayCount] = useState(8); // you can wire this to real streak later
+  const [dayCount, setDayCount] = useState<number>(0);
 
   const [showSettings, setShowSettings] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null);
+  const [dailyReminderEnabled, setDailyReminderEnabled] = useState(false);
 
+  const [userId, setUserId] = useState<string | null>(null);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Draft prayer state (after recording, before saving)
   const [draftAudioUri, setDraftAudioUri] = useState<string | null>(null);
   const [draftTranscript, setDraftTranscript] = useState("");
   const [draftDuration, setDraftDuration] = useState<number | null>(null);
@@ -55,7 +56,72 @@ export default function PrayScreen() {
     getUserId();
   }, []);
 
-  // Static fallback preview if needed
+  // Load streak count
+// Load streak (local calculation, instant + matches Journal)
+useEffect(() => {
+  if (!userId) return;
+
+  const loadStreak = async () => {
+    const { data: rows, error } = await supabase
+      .from("prayers")
+      .select("prayed_at")
+      .eq("user_id", userId)
+      .order("prayed_at", { ascending: false });
+
+    if (error || !rows) {
+      setDayCount(0);
+      return;
+    }
+
+    // Extract unique YYYY-MM-DD keys
+    const allDates = Array.from(
+      new Set(rows.map((p) => p.prayed_at.slice(0, 10)))
+    );
+
+    // Same logic as Journal
+    const formatDateKey = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+        2,
+        "0"
+      )}-${String(d.getDate()).padStart(2, "0")}`;
+
+    let streak = 0;
+    let day = new Date();
+
+    while (true) {
+      const key = formatDateKey(day);
+      if (allDates.includes(key)) {
+        streak++;
+        day.setDate(day.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+
+    setDayCount(streak);
+  };
+
+  loadStreak();
+}, [userId, prayState]);
+
+  // 🔥 Load reminder setting whenever userId changes or settings modal closes
+  useEffect(() => {
+    if (!userId) return;
+
+    const fetchSettings = async () => {
+      const { data } = await supabase
+        .from("user_settings")
+        .select("daily_reminder_enabled")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      setDailyReminderEnabled(data?.daily_reminder_enabled ?? false);
+    };
+
+    fetchSettings();
+  }, [userId, showSettings]);
+
+  // Transcript preview
   const transcriptPreview =
     draftTranscript ||
     "Thank you for this day and for all the blessings you've given me. I pray for strength and guidance as I face the challenges ahead.";
@@ -110,18 +176,19 @@ export default function PrayScreen() {
   // Timer countdown
   useEffect(() => {
     if (prayState !== "recording") return;
+
     const interval = setInterval(() => {
       setSecondsLeft((prev) => {
         if (prev <= 1) {
           clearInterval(interval);
-          stopRecordingAndProcess(); // auto-stop at 0
+          stopRecordingAndProcess();
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
+
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prayState]);
 
   const formattedTime = useMemo(() => {
@@ -130,20 +197,17 @@ export default function PrayScreen() {
     return `${m}:${s}`;
   }, [secondsLeft]);
 
-  // Helpers -------------------------------------------------------------
-
+  // Permissions
   const requestMicPermission = async () => {
     const { status } = await Audio.requestPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert(
-        "Microphone access needed",
-        "Please enable microphone access to record your prayer."
-      );
+      Alert.alert("Microphone access needed", "Please enable microphone access.");
       return false;
     }
     return true;
   };
 
+  // Start recording
   const startRecording = async () => {
     try {
       const ok = await requestMicPermission();
@@ -152,7 +216,6 @@ export default function PrayScreen() {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
       });
 
       const { recording } = await Audio.Recording.createAsync(
@@ -162,12 +225,12 @@ export default function PrayScreen() {
       setRecording(recording);
       setSecondsLeft(MAX_SECONDS_DEFAULT);
       setPrayState("recording");
-    } catch (e) {
-      console.warn("Failed to start recording", e);
-      Alert.alert("Error", "We couldn’t start recording. Please try again.");
+    } catch {
+      Alert.alert("Error", "Could not start recording.");
     }
   };
 
+  // Stop + process
   const stopRecordingAndProcess = async () => {
     if (!recording) return;
 
@@ -180,45 +243,31 @@ export default function PrayScreen() {
       const status = await recording.getStatusAsync();
       setRecording(null);
 
-      if (!uri) {
-        throw new Error("No recording URI");
-      }
+      if (!uri) throw new Error("No recording URI");
 
-      const durationSeconds =
-        status.durationMillis
-          ? Math.round(status.durationMillis / 1000)
-          : null;
+      const durationSeconds = status.durationMillis
+        ? Math.round(status.durationMillis / 1000)
+        : null;
 
-      // 1️⃣ Transcribe using Whisper
       const transcript = await transcribeAudioWithWhisper(uri);
 
-      // 2️⃣ Populate draft + open edit modal
       setDraftAudioUri(uri);
       setDraftDuration(durationSeconds);
       setDraftTranscript(transcript || "");
       setShowEditModal(true);
-    } catch (e) {
-      console.warn("Error stopping/processing recording", e);
-      Alert.alert(
-        "Error",
-        "We couldn’t process your prayer. Please try again."
-      );
+    } catch {
+      Alert.alert("Error", "Failed to process prayer.");
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleMicPress = () => {
-    if (isProcessing) return; // prevent spam
-
-    if (prayState === "idle" || prayState === "saved") {
-      startRecording();
-    } else if (prayState === "recording") {
-      stopRecordingAndProcess();
-    }
+    if (isProcessing) return;
+    prayState === "recording" ? stopRecordingAndProcess() : startRecording();
   };
 
-  const transcribeAudioWithWhisper = async (uri: string): Promise<string> => {
+  const transcribeAudioWithWhisper = async (uri: string) => {
     try {
       const formData = new FormData();
       formData.append("file", {
@@ -229,46 +278,27 @@ export default function PrayScreen() {
 
       const res = await fetch(
         `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/transcribe`,
-        {
-          method: "POST",
-          body: formData,
-        }
+        { method: "POST", body: formData }
       );
 
-      if (!res.ok) {
-        console.warn("Transcription function error:", await res.text());
-        return "";
-      }
-
+      if (!res.ok) return "";
       const json = await res.json();
       return json.text || "";
-    } catch (e) {
-      console.warn("Transcription failed", e);
+    } catch {
       return "";
     }
   };
 
-  /**
-   * Uploads the recorded audio to the **private** `prayer-audio` bucket
-   * and returns the storage path (to store in `audio_path`).
-   */
-  const uploadAudioToSupabase = async (
-    userId: string,
-    uri: string
-  ): Promise<string | null> => {
+  const uploadAudioToSupabase = async (userId: string, uri: string) => {
     try {
       const fileExt = uri.split(".").pop() || "m4a";
       const fileName = `${Date.now()}.${fileExt}`;
       const filePath = `${userId}/${fileName}`;
 
-      console.log("🟡 Starting upload via FileSystem:", { uri, filePath });
-
-      // Read file as base64 (legacy API to avoid SDK 54 breakage)
       const base64 = await FileSystem.readAsStringAsync(uri, {
         encoding: "base64",
       });
 
-      // Convert base64 → Uint8Array
       const binary = globalThis.atob
         ? globalThis.atob(base64)
         : Buffer.from(base64, "base64").toString("binary");
@@ -278,9 +308,6 @@ export default function PrayScreen() {
         fileBytes[i] = binary.charCodeAt(i);
       }
 
-      console.log("🟢 File bytes length:", fileBytes.length);
-
-      // Upload raw bytes to private bucket
       const { data, error } = await supabase.storage
         .from("prayer-audio")
         .upload(filePath, fileBytes, {
@@ -288,73 +315,40 @@ export default function PrayScreen() {
           upsert: false,
         });
 
-      if (error) {
-        console.warn("❌ Supabase upload error:", error.message);
-        return null;
-      }
-
-      console.log("✅ Uploaded to storage path:", data.path);
-      // We return the storage path (relative) – this goes into `audio_path`
+      if (error) return null;
       return data.path;
-    } catch (e) {
-      console.error("💥 Upload failed:", e);
+    } catch {
       return null;
     }
   };
 
   const handleSavePrayer = async () => {
     if (!userId || !draftAudioUri) {
-      Alert.alert(
-        "Error",
-        "Missing user or recording. Please try recording again."
-      );
-      return;
+      return Alert.alert("Error", "Missing recording.");
     }
 
     try {
       setIsProcessing(true);
 
-      console.log("🎙 Uploading prayer audio...");
       const storagePath = await uploadAudioToSupabase(userId, draftAudioUri);
-      console.log("📁 Storage path returned:", storagePath);
+      if (!storagePath) throw new Error("Upload failed");
 
-      if (!storagePath) {
-        throw new Error("Audio upload failed — no storage path returned.");
-      }
-
-      console.log("📝 Inserting prayer into Supabase:", {
-        user_id: userId,
-        audio_path: storagePath,
-        transcript_text: draftTranscript || null,
-        duration_seconds: draftDuration ?? null,
-      });
-
-      const { error } = await supabase.from("prayers").insert([
+      await supabase.from("prayers").insert([
         {
           user_id: userId,
           prayed_at: new Date().toISOString(),
           transcript_text: draftTranscript || null,
           duration_seconds: draftDuration ?? null,
-          audio_path: storagePath, // ✅ store storage path (not URL)
+          audio_path: storagePath,
         },
       ]);
 
-      if (error) {
-        console.warn("❌ Insert prayer error:", error.message);
-        throw error;
-      }
-
-      console.log("✅ Prayer saved successfully!");
       setShowEditModal(false);
       setPrayState("saved");
       setShowToast(true);
       setTimeout(() => setShowToast(false), 3000);
     } catch (e: any) {
-      console.error("💥 handleSavePrayer error:", e);
-      Alert.alert(
-        "Error",
-        e?.message || "We couldn't save your prayer. Please try again."
-      );
+      Alert.alert("Error", e.message || "Failed to save prayer.");
     } finally {
       setIsProcessing(false);
     }
@@ -407,6 +401,8 @@ export default function PrayScreen() {
             Prayer Journal
           </Text>
         </View>
+
+        {/* Settings */}
         <TouchableOpacity onPress={() => setShowSettings(true)}>
           <Ionicons
             name="settings-outline"
@@ -476,6 +472,7 @@ export default function PrayScreen() {
           )}
         </View>
 
+        {/* Saved UI */}
         {prayState === "saved" && (
           <View style={styles.savedSection}>
             <View
@@ -505,64 +502,29 @@ export default function PrayScreen() {
                     { color: colors.textSecondary },
                   ]}
                 >
-                  Your words have been preserved. Take a moment to reflect.
+                  Your words have been preserved in your Journal.
                 </Text>
               </View>
-            </View>
-
-            <View
-              style={[
-                styles.transcriptCard,
-                { backgroundColor: colors.card },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.transcriptLabel,
-                  { color: colors.textSecondary },
-                ]}
-              >
-                TRANSCRIPT PREVIEW
-              </Text>
-              <Text
-                style={[
-                  styles.transcriptText,
-                  { color: colors.textPrimary },
-                ]}
-                numberOfLines={3}
-              >
-                {transcriptPreview}
-              </Text>
-              <TouchableOpacity onPress={() => router.push("/journal/entry")}>
-                <Text
-                  style={[
-                    styles.transcriptLink,
-                    { color: colors.accent },
-                  ]}
-                >
-                  View full transcript
-                </Text>
-              </TouchableOpacity>
             </View>
           </View>
         )}
 
-        {/* Optional: still keep onboarding reminder link if you want */}
-        <TouchableOpacity
-          style={styles.reminderRow}
-          onPress={() => router.push("/onboarding/reminder")}
-        >
-          <Ionicons
-            name="notifications-outline"
-            size={18}
-            color={colors.textSecondary}
-          />
-          <Text
-            style={[styles.reminderText, { color: colors.textSecondary }]}
+        {/* Daily Reminder CTA — hidden once enabled */}
+        {!dailyReminderEnabled && (
+          <TouchableOpacity
+            style={styles.reminderRow}
+            onPress={() => setShowSettings(true)}
           >
-            Set daily reminder
-          </Text>
-        </TouchableOpacity>
+            <Ionicons
+              name="notifications-outline"
+              size={18}
+              color={colors.textSecondary}
+            />
+            <Text style={[styles.reminderText, { color: colors.textSecondary }]}>
+              Set daily reminder
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Toast */}
@@ -574,12 +536,12 @@ export default function PrayScreen() {
             color={colors.textPrimary}
           />
           <Text style={[styles.toastText, { color: colors.textPrimary }]}>
-            Day {dayCount} complete 🙏
+            Day {dayCount} complete ⚡️
           </Text>
         </View>
       )}
 
-      {/* Settings Modal (shared with Journal tab) */}
+      {/* Settings Modal */}
       <SettingsModal
         visible={showSettings}
         onClose={() => setShowSettings(false)}
@@ -603,6 +565,7 @@ export default function PrayScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -612,10 +575,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   leftHeader: { flexDirection: "row", alignItems: "center" },
+
   headerTitle: {
     fontFamily: fonts.heading,
     fontSize: 18,
   },
+
   subHeader: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
@@ -628,14 +593,22 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 14,
   },
+
   main: { flex: 1, alignItems: "center", justifyContent: "flex-start" },
-  micContainer: { alignItems: "center", marginTop: spacing.xl },
+
+  // Lowered Mic button
+  micContainer: {
+    alignItems: "center",
+    marginTop: spacing.xl * 5.5,
+  },
+
   halo: {
     position: "absolute",
     width: 140,
     height: 140,
     borderRadius: 70,
   },
+
   micButton: {
     width: 120,
     height: 120,
@@ -652,12 +625,14 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 6,
   },
+
   hint: {
     marginTop: spacing.xl,
     textAlign: "center",
     fontFamily: fonts.body,
     fontSize: 16,
   },
+
   timerWrapper: { marginTop: spacing.lg },
   timerCircle: {
     flexDirection: "row",
@@ -678,6 +653,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 16,
   },
+
   savedSection: {
     width: "100%",
     paddingHorizontal: spacing.lg,
@@ -698,6 +674,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 14,
   },
+
   transcriptCard: { borderRadius: 16, padding: spacing.md },
   transcriptLabel: {
     fontFamily: fonts.body,
@@ -711,16 +688,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: spacing.xs,
   },
+
   reminderRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: spacing.lg,
+    marginTop: spacing.xl,
   },
   reminderText: {
     marginLeft: 8,
     fontFamily: fonts.body,
     fontSize: 14,
   },
+
   toast: {
     position: "absolute",
     left: spacing.lg,
@@ -739,67 +718,5 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontFamily: fonts.body,
     fontSize: 14,
-  },
-
-  // Edit modal (kept here for completeness, though layout lives in TranscriptEditor)
-  editBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.35)",
-    justifyContent: "flex-end",
-  },
-  editCard: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xl,
-  },
-  editTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 18,
-    marginBottom: 4,
-  },
-  editSubtitle: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    marginBottom: spacing.md,
-  },
-  editInputWrapper: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 16,
-    padding: spacing.md,
-    minHeight: 140,
-    maxHeight: 260,
-  },
-  editInput: {
-    fontFamily: fonts.body,
-    fontSize: 14,
-    flexGrow: 1,
-  },
-  editButtonsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: spacing.lg,
-  },
-  editButton: {
-    flex: 1,
-    height: 44,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  editButtonGhost: {
-    marginRight: spacing.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#ccc",
-  },
-  editButtonGhostText: {
-    fontFamily: fonts.body,
-    fontSize: 14,
-  },
-  editButtonText: {
-    fontFamily: fonts.heading,
-    fontSize: 14,
-    color: "#000",
   },
 });

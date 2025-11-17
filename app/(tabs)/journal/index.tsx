@@ -387,30 +387,28 @@ export default function JournalScreen() {
   const daysPrayedThisMonth = daysWithPrayer.size;
 
   const currentStreak = useMemo(() => {
-    if (!userId || allPrayers.length === 0) return 0;
+    if (!userId) return 0;
 
-    // Use ALL dates ever prayed
+    // If zero prayers loaded yet, streak is 0
+    if (allPrayers.length === 0) return 0;
+
+    // Use ALL unique prayer days
     const allDates = Array.from(
       new Set(allPrayers.map((p) => p.prayed_at.slice(0, 10)))
     );
 
-    const today = new Date();
-    const todayKey = formatDateKey(today);
-
     let streak = 0;
+    let day = new Date();
 
-    // Check yesterday backwards
-    for (let i = 1; i < 60; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() - i);
-      const key = formatDateKey(d);
-
-      if (allDates.includes(key)) streak++;
-      else break;
+    while (true) {
+      const key = formatDateKey(day);
+      if (allDates.includes(key)) {
+        streak++;
+        day.setDate(day.getDate() - 1);
+      } else {
+        break;
+      }
     }
-
-    // If today was prayed, add 1
-    if (allDates.includes(todayKey)) streak += 1;
 
     return streak;
   }, [allPrayers, userId]);

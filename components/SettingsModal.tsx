@@ -1,3 +1,4 @@
+// components/SettingsModal.tsx
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { BlurView } from "expo-blur";
@@ -37,7 +38,11 @@ interface SettingsModalProps {
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.82;
 
-export default function SettingsModal({ visible, onClose, userId }: SettingsModalProps) {
+export default function SettingsModal({
+  visible,
+  onClose,
+  userId,
+}: SettingsModalProps) {
   const { theme, setTheme, colors } = useTheme();
   const isDark = theme === "dark";
 
@@ -47,7 +52,8 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
   const [dailyReminderEnabled, setDailyReminderEnabled] = useState(false);
   const [reminderTime, setReminderTime] = useState("08:00");
   const [showTimePicker, setShowTimePicker] = useState(false);
-  const [deleteAudioAfterTranscription, setDeleteAudioAfterTranscription] = useState(false);
+  const [deleteAudioAfterTranscription, setDeleteAudioAfterTranscription] =
+    useState(false);
   const [subscriptionPlan, setSubscriptionPlan] = useState("Core Plan");
   const [version, setVersion] = useState("v1.0.0");
   const [hasReflectiveSummary, setHasReflectiveSummary] = useState(false);
@@ -63,18 +69,27 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
     setToastMessage(msg);
     toastOpacity.setValue(0);
     Animated.sequence([
-      Animated.timing(toastOpacity, { toValue: 1, duration: 180, useNativeDriver: true }),
+      Animated.timing(toastOpacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
       Animated.delay(2000),
-      Animated.timing(toastOpacity, { toValue: 0, duration: 180, useNativeDriver: true }),
+      Animated.timing(toastOpacity, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true,
+      }),
     ]).start(() => setToastMessage(null));
   };
 
   // ==========================
-  // Backdrop (Fix B)
+  // Backdrop
   // ==========================
   const backdropOpacity = useRef(new Animated.Value(0)).current;
 
   const fadeInBackdrop = () => {
+    backdropOpacity.setValue(0);
     Animated.timing(backdropOpacity, {
       toValue: 1,
       duration: 160,
@@ -127,10 +142,15 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, g) => g.dy > 5,
-      onPanResponderMove: (_, g) => g.dy > 0 && translateY.setValue(g.dy),
+      onPanResponderMove: (_, g) => {
+        if (g.dy > 0) translateY.setValue(g.dy);
+      },
       onPanResponderRelease: (_, g) => {
-        if (g.dy > 80) closeEverything();
-        else openSheet();
+        if (g.dy > 80) {
+          closeEverything();
+        } else {
+          openSheet();
+        }
       },
     })
   ).current;
@@ -141,23 +161,25 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
   useEffect(() => {
     if (!visible || !userId) return;
 
-    backdropOpacity.setValue(0);
+    setLoadingSettings(true);
     fadeInBackdrop();
     openSheet();
 
-    const load = async () => {
-      const { data } = await supabase
+    const loadSettings = async () => {
+      const { data, error } = await supabase
         .from("user_settings")
         .select("*")
         .eq("user_id", userId)
         .maybeSingle();
 
-      if (data) {
+      if (!error && data) {
         setDailyReminderEnabled(data.daily_reminder_enabled ?? false);
         setReminderTime(data.reminder_time ?? "08:00");
-        setDeleteAudioAfterTranscription(data.delete_audio_after_transcription ?? false);
+        setDeleteAudioAfterTranscription(
+          data.delete_audio_after_transcription ?? false
+        );
         setSubscriptionPlan(data.subscription_plan ?? "Core Plan");
-        setVersion(data.version ?? "v1.0.0");
+        setVersion(data.version ?? "1.0.0");
         setHasReflectiveSummary(data.has_reflective_summary ?? false);
 
         if (data.dark_mode_preference && data.dark_mode_preference !== theme) {
@@ -168,17 +190,23 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
       setLoadingSettings(false);
     };
 
-    load();
+    loadSettings();
   }, [visible, userId]);
 
   // ==========================
-  // Settings handlers
+  // Update Setting helper
   // ==========================
-  const updateSetting = async (k: string, v: any) => {
+  const updateSetting = async (key: string, value: any) => {
     if (!userId) return;
-    await supabase.from("user_settings").upsert({ user_id: userId, [k]: v });
+    await supabase.from("user_settings").upsert({
+      user_id: userId,
+      [key]: value,
+    });
   };
 
+  // ==========================
+  // Handlers
+  // ==========================
   const handleDarkMode = async () => {
     const newTheme = isDark ? "light" : "dark";
     setTheme(newTheme);
@@ -187,15 +215,20 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
   };
 
   const handleReminderToggle = async () => {
-    const v = !dailyReminderEnabled;
-    setDailyReminderEnabled(v);
-    await updateSetting("daily_reminder_enabled", v);
+    const next = !dailyReminderEnabled;
+    setDailyReminderEnabled(next);
+    setShowTimePicker(next); // open picker when turning ON, hide when OFF
+    await updateSetting("daily_reminder_enabled", next);
 
-    if (v) {
+    if (next) {
       const ok = await requestNotificationPermissions();
       if (!ok) {
-        Alert.alert("Notifications Disabled", "Enable notifications to receive reminders.");
+        Alert.alert(
+          "Notifications Disabled",
+          "Enable notifications to receive reminders."
+        );
         setDailyReminderEnabled(false);
+        setShowTimePicker(false);
         await updateSetting("daily_reminder_enabled", false);
         return;
       }
@@ -209,6 +242,7 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
 
   const handleTimeChange = async (_: any, date?: Date) => {
     if (!date) return;
+
     const hrs = `${date.getHours()}`.padStart(2, "0");
     const mins = `${date.getMinutes()}`.padStart(2, "0");
     const t = `${hrs}:${mins}`;
@@ -223,16 +257,22 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
   };
 
   const handleDeleteToggle = async () => {
-    const v = !deleteAudioAfterTranscription;
-    setDeleteAudioAfterTranscription(v);
-    await updateSetting("delete_audio_after_transcription", v);
-    showToast(v ? "Audio will be deleted" : "Audio retained");
+    const next = !deleteAudioAfterTranscription;
+    setDeleteAudioAfterTranscription(next);
+    await updateSetting("delete_audio_after_transcription", next);
+    showToast(
+      next
+        ? "Audio will be deleted after transcription"
+        : "Audio will be kept"
+    );
   };
 
-  const handleReflectiveToggle = async (v: boolean) => {
-    setHasReflectiveSummary(v);
-    await updateSetting("has_reflective_summary", v);
-    showToast(v ? "Summaries enabled" : "Summaries disabled");
+  const handleReflectiveToggle = async (value: boolean) => {
+    setHasReflectiveSummary(value);
+    await updateSetting("has_reflective_summary", value);
+    showToast(
+      value ? "Reflective summaries enabled" : "Reflective summaries disabled"
+    );
   };
 
   const handleSignOut = async () => {
@@ -241,19 +281,19 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
   };
 
   const handleDeleteAccount = () => {
-    Alert.alert("Delete Account", "This action is permanent.", [
+    Alert.alert("Delete Account", "This will permanently delete your data.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
           const { error } = await supabase.rpc("delete_user_and_settings");
-          if (!error) {
-            await supabase.auth.signOut();
-            closeEverything();
-          } else {
+          if (error) {
             Alert.alert("Error", error.message);
+            return;
           }
+          await supabase.auth.signOut();
+          closeEverything();
         },
       },
     ]);
@@ -269,10 +309,12 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
       {/* BACKDROP LAYER */}
       <View style={StyleSheet.absoluteFill}>
         <Animated.View
-          style={{
-            ...StyleSheet.absoluteFillObject,
-            opacity: backdropOpacity,
-          }}
+          style={[
+            StyleSheet.absoluteFillObject,
+            {
+              opacity: backdropOpacity,
+            },
+          ]}
         >
           <BlurView
             tint={isDark ? "dark" : "light"}
@@ -281,6 +323,7 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
           />
         </Animated.View>
 
+        {/* Tap outside to close */}
         <Pressable style={StyleSheet.absoluteFill} onPress={closeEverything} />
       </View>
 
@@ -288,17 +331,28 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
       <Animated.View
         style={[
           styles.sheetContainer,
-          { backgroundColor: colors.background, transform: [{ translateY }] },
+          {
+            backgroundColor: colors.background,
+            transform: [{ translateY }],
+          },
         ]}
       >
+        {/* Drag handle */}
         <View {...panResponder.panHandlers}>
           <View style={styles.handleBar} />
         </View>
 
         {/* HEADER */}
-        <View style={[styles.headerRow, { borderBottomColor: colors.textSecondary + "22" }]}>
-          <View>
-            <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Settings</Text>
+        <View
+          style={[
+            styles.headerRow,
+            { borderBottomColor: colors.textSecondary + "22" },
+          ]}
+        >
+          <View style={{ flex: 1, paddingRight: spacing.md }}>
+            <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
+              Settings
+            </Text>
             <Text style={[styles.headerSub, { color: colors.textSecondary }]}>
               Manage your preferences and account
             </Text>
@@ -308,20 +362,39 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
           </TouchableOpacity>
         </View>
 
-        {/* BODY SCROLL */}
+        {/* BODY */}
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={{ paddingBottom: spacing.xl * 2 }}
           showsVerticalScrollIndicator={false}
         >
           {/* APPEARANCE */}
-          <Text style={[styles.category, { color: colors.textSecondary }]}>APPEARANCE</Text>
+          <Text
+            style={[styles.category, { color: colors.textSecondary }]}
+          >
+            APPEARANCE
+          </Text>
 
-          <View style={[styles.settingRow, { backgroundColor: colors.card }]}>
-            <Ionicons name="sunny-outline" size={20} color={colors.textPrimary} />
+          <View
+            style={[
+              styles.settingRow,
+              { backgroundColor: colors.card },
+            ]}
+          >
+            <Ionicons
+              name="sunny-outline"
+              size={20}
+              color={colors.textPrimary}
+            />
             <View style={styles.settingText}>
-              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>Dark Mode</Text>
-              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
+              <Text
+                style={[styles.settingLabel, { color: colors.textPrimary }]}
+              >
+                Dark Mode
+              </Text>
+              <Text
+                style={[styles.settingSub, { color: colors.textSecondary }]}
+              >
                 {isDark ? "Dark theme active" : "Light theme active"}
               </Text>
             </View>
@@ -329,27 +402,81 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
           </View>
 
           {/* NOTIFICATIONS */}
-          <Text style={[styles.category, { color: colors.textSecondary }]}>NOTIFICATIONS</Text>
-          <View style={[styles.settingRow, { backgroundColor: colors.card }]}>
-            <Ionicons name="notifications-outline" size={20} color={colors.textPrimary} />
+          <Text
+            style={[styles.category, { color: colors.textSecondary }]}
+          >
+            NOTIFICATIONS
+          </Text>
+
+          <View
+            style={[
+              styles.settingRow,
+              { backgroundColor: colors.card },
+            ]}
+          >
+            <Ionicons
+              name="notifications-outline"
+              size={20}
+              color={colors.textPrimary}
+            />
             <View style={styles.settingText}>
-              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>Daily Reminder</Text>
-              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>Get reminded to pray</Text>
+              <Text
+                style={[styles.settingLabel, { color: colors.textPrimary }]}
+              >
+                Daily Reminder
+              </Text>
+              <Text
+                style={[styles.settingSub, { color: colors.textSecondary }]}
+              >
+                Get reminded to pray
+              </Text>
             </View>
-            <Switch value={dailyReminderEnabled} onValueChange={handleReminderToggle} />
+            <Switch
+              value={dailyReminderEnabled}
+              onValueChange={handleReminderToggle}
+            />
           </View>
 
           {dailyReminderEnabled && (
             <>
-              <View style={[styles.settingRow, { backgroundColor: colors.card }]}>
-                <Ionicons name="time-outline" size={20} color={colors.textPrimary} />
+              <View
+                style={[
+                  styles.settingRow,
+                  { backgroundColor: colors.card },
+                ]}
+              >
+                <Ionicons
+                  name="time-outline"
+                  size={20}
+                  color={colors.textPrimary}
+                />
                 <View style={styles.settingText}>
-                  <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>Reminder Time</Text>
-                  <Text style={[styles.settingSub, { color: colors.textSecondary }]}>{reminderTime}</Text>
+                  <Text
+                    style={[
+                      styles.settingLabel,
+                      { color: colors.textPrimary },
+                    ]}
+                  >
+                    Reminder Time
+                  </Text>
+                  <Text
+                    style={[
+                      styles.settingSub,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {reminderTime}
+                  </Text>
                 </View>
-                <TouchableOpacity onPress={() => setShowTimePicker((v) => !v)}>
+                <TouchableOpacity
+                  onPress={() => setShowTimePicker((v) => !v)}
+                >
                   <Ionicons
-                    name={showTimePicker ? "chevron-up-outline" : "chevron-down-outline"}
+                    name={
+                      showTimePicker
+                        ? "chevron-up-outline"
+                        : "chevron-down-outline"
+                    }
                     size={18}
                     color={colors.textSecondary}
                   />
@@ -357,15 +484,22 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
               </View>
 
               {showTimePicker && (
-                <View style={[styles.timePickerContainer, { backgroundColor: colors.card }]}>
+                <View
+                  style={[
+                    styles.timePickerContainer,
+                    { backgroundColor: colors.card },
+                  ]}
+                >
                   <DateTimePicker
-                    value={new Date(
-                      2024,
-                      0,
-                      1,
-                      parseInt(reminderTime.split(":")[0]),
-                      parseInt(reminderTime.split(":")[1])
-                    )}
+                    value={
+                      new Date(
+                        2024,
+                        0,
+                        1,
+                        parseInt(reminderTime.split(":")[0] || "8", 10),
+                        parseInt(reminderTime.split(":")[1] || "0", 10)
+                      )
+                    }
                     mode="time"
                     display="spinner"
                     onChange={handleTimeChange}
@@ -377,25 +511,62 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
           )}
 
           {/* PRIVACY */}
-          <Text style={[styles.category, { color: colors.textSecondary }]}>PRIVACY</Text>
+          <Text
+            style={[styles.category, { color: colors.textSecondary }]}
+          >
+            PRIVACY
+          </Text>
 
-          <View style={[styles.settingRow, { backgroundColor: colors.card }]}>
-            <Ionicons name="trash-outline" size={20} color={colors.textPrimary} />
+          <View
+            style={[
+              styles.settingRow,
+              { backgroundColor: colors.card },
+            ]}
+          >
+            <Ionicons
+              name="trash-outline"
+              size={20}
+              color={colors.textPrimary}
+            />
             <View style={styles.settingText}>
-              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>Delete Audio Files</Text>
-              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>Remove after transcription</Text>
+              <Text
+                style={[styles.settingLabel, { color: colors.textPrimary }]}
+              >
+                Delete Audio Files
+              </Text>
+              <Text
+                style={[styles.settingSub, { color: colors.textSecondary }]}
+              >
+                Remove after transcription
+              </Text>
             </View>
-            <Switch value={deleteAudioAfterTranscription} onValueChange={handleDeleteToggle} />
+            <Switch
+              value={deleteAudioAfterTranscription}
+              onValueChange={handleDeleteToggle}
+            />
           </View>
 
           {/* REFLECTIVE SUMMARY */}
-          <View style={[styles.settingRow, { backgroundColor: colors.card }]}>
-            <Ionicons name="book-outline" size={20} color={colors.textPrimary} />
+          <View
+            style={[
+              styles.settingRow,
+              { backgroundColor: colors.card },
+            ]}
+          >
+            <Ionicons
+              name="book-outline"
+              size={20}
+              color={colors.textPrimary}
+            />
             <View style={styles.settingText}>
-              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>
+              <Text
+                style={[styles.settingLabel, { color: colors.textPrimary }]}
+              >
                 Reflective Summaries
               </Text>
-              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
+              <Text
+                style={[styles.settingSub, { color: colors.textSecondary }]}
+              >
                 Generate gentle overviews of your recent prayers
               </Text>
             </View>
@@ -408,78 +579,145 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
             />
           </View>
 
-          <Text style={{ fontSize: 13, color: colors.textSecondary, marginBottom: spacing.sm }}>
-            When enabled, Sinai creates short reflective summaries of your own prayers to help
-            you notice themes. This is private and optional.
+          <Text
+            style={{
+              fontSize: 13,
+              color: colors.textSecondary,
+              marginBottom: spacing.sm,
+            }}
+          >
+            When enabled, Sinai creates short reflective summaries of your own
+            prayers to help you notice themes. This is private and optional.
           </Text>
 
           {/* SUBSCRIPTION */}
-          <Text style={[styles.category, { color: colors.textSecondary }]}>SUBSCRIPTION</Text>
+          <Text
+            style={[styles.category, { color: colors.textSecondary }]}
+          >
+            SUBSCRIPTION
+          </Text>
 
-          <View style={[styles.subscriptionBox, { backgroundColor: colors.card }]}>
+          <View
+            style={[
+              styles.subscriptionBox,
+              { backgroundColor: colors.card },
+            ]}
+          >
             <View>
-              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>
+              <Text
+                style={[styles.settingLabel, { color: colors.textPrimary }]}
+              >
                 {subscriptionPlan}
               </Text>
-              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>£2.99/month</Text>
+              <Text
+                style={[styles.settingSub, { color: colors.textSecondary }]}
+              >
+                £2.99/month
+              </Text>
             </View>
 
-            <TouchableOpacity style={[styles.manageBtn, { backgroundColor: colors.accent + "22" }]}>
-              <Text style={[styles.manageText, { color: colors.accent }]}>Manage Subscription</Text>
+            <TouchableOpacity
+              style={[
+                styles.manageBtn,
+                { backgroundColor: colors.accent + "22" },
+              ]}
+            >
+              <Text
+                style={[styles.manageText, { color: colors.accent }]}
+              >
+                Manage Subscription
+              </Text>
             </TouchableOpacity>
           </View>
 
-          {/* SUPPORT */}
-          <Text style={[styles.category, { color: colors.textSecondary }]}>SUPPORT & LEGAL</Text>
+          {/* SUPPORT & LEGAL */}
+          <Text
+            style={[styles.category, { color: colors.textSecondary }]}
+          >
+            SUPPORT & LEGAL
+          </Text>
 
           <TouchableOpacity
             style={styles.linkRow}
             onPress={() => Linking.openURL("mailto:info@sinai.global")}
           >
-            <Ionicons name="help-circle-outline" size={20} color={colors.textPrimary} />
-            <Text style={[styles.linkText, { color: colors.textPrimary }]}>Help & Support</Text>
+            <Ionicons
+              name="help-circle-outline"
+              size={20}
+              color={colors.textPrimary}
+            />
+            <Text style={[styles.linkText, { color: colors.textPrimary }]}>
+              Help & Support
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.linkRow}
             onPress={() => Linking.openURL("https://sinai.global/privacy")}
           >
-            <Ionicons name="shield-checkmark-outline" size={20} color={colors.textPrimary} />
-            <Text style={[styles.linkText, { color: colors.textPrimary }]}>Privacy Policy</Text>
+            <Ionicons
+              name="shield-checkmark-outline"
+              size={20}
+              color={colors.textPrimary}
+            />
+            <Text style={[styles.linkText, { color: colors.textPrimary }]}>
+              Privacy Policy
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.linkRow}
             onPress={() => Linking.openURL("https://sinai.global/terms")}
           >
-            <Ionicons name="document-text-outline" size={20} color={colors.textPrimary} />
-            <Text style={[styles.linkText, { color: colors.textPrimary }]}>Terms of Service</Text>
+            <Ionicons
+              name="document-text-outline"
+              size={20}
+              color={colors.textPrimary}
+            />
+            <Text style={[styles.linkText, { color: colors.textPrimary }]}>
+              Terms of Service
+            </Text>
           </TouchableOpacity>
 
           {/* ACCOUNT */}
           <TouchableOpacity style={styles.signOut} onPress={handleSignOut}>
-            <Text style={[styles.signOutText, { color: colors.textPrimary }]}>Sign Out</Text>
+            <Text
+              style={[styles.signOutText, { color: colors.textPrimary }]}
+            >
+              Sign Out
+            </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteAccount}>
+          <TouchableOpacity
+            style={styles.deleteBtn}
+            onPress={handleDeleteAccount}
+          >
             <Text style={styles.deleteText}>Delete Account</Text>
           </TouchableOpacity>
 
-          <Text style={[styles.version, { color: colors.textSecondary }]}>
+          {/* VERSION */}
+          <Text
+            style={[styles.version, { color: colors.textSecondary }]}
+          >
             Prayer Journal {version}
           </Text>
         </ScrollView>
 
-        {/* TOAST */}
+        {/* Toast */}
         {toastMessage && (
           <Animated.View
             pointerEvents="none"
             style={[
               styles.toast,
-              { opacity: toastOpacity, backgroundColor: colors.card },
+              {
+                opacity: toastOpacity,
+                backgroundColor: colors.card,
+              },
             ]}
           >
-            <Text style={[styles.toastText, { color: colors.textPrimary }]}>
+            <Text
+              style={[styles.toastText, { color: colors.textPrimary }]}
+            >
               {toastMessage}
             </Text>
           </Animated.View>
@@ -490,7 +728,6 @@ export default function SettingsModal({ visible, onClose, userId }: SettingsModa
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1 },
   sheetContainer: {
     position: "absolute",
     left: 0,
@@ -520,7 +757,13 @@ const styles = StyleSheet.create({
   headerTitle: { fontFamily: fonts.heading, fontSize: 18 },
   headerSub: { fontFamily: fonts.body, fontSize: 13, marginTop: 4 },
   scroll: { marginTop: spacing.md },
-  category: { fontFamily: fonts.heading, fontSize: 12, marginTop: spacing.lg, marginBottom: spacing.sm },
+  category: {
+    fontFamily: fonts.heading,
+    fontSize: 12,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm / 2,
+    letterSpacing: 0.5,
+  },
   settingRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -529,7 +772,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     borderRadius: 16,
   },
-  settingText: { flex: 1, marginLeft: spacing.sm },
+  settingText: { flex: 1, marginLeft: spacing.sm, marginRight: spacing.sm },
   settingLabel: { fontFamily: fonts.heading, fontSize: 15 },
   settingSub: { fontFamily: fonts.body, fontSize: 13, marginTop: 2 },
   timePickerContainer: {
@@ -545,9 +788,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
-  manageBtn: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: 12 },
+  manageBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: 12,
+  },
   manageText: { fontFamily: fonts.body, fontSize: 13 },
-  linkRow: { flexDirection: "row", alignItems: "center", marginBottom: spacing.sm },
+  linkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: spacing.sm,
+  },
   linkText: { marginLeft: spacing.sm, fontFamily: fonts.body, fontSize: 14 },
   signOut: { marginTop: spacing.lg, alignItems: "center" },
   signOutText: { fontFamily: fonts.body, fontSize: 15 },
