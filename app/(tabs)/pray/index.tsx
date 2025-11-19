@@ -541,6 +541,35 @@ useEffect(() => {
         </View>
       )}
 
+      {showReflectionToast && (
+        <View
+          style={{
+            position: "absolute",
+            left: spacing.lg,
+            right: spacing.lg,
+            bottom: spacing.lg,
+            backgroundColor: colors.card,
+            padding: spacing.md,
+            borderRadius: 16,
+            flexDirection: "row",
+            alignItems: "center",
+            shadowColor: "#000",
+            shadowOpacity: 0.1,
+            shadowRadius: 8,
+          }}
+        >
+          <Ionicons
+            name="sparkles-outline"
+            size={18}
+            color={colors.accent}
+            style={{ marginRight: 8 }}
+          />
+          <Text style={{ color: colors.textPrimary, fontFamily: fonts.body }}>
+            {reflectionToastMessage}
+          </Text>
+        </View>
+      )}
+
       {/* Settings Modal */}
       <SettingsModal
         visible={showSettings}

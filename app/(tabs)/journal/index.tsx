@@ -25,7 +25,11 @@ import {
   View,
 } from "react-native";
 
+import type { MilestoneConfig } from "@/app/constants/milestonesConfig";
+import { MILESTONES } from "@/app/constants/milestonesConfig";
+import MilestoneModal from "@/components/MilestoneModal";
 import ReminderBanner from "@/components/ReminderBanner";
+import ShimmerCard from "@/components/ShimmerCard";
 import Calendar from "@/components/journal/Calendar";
 import { useAuth } from "@/contexts/AuthProvider";
 import SettingsModal from "../../../components/SettingsModal";
@@ -82,6 +86,29 @@ const formatMsToClock = (ms?: number | null) => {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 };
 
+// ---- Reflection generator ----
+const triggerReflection = async (
+  userId: string,
+  type: "weekly" | "monthly"
+) => {
+  try {
+    const res = await fetch(
+      `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generate_reflection`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, type }),
+      }
+    );
+
+    const json = await res.json();
+    console.log(`Reflection result (${type}):`, json);
+  } catch (err) {
+    console.warn(`Error calling ${type} reflection:`, err);
+  }
+};
+
+
 // ---- Screen ----------------------------------------------------------
 
 export default function JournalScreen() {
@@ -123,6 +150,17 @@ export default function JournalScreen() {
   const [playThroughSpeaker, setPlayThroughSpeaker] = useState(true);
 
   const soundRef = useRef<Audio.Sound | null>(null);
+
+  const [showReflectionBadge, setShowReflectionBadge] = useState<"weekly" | "monthly" | null>(null);
+  // last reflection Seen
+  const [lastReflectionSeen, setLastReflectionSeen] = useState<string | null>(null);
+  const [showReflectionToast, setShowReflectionToast] = useState(false);
+  const [reflectionToastMessage, setReflectionToastMessage] = useState("");
+  const [loadingReflections, setLoadingReflections] = useState(true);
+
+// Milestone state
+const [milestoneModalVisible, setMilestoneModalVisible] = useState(false);
+const [unlockedMilestone, setUnlockedMilestone] = useState<MilestoneConfig | null>(null);
 
   // ---- Fetch ALL prayers (for streak + recents) -------------------------
 
@@ -342,11 +380,55 @@ export default function JournalScreen() {
 
   // ---- Reflections ----------------------------------------------------
 
+  // ---- Check if weekly + monthly reflections should be generated ----
+  const checkReflectionGeneration = async () => {
+    if (!userId || allPrayers.length === 0) return;
+
+    const today = new Date();
+    const dayOfWeek = today.getDay(); // 0 = Sunday
+    const day = today.getDate();
+    const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+
+    // Create date keys
+    const todayKey = today.toISOString().slice(0, 10);
+
+    // ------- WEEKLY LOGIC -------
+    if (dayOfWeek === 0) {
+      const prayersThisWeek = allPrayers.filter((p) => {
+        const d = new Date(p.prayed_at);
+        return d >= new Date(today.getFullYear(), today.getMonth(), today.getDate() - 7);
+      });
+
+      if (prayersThisWeek.length >= 2) {
+        await triggerReflection(userId, "weekly");
+      }
+    }
+
+    // ------- MONTHLY LOGIC -------
+    if (day === lastDayOfMonth) {
+      const prayersThisMonth = allPrayers.filter((p) => {
+        const d = new Date(p.prayed_at);
+        return d.getMonth() === today.getMonth();
+      });
+
+      if (prayersThisMonth.length >= 4) {
+        await triggerReflection(userId, "monthly");
+      }
+    }
+  };
+
+  // ---- Fetch reflections ----
   useEffect(() => {
     if (!userId) return;
-
+  
     const fetchReflections = async () => {
+      setLoadingReflections(true);
+      
       try {
+        // 🔥 Step 1 — check if we should generate weekly/monthly reflections
+        await checkReflectionGeneration();
+  
+        // fetch weekly reflections
         const { data: weekly } = await supabase
           .from("reflections")
           .select("*")
@@ -355,8 +437,20 @@ export default function JournalScreen() {
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
-        if (weekly) setWeeklyReflection(weekly as Reflection);
+  
+        if (weekly) {setWeeklyReflection(weekly as Reflection);
+          
+          // NEW: trigger toast if this weekly reflection is new
+          if (weekly.id !== lastReflectionSeen) {
+            setReflectionToastMessage("New weekly reflection ready 🙏");
+            setShowReflectionToast(true);
+            setLastReflectionSeen(weekly.id);
 
+            setTimeout(() => setShowReflectionToast(false), 3500);
+          }
+        }    
+
+        // fetch monthly reflection
         const { data: monthly } = await supabase
           .from("reflections")
           .select("*")
@@ -365,14 +459,28 @@ export default function JournalScreen() {
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
-        if (monthly) setMonthlyReflection(monthly as Reflection);
+  
+        if (monthly) {setMonthlyReflection(monthly as Reflection);
+    
+          // NEW: trigger toast if this monthly reflection is new
+          if (monthly.id !== lastReflectionSeen) {
+            setReflectionToastMessage("New monthly reflection ready 🙏");
+            setShowReflectionToast(true);
+            setLastReflectionSeen(monthly.id);
+
+            setTimeout(() => setShowReflectionToast(false), 3500);
+          }
+        }
+
       } catch (err) {
         console.warn("Reflections fetch error:", err);
+      } finally {
+        setLoadingReflections(false);
       }
     };
-
+  
     fetchReflections();
-  }, [userId]);
+  }, [userId, allPrayers, lastReflectionSeen]); // 🔥 listen for new prayers
 
   // ---- Derived data ---------------------------------------------------
 
@@ -411,7 +519,58 @@ export default function JournalScreen() {
     }
 
     return streak;
-  }, [allPrayers, userId]);
+  }, [allPrayers, userId])
+  
+  // ---- Milestone detection ----
+  useEffect(() => {
+    if (!userId) return;
+
+    const checkMilestones = async () => {
+      try {
+        // 1. Fetch user's unlocked milestones from supabase
+        const { data: unlockedRows, error } = await supabase
+          .from("milestones_unlocked")
+          .select("milestone_key")
+          .eq("user_id", userId);
+
+        if (error) {
+          console.warn("Milestones fetch error:", error.message);
+          return;
+        }
+
+        const unlockedIds = new Set(unlockedRows?.map((r) => r.milestone_key));
+
+        // 2. Find next milestone the user is eligible for
+        const newlyUnlocked = MILESTONES.find(
+          (m) => currentStreak >= m.requiredStreak && !unlockedIds.has(m.key)
+        );
+
+        if (!newlyUnlocked) return;
+
+        // 3. Insert into milestones_unlocked table
+        const { error: insertErr } = await supabase
+          .from("milestones_unlocked")
+          .insert({
+            user_id: userId,
+            milestone_key: newlyUnlocked.key,
+          });
+
+        if (insertErr) {
+          console.warn("Failed to unlock milestone:", insertErr.message);
+          return;
+        }
+
+        // 4. Trigger modal
+        setUnlockedMilestone(newlyUnlocked);
+        setMilestoneModalVisible(true);
+
+    } catch (err) {
+      console.warn("Unexpected milestone error:", err);
+    }
+  };
+
+  checkMilestones();
+}, [currentStreak, userId]);
 
   const prayersForSelectedDate = useMemo(() => {
     if (!selectedDateKey) return [];
@@ -698,7 +857,9 @@ export default function JournalScreen() {
           <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
             Weekly reflection
           </Text>
-          {weeklyReflection ? (
+          {loadingReflections ? (
+            <ShimmerCard height={110} />
+          ) : weeklyReflection ? (
             <View
               style={[
                 styles.reflectionCard,
@@ -710,6 +871,7 @@ export default function JournalScreen() {
               >
                 {weeklyReflection.title}
               </Text>
+
               {!!weeklyReflection.subtitle && (
                 <Text
                   style={[
@@ -720,12 +882,14 @@ export default function JournalScreen() {
                   {weeklyReflection.subtitle}
                 </Text>
               )}
+
               <Text
                 style={[styles.reflectionBody, { color: colors.textSecondary }]}
                 numberOfLines={3}
               >
                 {weeklyReflection.body}
               </Text>
+
               {!!weeklyReflection.verse_reference && (
                 <Text
                   style={[
@@ -739,12 +903,7 @@ export default function JournalScreen() {
               )}
             </View>
           ) : (
-            <View
-              style={[
-                styles.emptyCard,
-                { backgroundColor: colors.card },
-              ]}
-            >
+            <View style={[styles.emptyCard, { backgroundColor: colors.card }]}>
               <Ionicons
                 name="sparkles-outline"
                 size={18}
@@ -752,10 +911,7 @@ export default function JournalScreen() {
                 style={{ marginRight: spacing.sm }}
               />
               <Text
-                style={[
-                  styles.sectionSubtitle,
-                  { color: colors.textSecondary },
-                ]}
+                style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
               >
                 No reflections yet — your weekly summary will appear here once
                 you generate one.
@@ -871,7 +1027,9 @@ export default function JournalScreen() {
           <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
             Monthly reflection
           </Text>
-          {monthlyReflection ? (
+          {loadingReflections ? (
+            <ShimmerCard height={130} />
+          ) : monthlyReflection ? (
             <View
               style={[
                 styles.reflectionCard,
@@ -883,6 +1041,7 @@ export default function JournalScreen() {
               >
                 {monthlyReflection.title}
               </Text>
+
               {!!monthlyReflection.subtitle && (
                 <Text
                   style={[
@@ -893,12 +1052,14 @@ export default function JournalScreen() {
                   {monthlyReflection.subtitle}
                 </Text>
               )}
+
               <Text
                 style={[styles.reflectionBody, { color: colors.textSecondary }]}
                 numberOfLines={4}
               >
                 {monthlyReflection.body}
               </Text>
+
               {!!monthlyReflection.verse_reference && (
                 <Text
                   style={[
@@ -912,12 +1073,7 @@ export default function JournalScreen() {
               )}
             </View>
           ) : (
-            <View
-              style={[
-                styles.emptyCard,
-                { backgroundColor: colors.card },
-              ]}
-            >
+            <View style={[styles.emptyCard, { backgroundColor: colors.card }]}>
               <Ionicons
                 name="calendar-outline"
                 size={18}
@@ -925,10 +1081,7 @@ export default function JournalScreen() {
                 style={{ marginRight: spacing.sm }}
               />
               <Text
-                style={[
-                  styles.sectionSubtitle,
-                  { color: colors.textSecondary },
-                ]}
+                style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
               >
                 No monthly reflection yet — keep showing up in prayer and you’ll
                 unlock a monthly summary here.
@@ -1185,6 +1338,15 @@ export default function JournalScreen() {
         visible={showSettings}
         onClose={() => setShowSettings(false)}
         userId={userId}
+      />
+      {/* Milestone Modal */}
+      <MilestoneModal
+        visible={milestoneModalVisible}
+        milestone={unlockedMilestone}
+        onClose={() => {
+          setMilestoneModalVisible(false);
+          setUnlockedMilestone(null);
+        }}
       />
     </SafeAreaView>
   );
