@@ -10,11 +10,9 @@ import React, {
   useState,
 } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Image,
   LayoutAnimation,
-  Modal,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -22,32 +20,26 @@ import {
   Text,
   TouchableOpacity,
   UIManager,
-  View,
+  View
 } from "react-native";
 
 import type { MilestoneConfig } from "@/app/constants/milestonesConfig";
 import { MILESTONES } from "@/app/constants/milestonesConfig";
-import MilestoneModal from "@/components/MilestoneModal";
+import BookmarksModal from "@/components/journal/BookmarksOverlay";
+import Calendar from "@/components/journal/Calendar";
+import MilestoneModal from "@/components/journal/MilestoneModal";
+import PrayerDayModal from "@/components/journal/PrayerDayOverlay";
+import PrayerEntryModal from "@/components/journal/PrayerEntryModal";
 import ReminderBanner from "@/components/ReminderBanner";
 import ShimmerCard from "@/components/ShimmerCard";
-import Calendar from "@/components/journal/Calendar";
 import { useAuth } from "@/contexts/AuthProvider";
+import { Prayer } from "@/types/Prayer";
+import { Portal, PortalProvider } from "@gorhom/portal";
 import SettingsModal from "../../../components/SettingsModal";
 import { useTheme } from "../../../contexts/ThemeContext";
 import { supabase } from "../../../lib/supabaseClient";
 import { fonts, spacing } from "../../../theme/theme";
-
 // ---- Types -----------------------------------------------------------
-
-type Prayer = {
-  id: string;
-  user_id: string;
-  prayed_at: string;
-  transcript_text: string | null;
-  duration_seconds: number | null;
-  audio_path: string | null; // stored path in bucket
-  signed_audio_url: string | null; // 1-year signed URL
-};
 
 type Reflection = {
   id: string;
@@ -84,6 +76,7 @@ const formatMsToClock = (ms?: number | null) => {
   const mins = Math.floor(totalSeconds / 60);
   const secs = totalSeconds % 60;
   return `${mins}:${String(secs).padStart(2, "0")}`;
+
 };
 
 // ---- Reflection generator ----
@@ -107,7 +100,6 @@ const triggerReflection = async (
     console.warn(`Error calling ${type} reflection:`, err);
   }
 };
-
 
 // ---- Screen ----------------------------------------------------------
 
@@ -136,7 +128,9 @@ export default function JournalScreen() {
   // Selected date for modal
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [dayModalVisible, setDayModalVisible] = useState(false);
-
+  // ---- Single-prayer entry modal state ----
+  const [selectedPrayer, setSelectedPrayer] = useState<Prayer | null>(null);
+  const [prayerEntryVisible, setPrayerEntryVisible] = useState(false);
   // Playback state (shared for recent list + modal)
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
@@ -148,9 +142,11 @@ export default function JournalScreen() {
 
   // Speaker route toggle
   const [playThroughSpeaker, setPlayThroughSpeaker] = useState(true);
-
+  const [useSpeaker, setUseSpeaker] = useState(true);
+  const onToggleSpeaker = () => setUseSpeaker((prev) => !prev);
   const soundRef = useRef<Audio.Sound | null>(null);
 
+  
   const [showReflectionBadge, setShowReflectionBadge] = useState<"weekly" | "monthly" | null>(null);
   // last reflection Seen
   const [lastReflectionSeen, setLastReflectionSeen] = useState<string | null>(null);
@@ -161,6 +157,12 @@ export default function JournalScreen() {
 // Milestone state
 const [milestoneModalVisible, setMilestoneModalVisible] = useState(false);
 const [unlockedMilestone, setUnlockedMilestone] = useState<MilestoneConfig | null>(null);
+
+// ---- Bookmarked prayers state ----
+const [bookmarkedPrayers, setBookmarkedPrayers] = useState<Prayer[]>([]);
+const [bookmarksModalVisible, setBookmarksModalVisible] = useState(false);
+const [searchQuery, setSearchQuery] = useState("");
+const [locallyUnbookmarkedIds, setLocallyUnbookmarkedIds] = useState<string[]>([]);
 
   // ---- Fetch ALL prayers (for streak + recents) -------------------------
 
@@ -181,13 +183,24 @@ const [unlockedMilestone, setUnlockedMilestone] = useState<MilestoneConfig | nul
         setAllPrayers([]);
       } else {
         const prayersWithUrls: Prayer[] = [];
-
+        
         for (const p of data || []) {
+        // Determine bookmark status
+        const { data: bm } = await supabase
+        .from("bookmarked_prayers")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("prayer_id", p.id)
+        .maybeSingle();
+
+        const isBookmarked = !!bm;
+        //if no audio, still include bookmark state
+        
           if (!p.audio_path) {
             prayersWithUrls.push({ ...(p as Prayer), signed_audio_url: null });
             continue;
           }
-
+          // Add signed URL
           const { data: signed } = await supabase.storage
             .from("prayer-audio")
             .createSignedUrl(p.audio_path, 60 * 60 * 24 * 365);
@@ -195,6 +208,7 @@ const [unlockedMilestone, setUnlockedMilestone] = useState<MilestoneConfig | nul
           prayersWithUrls.push({
             ...(p as Prayer),
             signed_audio_url: signed?.signedUrl ?? null,
+            is_bookmarked: isBookmarked,
           });
         }
 
@@ -368,14 +382,64 @@ const [unlockedMilestone, setUnlockedMilestone] = useState<MilestoneConfig | nul
             setPrayers((prev) => deleteById(prev, oldRow.id));
             setAllPrayers((prev) => deleteById(prev, oldRow.id));
             return;
-          }
+          } 
         }
       )
+      
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
+  }, [userId]);
+
+  // ---- Realtime bookmark sync ----
+  useEffect(() => {
+    if (!userId) return;
+
+    const channel = supabase
+      .channel("bookmarks-sync")
+      .on(
+        "postgres_changes",
+        {
+          schema: "public",
+          table: "bookmarked_prayers",
+          filter: `user_id=eq.${userId}`,
+          event: "*",
+        },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            const prayerId = payload.new.prayer_id;
+            setAllPrayers((prev) =>
+              prev.map((p) =>
+                p.id === prayerId ? { ...p, is_bookmarked: true } : p
+              )
+            );
+            setPrayers((prev) =>
+              prev.map((p) =>
+                p.id === prayerId ? { ...p, is_bookmarked: true } : p
+              )
+            );
+          }
+
+          if (payload.eventType === "DELETE") {
+            const prayerId = payload.old.prayer_id;
+            setAllPrayers((prev) =>
+              prev.map((p) =>
+                p.id === prayerId ? { ...p, is_bookmarked: false } : p
+              )
+            );
+            setPrayers((prev) =>
+              prev.map((p) =>
+                p.id === prayerId ? { ...p, is_bookmarked: false } : p
+              )
+            );
+          }
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [userId]);
 
   // ---- Reflections ----------------------------------------------------
@@ -481,6 +545,35 @@ const [unlockedMilestone, setUnlockedMilestone] = useState<MilestoneConfig | nul
   
     fetchReflections();
   }, [userId, allPrayers, lastReflectionSeen]); // 🔥 listen for new prayers
+
+// ---- Fetch bookmarked prayers ----
+useEffect(() => {
+  if (!userId) return;
+
+  const fetchBookmarks = async () => {
+    const { data, error } = await supabase
+      .from("bookmarked_prayers")
+      .select("prayer_id, prayers(*)")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.warn("Failed to fetch bookmarks:", error.message);
+      return;
+    }
+
+    // Extract the prayer rows, attach is_bookmarked
+    const mapped: Prayer[] = data
+      ? data.map((row: any) => ({
+        ...(row.prayers as Prayer),
+        is_bookmarked: true,
+      })) : [];
+
+    setBookmarkedPrayers(mapped);
+  };
+
+  fetchBookmarks();
+}, [userId]);
 
   // ---- Derived data ---------------------------------------------------
 
@@ -600,6 +693,8 @@ const [unlockedMilestone, setUnlockedMilestone] = useState<MilestoneConfig | nul
       console.warn("Audio mode config error:", e);
     }
   };
+
+  // ---- Play/pause prayer audio ---------------------------------------
 
   const handlePlayPause = async (p: Prayer) => {
     try {
@@ -743,6 +838,75 @@ const [unlockedMilestone, setUnlockedMilestone] = useState<MilestoneConfig | nul
     );
   };
 
+  // ---- Bookmark toggle ----
+  const toggleBookmark = async (prayerId: string) => {
+    if (!userId) return;
+
+    try {
+      // Check if bookmark exists
+      const { data: existing } = await supabase
+        .from("bookmarked_prayers")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("prayer_id", prayerId)
+        .maybeSingle();
+
+      if (existing) {
+        // Remove bookmark
+        await supabase
+          .from("bookmarked_prayers")
+          .delete()
+          .eq("id", existing.id);
+
+        // Optimistic UI update
+        setAllPrayers((prev) =>
+          prev.map((p) =>
+            p.id === prayerId ? { ...p, is_bookmarked: false } : p
+          )
+        );
+        setPrayers((prev) =>
+          prev.map((p) =>
+            p.id === prayerId ? { ...p, is_bookmarked: false } : p
+          )
+        );
+      } else {
+        // Add bookmark
+        await supabase
+          .from("bookmarked_prayers")
+          .insert({
+            user_id: userId,
+            prayer_id: prayerId,
+          });
+
+        // Optimistic UI update
+        setAllPrayers((prev) =>
+          prev.map((p) =>
+            p.id === prayerId ? { ...p, is_bookmarked: true } : p
+          )
+        );
+        setPrayers((prev) =>
+          prev.map((p) =>
+            p.id === prayerId ? { ...p, is_bookmarked: true } : p
+          )
+        );
+      }
+    } catch (err) {
+      console.warn("Bookmark toggle error:", err);
+    }
+  };
+// ---- Open the single-prayer "Prayer Entry" modal ----
+const openPrayerEntry = (p: Prayer) => {
+  console.log("openPrayerEntry called with", p.id); 
+  setSelectedPrayer(p);
+  setPrayerEntryVisible(true);
+};
+// NEW: open modal from anywhere
+const handleSelectPrayer = (p: Prayer) => {
+  console.log("handleSelectPrayer called with", p.id);
+  setSelectedPrayer(p);
+  setPrayerEntryVisible(true);
+
+};
   // ---- Handlers for calendar & modal ---------------------------------
 
   const handleMonthChange = (nextMonth: Date) => {
@@ -765,590 +929,520 @@ const [unlockedMilestone, setUnlockedMilestone] = useState<MilestoneConfig | nul
   // --------------------------------------------------------------------
 
   return (
-    <SafeAreaView
-      style={[styles.container, { backgroundColor: colors.background }]}
-    >
-      {/* Header */}
-      <View
-        style={[
-          styles.header,
-          { borderBottomColor: colors.textSecondary + "20" },
-        ]}
+    <PortalProvider>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: colors.background }]}
       >
-        <View style={styles.leftHeader}>
-          <Image
-            source={require("../../../assets/Logo2.png")}
-            style={{ width: 44, height: 44, marginRight: 8 }}
-            resizeMode="contain"
-          />
-          <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
-            Prayer Journal
-          </Text>
-        </View>
-        <TouchableOpacity onPress={() => setShowSettings(true)}>
-          <Ionicons
-            name="settings-outline"
-            size={22}
-            color={colors.textPrimary}
-          />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView
-        contentContainerStyle={[styles.scrollContent]}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Journey Summary */}
-        <View style={styles.section}>
-          <View style={styles.journeyHeaderRow}>
-            <View style={{ flex: 1 }}>
-              <Text
-                style={[styles.sectionTitle, { color: colors.textPrimary }]}
-              >
-                Your Prayer Journey
-              </Text>
-              <Text
-                style={[
-                  styles.sectionSubtitle,
-                  { color: colors.textSecondary },
-                ]}
-              >
-                You’ve prayed {daysPrayedThisMonth} days this month
-              </Text>
-            </View>
-            <View
-              style={[
-                styles.streakChip,
-                { backgroundColor: colors.accent + "20" },
-              ]}
-            >
-              <Ionicons name="flash" size={16} color={colors.accent} />
-              <View style={{ marginLeft: 8 }}>
-                <Text
-                  style={[styles.streakLabel, { color: colors.textPrimary }]}
-                >
-                  {currentStreak}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {/* Reminder */}
-        {userId && (
-          <View style={styles.section}>
-            <ReminderBanner userId={userId} />
-          </View>
-        )}
-
-        {/* Calendar */}
-        <View style={styles.section}>
-          <Calendar
-            month={currentMonth}
-            onMonthChange={handleMonthChange}
-            selectedDateKey={selectedDateKey}
-            onSelectDate={openDayModal}
-            daysWithPrayer={daysWithPrayer}
-          />
-        </View>
-
-        {/* Weekly reflection card (short) */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-            Weekly reflection
-          </Text>
-          {loadingReflections ? (
-            <ShimmerCard height={110} />
-          ) : weeklyReflection ? (
-            <View
-              style={[
-                styles.reflectionCard,
-                { backgroundColor: colors.card },
-              ]}
-            >
-              <Text
-                style={[styles.reflectionTitle, { color: colors.textPrimary }]}
-              >
-                {weeklyReflection.title}
-              </Text>
-
-              {!!weeklyReflection.subtitle && (
-                <Text
-                  style={[
-                    styles.reflectionSubtitle,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  {weeklyReflection.subtitle}
-                </Text>
-              )}
-
-              <Text
-                style={[styles.reflectionBody, { color: colors.textSecondary }]}
-                numberOfLines={3}
-              >
-                {weeklyReflection.body}
-              </Text>
-
-              {!!weeklyReflection.verse_reference && (
-                <Text
-                  style={[
-                    styles.reflectionVerse,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  {weeklyReflection.verse_reference} —{" "}
-                  {weeklyReflection.verse_text}
-                </Text>
-              )}
-            </View>
-          ) : (
-            <View style={[styles.emptyCard, { backgroundColor: colors.card }]}>
-              <Ionicons
-                name="sparkles-outline"
-                size={18}
-                color={colors.accent}
-                style={{ marginRight: spacing.sm }}
-              />
-              <Text
-                style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
-              >
-                No reflections yet — your weekly summary will appear here once
-                you generate one.
-              </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Recent prayers (last 3) */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-            Recent prayers
-          </Text>
-
-          {recentPrayers.length === 0 ? (
-            <View
-              style={[
-                styles.emptyCard,
-                { backgroundColor: colors.card },
-              ]}
-            >
-              <Ionicons
-                name="mic-outline"
-                size={20}
-                color={colors.accent}
-                style={{ marginRight: spacing.sm }}
-              />
-              <Text
-                style={[
-                  styles.sectionSubtitle,
-                  { color: colors.textSecondary },
-                ]}
-              >
-                No prayers recorded yet — tap the mic on the Pray tab to make
-                your first entry.
-              </Text>
-            </View>
-          ) : (
-            recentPrayers.map((p) => {
-              const dateObj = new Date(p.prayed_at);
-              const dateLabel = dateObj.toLocaleDateString("en-GB", {
-                weekday: "short",
-                day: "numeric",
-                month: "short",
-              });
-              const timeLabel = dateObj.toLocaleTimeString("en-GB", {
-                hour: "2-digit",
-                minute: "2-digit",
-              });
-              const isPlaying = playingId === p.id;
-
-              return (
-                <View
-                  key={p.id}
-                  style={[
-                    styles.recentPrayerRow,
-                    { backgroundColor: colors.card },
-                  ]}
-                >
-                  {/* Tap left side to open modal for that day */}
-                  <TouchableOpacity
-                    style={{ flex: 1 }}
-                    onPress={() => {
-                      const key = p.prayed_at.slice(0, 10);
-                      openDayModal(key);
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <Text
-                      style={[
-                        styles.recentPrayerTitle,
-                        { color: colors.textPrimary },
-                      ]}
-                    >
-                      {dateLabel} • {timeLabel}
-                    </Text>
-                    {!!p.transcript_text && (
-                      <Text
-                        style={[
-                          styles.recentPrayerSnippet,
-                          { color: colors.textSecondary },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {p.transcript_text}
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-
-                  {/* Inline play button */}
-                  <TouchableOpacity
-                    onPress={() => handlePlayPause(p)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    {loadingAudioId === p.id ? (
-                      <ActivityIndicator color={colors.accent} />
-                    ) : (
-                      <Ionicons
-                        name={isPlaying ? "pause-circle" : "play-circle"}
-                        size={28}
-                        color={colors.accent}
-                      />
-                    )}
-                  </TouchableOpacity>
-                </View>
-              );
-            })
-          )}
-        </View>
-
-        {/* Monthly reflection / score-card style */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-            Monthly reflection
-          </Text>
-          {loadingReflections ? (
-            <ShimmerCard height={130} />
-          ) : monthlyReflection ? (
-            <View
-              style={[
-                styles.reflectionCard,
-                { backgroundColor: colors.card },
-              ]}
-            >
-              <Text
-                style={[styles.reflectionTitle, { color: colors.textPrimary }]}
-              >
-                {monthlyReflection.title}
-              </Text>
-
-              {!!monthlyReflection.subtitle && (
-                <Text
-                  style={[
-                    styles.reflectionSubtitle,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  {monthlyReflection.subtitle}
-                </Text>
-              )}
-
-              <Text
-                style={[styles.reflectionBody, { color: colors.textSecondary }]}
-                numberOfLines={4}
-              >
-                {monthlyReflection.body}
-              </Text>
-
-              {!!monthlyReflection.verse_reference && (
-                <Text
-                  style={[
-                    styles.reflectionVerse,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  {monthlyReflection.verse_reference} —{" "}
-                  {monthlyReflection.verse_text}
-                </Text>
-              )}
-            </View>
-          ) : (
-            <View style={[styles.emptyCard, { backgroundColor: colors.card }]}>
-              <Ionicons
-                name="calendar-outline"
-                size={18}
-                color={colors.accent}
-                style={{ marginRight: spacing.sm }}
-              />
-              <Text
-                style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
-              >
-                No monthly reflection yet — keep showing up in prayer and you’ll
-                unlock a monthly summary here.
-              </Text>
-            </View>
-          )}
-        </View>
-      </ScrollView>
-
-      {/* Day modal: full-page, all prayers for selected date */}
-      <Modal
-        visible={dayModalVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={closeDayModal}
-      >
-        <SafeAreaView
+        {/* Header */}
+        <View
           style={[
-            styles.modalContainer,
-            { backgroundColor: colors.background },
+            styles.header,
+            { borderBottomColor: colors.textSecondary + "20" },
           ]}
         >
-          {/* Modal header */}
-          <View
-            style={[
-              styles.modalHeader,
-              { borderBottomColor: colors.textSecondary + "20" },
-            ]}
-          >
-            <TouchableOpacity onPress={closeDayModal}>
-              <Ionicons
-                name="chevron-back-outline"
-                size={22}
-                color={colors.textPrimary}
-              />
-            </TouchableOpacity>
+          <View style={styles.leftHeader}>
+            <Image
+              source={require("../../../assets/Logo2.png")}
+              style={{ width: 44, height: 44, marginRight: 8 }}
+              resizeMode="contain"
+            />
+            <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
+              Prayer Journal
+            </Text>
+          </View>
+          <TouchableOpacity onPress={() => setShowSettings(true)}>
+            <Ionicons
+              name="settings-outline"
+              size={22}
+              color={colors.textPrimary}
+            />
+          </TouchableOpacity>
+        </View>
 
-            <View style={{ flex: 1, marginLeft: spacing.sm }}>
-              <Text
-                style={[styles.modalTitle, { color: colors.textPrimary }]}
-              >
-                {selectedDateKey
-                  ? new Date(selectedDateKey).toLocaleDateString("en-GB", {
-                      weekday: "long",
-                      day: "numeric",
-                      month: "long",
-                    })
-                  : "Selected day"}
-              </Text>
-              <Text
+        <ScrollView
+          contentContainerStyle={[styles.scrollContent]}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Journey Summary */}
+          <View style={styles.section}>
+            <View style={styles.journeyHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[styles.sectionTitle, { color: colors.textPrimary }]}
+                >
+                  Your Prayer Journey
+                </Text>
+                <Text
+                  style={[
+                    styles.sectionSubtitle,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  You’ve prayed {daysPrayedThisMonth} days this month
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  // Open the milestone modal manually
+                  setMilestoneModalVisible(true);
+                }}
                 style={[
-                  styles.modalSubtitle,
-                  { color: colors.textSecondary },
+                  styles.streakChip,
+                  { backgroundColor: colors.accent + "20" },
                 ]}
+                activeOpacity={0.7}
               >
-                {prayersForSelectedDate.length}{" "}
-                {prayersForSelectedDate.length === 1 ? "prayer" : "prayers"}
-              </Text>
+                <Ionicons name="flash" size={16} color={colors.accent} />
+                <View style={{ marginLeft: 8 }}>
+                  <Text
+                    style={[styles.streakLabel, { color: colors.textPrimary }]}
+                  >
+                    {currentStreak}
+                  </Text>
+                </View>
+              </TouchableOpacity>
             </View>
-
-            {/* Speaker toggle icon */}
-            <TouchableOpacity
-              onPress={() => setPlayThroughSpeaker((prev) => !prev)}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ionicons
-                name={
-                  playThroughSpeaker
-                    ? "volume-high-outline"
-                    : "headset-outline"
-                }
-                size={22}
-                color={colors.textPrimary}
-              />
-            </TouchableOpacity>
           </View>
 
-          <ScrollView
-            contentContainerStyle={[
-              styles.modalScrollContent,
-              { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-            ]}
-            showsVerticalScrollIndicator={false}
-          >
-            {loadingPrayers ? (
-              <ActivityIndicator color={colors.accent} />
-            ) : prayersForSelectedDate.length === 0 ? (
-              <Text
+          {/* Reminder */}
+          {userId && (
+            <View style={styles.section}>
+              <ReminderBanner userId={userId} />
+            </View>
+          )}
+
+          {/* Calendar */}
+          <View style={styles.section}>
+            <Calendar
+              month={currentMonth}
+              onMonthChange={handleMonthChange}
+              selectedDateKey={selectedDateKey}
+              onSelectDate={openDayModal}
+              daysWithPrayer={daysWithPrayer}
+            />
+          </View>
+
+          {/* Weekly reflection card (short) */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+              Weekly reflection
+            </Text>
+            {loadingReflections ? (
+              <ShimmerCard height={110} />
+            ) : weeklyReflection ? (
+              <View
                 style={[
-                  styles.sectionSubtitle,
-                  { color: colors.textSecondary },
+                  styles.reflectionCard,
+                  { backgroundColor: colors.card },
                 ]}
               >
-                No prayers recorded this day.
-              </Text>
+                <Text
+                  style={[styles.reflectionTitle, { color: colors.textPrimary }]}
+                >
+                  {weeklyReflection.title}
+                </Text>
+
+                {!!weeklyReflection.subtitle && (
+                  <Text
+                    style={[
+                      styles.reflectionSubtitle,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {weeklyReflection.subtitle}
+                  </Text>
+                )}
+
+                <Text
+                  style={[styles.reflectionBody, { color: colors.textSecondary }]}
+                  numberOfLines={3}
+                >
+                  {weeklyReflection.body}
+                </Text>
+
+                {!!weeklyReflection.verse_reference && (
+                  <Text
+                    style={[
+                      styles.reflectionVerse,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {weeklyReflection.verse_reference} —{" "}
+                    {weeklyReflection.verse_text}
+                  </Text>
+                )}
+              </View>
             ) : (
-              prayersForSelectedDate.map((p) => {
+              <View style={[styles.emptyCard, { backgroundColor: colors.card }]}>
+                <Ionicons
+                  name="sparkles-outline"
+                  size={18}
+                  color={colors.accent}
+                  style={{ marginRight: spacing.sm }}
+                />
+                <Text
+                  style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
+                >
+                  No reflections yet — your weekly summary will appear here once
+                  you generate one.
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Recent prayers (last 3) */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+              Recent prayers
+            </Text>
+
+            {recentPrayers.length === 0 ? (
+              <View
+                style={[
+                  styles.emptyCard,
+                  { backgroundColor: colors.card },
+                ]}
+              >
+
+                <Text
+                  style={[
+                    styles.sectionSubtitle,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  No prayers recorded yet — tap the mic on the Pray tab to make
+                  your first entry.
+                </Text>
+              </View>
+            ) : (
+              recentPrayers.map((p) => {
+                const dateObj = new Date(p.prayed_at);
+                const dateLabel = dateObj.toLocaleDateString("en-GB", {
+                  weekday: "short",
+                  day: "numeric",
+                  month: "short",
+                });
+                const timeLabel = dateObj.toLocaleTimeString("en-GB", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
                 const isPlaying = playingId === p.id;
-                const isExpanded = expandedPrayerId === p.id;
-                const progress =
-                  isPlaying && playbackDuration
-                    ? playbackPosition / playbackDuration
-                    : 0;
 
                 return (
                   <View
                     key={p.id}
                     style={[
-                      styles.prayerCard,
+                      styles.recentPrayerRow,
                       { backgroundColor: colors.card },
                     ]}
                   >
-                    {/* Play button */}
+                    {/* Tap left side to open modal for that prayer */}
                     <TouchableOpacity
-                      onPress={() => handlePlayPause(p)}
-                      style={styles.playButton}
+                      style={{ flex: 1 }}
+                      onPress={() => {
+                        openPrayerEntry(p);
+                      }}
+                      activeOpacity={0.8}
                     >
-                      {loadingAudioId === p.id ? (
-                        <ActivityIndicator color={colors.accent} />
-                      ) : (
-                        <Ionicons
-                          name={isPlaying ? "pause-circle" : "play-circle"}
-                          size={36}
-                          color={colors.accent}
-                        />
-                      )}
-                    </TouchableOpacity>
 
-                    {/* Content */}
-                    <View style={{ flex: 1 }}>
-                      <View style={styles.prayerHeaderRow}>
+                      {!!p.transcript_text && (
                         <Text
                           style={[
-                            styles.prayerTime,
+                            styles.recentPrayerSnippet,
                             { color: colors.textPrimary },
                           ]}
+                          numberOfLines={2}
                         >
-                          {new Date(p.prayed_at).toLocaleTimeString("en-GB", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}{" "}
-                          • {formatDuration(p.duration_seconds)}
+                          {p.transcript_text}
                         </Text>
-
-                        {/* Delete icon */}
-                        <TouchableOpacity
-                          onPress={() => handleDeletePrayer(p)}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        >
-                          <Ionicons
-                            name="trash-outline"
-                            size={18}
-                            color={colors.textSecondary}
-                          />
-                        </TouchableOpacity>
-                      </View>
-
-                      {/* Progress bar + times */}
-                      {p.signed_audio_url && (
-                        <View style={styles.playbackMeta}>
-                          <View
-                            style={[
-                              styles.playbackTrack,
-                              { backgroundColor: colors.textSecondary + "22" },
-                            ]}
-                          >
-                            <View
-                              style={[
-                                styles.playbackFill,
-                                {
-                                  backgroundColor: colors.accent,
-                                  width: `${Math.min(
-                                    100,
-                                    Math.max(0, progress * 100)
-                                  )}%`,
-                                },
-                              ]}
-                            />
-                          </View>
-                          <View style={styles.playbackTimesRow}>
-                            <Text
-                              style={[
-                                styles.playbackTimeLabel,
-                                { color: colors.textSecondary },
-                              ]}
-                            >
-                              {isPlaying
-                                ? formatMsToClock(playbackPosition)
-                                : "0:00"}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.playbackTimeLabel,
-                                { color: colors.textSecondary },
-                              ]}
-                            >
-                              {formatMsToClock(
-                                playbackDuration ??
-                                  (p.duration_seconds ?? 0) * 1000
-                              )}
-                            </Text>
-                          </View>
-                        </View>
                       )}
+                                            <Text
+                        style={[
+                          styles.prayerMeta,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
+                        {dateLabel} • {timeLabel}
+                      </Text>
+                    </TouchableOpacity>
 
-                      {/* Transcript (collapsible) */}
-                      {p.transcript_text && (
-                        <View style={{ marginTop: spacing.sm }}>
-                          <Text
-                            style={[
-                              styles.prayerText,
-                              { color: colors.textSecondary },
-                            ]}
-                            numberOfLines={isExpanded ? undefined : 3}
-                          >
-                            {p.transcript_text}
-                          </Text>
+                    {/* Bookmark icon */}
+                    <TouchableOpacity
+                      onPress={() => toggleBookmark(p.id)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={{ marginRight: spacing.sm }}
+                    >
+                      <Ionicons
+                        name={p.is_bookmarked ? "heart" : "heart-outline"}
+                        size={22}
+                        color={colors.accent}
+                        
+                      />
+                    </TouchableOpacity>
 
-                          <TouchableOpacity
-                            onPress={() => toggleTranscript(p.id)}
-                            style={styles.transcriptToggleRow}
-                          >
-                            <Text
-                              style={[
-                                styles.transcriptToggleText,
-                                { color: colors.accent },
-                              ]}
-                            >
-                              {isExpanded ? "Hide transcript" : "Show full"}
-                            </Text>
-                            <Ionicons
-                              name={
-                                isExpanded
-                                  ? "chevron-up-outline"
-                                  : "chevron-down-outline"
-                              }
-                              size={16}
-                              color={colors.accent}
-                            />
-                          </TouchableOpacity>
-                        </View>
-                      )}
-                    </View>
                   </View>
                 );
               })
             )}
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
+          </View>
 
-      {/* Settings */}
-      <SettingsModal
-        visible={showSettings}
-        onClose={() => setShowSettings(false)}
+          {/* Monthly reflection / score-card style */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+              Monthly reflection
+            </Text>
+            {loadingReflections ? (
+              <ShimmerCard height={130} />
+            ) : monthlyReflection ? (
+              <View
+                style={[
+                  styles.reflectionCard,
+                  { backgroundColor: colors.card },
+                ]}
+              >
+                <Text
+                  style={[styles.reflectionTitle, { color: colors.textPrimary }]}
+                >
+                  {monthlyReflection.title}
+                </Text>
+
+                {!!monthlyReflection.subtitle && (
+                  <Text
+                    style={[
+                      styles.reflectionSubtitle,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {monthlyReflection.subtitle}
+                  </Text>
+                )}
+
+                <Text
+                  style={[styles.reflectionBody, { color: colors.textSecondary }]}
+                  numberOfLines={4}
+                >
+                  {monthlyReflection.body}
+                </Text>
+
+                {!!monthlyReflection.verse_reference && (
+                  <Text
+                    style={[
+                      styles.reflectionVerse,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {monthlyReflection.verse_reference} —{" "}
+                    {monthlyReflection.verse_text}
+                  </Text>
+                )}
+              </View>
+            ) : (
+              <View style={[styles.emptyCard, { backgroundColor: colors.card }]}>
+                <Ionicons
+                  name="calendar-outline"
+                  size={18}
+                  color={colors.accent}
+                  style={{ marginRight: spacing.sm }}
+                />
+                <Text
+                  style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
+                >
+                  No monthly reflection yet — keep showing up in prayer and
+                  you’ll unlock a monthly summary here.
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Bookmarked Prayers */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+              Bookmarked prayers
+            </Text>
+
+            {bookmarkedPrayers.length === 0 ? (
+              <View style={[styles.emptyCard, { backgroundColor: colors.card }]}>
+                <Ionicons
+                  name="heart-outline"
+                  size={18}
+                  color={colors.accent}
+                  style={{ marginRight: spacing.sm }}
+                />
+                <Text
+                  style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
+                >
+                  Bookmark prayers you want to revisit later.
+                </Text>
+              </View>
+            ) : (
+              <>
+                {/* Preview first 3 bookmarks */}
+                {bookmarkedPrayers.slice(0, 3).map((p) => {
+                  const dateObj = new Date(p.prayed_at);
+                  const dateLabel = dateObj.toLocaleDateString("en-GB", {
+                    weekday: "short",
+                    day: "numeric",
+                    month: "short",
+                  });
+                  const timeLabel = dateObj.toLocaleTimeString("en-GB", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  });
+
+                  return (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={[
+                        styles.recentPrayerRow,
+                        { backgroundColor: colors.card },
+                      ]}
+                      onPress={() => {
+                        const full =
+                          allPrayers.find((ap) => ap.id === p.id) ?? p;
+                        openPrayerEntry(full);
+                        setSearchQuery("");
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        {/* LEFT SIDE: transcript text snippet */}
+                        {!!p.transcript_text && (
+                          <Text
+                            style={[
+                              styles.recentPrayerSnippet,
+                              { color: colors.textPrimary },
+                            ]}
+                            numberOfLines={2}
+                          >
+                            {p.transcript_text}
+                          </Text>
+                        )}
+                        <Text
+                          style={[
+                            styles.prayerMeta,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
+                          {/* LEFT SIDE: date • time + snippet */}
+                          {dateLabel} • {timeLabel}
+                        </Text>
+                      </View>
+
+                      {/* Bookmark icon toggle */}
+                      <Ionicons
+                        name={p.is_bookmarked ? "heart" : "heart-outline"}
+                        size={22}
+                        color={colors.accent}
+                      />
+                    </TouchableOpacity>
+                  );
+                })}
+
+                {/* View all button */}
+                {bookmarkedPrayers.length > 3 && (
+                  <TouchableOpacity
+                    onPress={() => setBookmarksModalVisible(true)}
+                    style={{ marginTop: spacing.sm }}
+                  >
+                    <Text
+                      style={{
+                        color: colors.accent,
+                        fontFamily: fonts.body,
+                        fontSize: 14,
+                      }}
+                    >
+                      View all bookmarked prayers →
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            )}
+          </View>
+        </ScrollView>
+
+        {/* Reflection Toast stays inside normal layout */}
+        {showReflectionToast && (
+          <View
+            style={{
+              position: "absolute",
+              left: spacing.lg,
+              right: spacing.lg,
+              bottom: spacing.lg,
+              backgroundColor: colors.card,
+              padding: spacing.md,
+              borderRadius: 16,
+              flexDirection: "row",
+              alignItems: "center",
+              shadowColor: "#000",
+              shadowOpacity: 0.1,
+              shadowRadius: 8,
+            }}
+          >
+            <Ionicons
+              name="sparkles-outline"
+              size={18}
+              color={colors.accent}
+              style={{ marginRight: 8 }}
+            />
+            <Text style={{ color: colors.textPrimary, fontFamily: fonts.body }}>
+              {reflectionToastMessage}
+            </Text>
+          </View>
+        )}
+      </SafeAreaView>
+      {/* Modals */}
+      <PrayerDayModal
+        visible={dayModalVisible}
+        dateKey={selectedDateKey}
+        prayersForSelectedDate={prayersForSelectedDate}
+        selectedDateKey={selectedDateKey}
+        expandedPrayerId={expandedPrayerId}
+        closeDayModal={closeDayModal}
+        loadingPrayers={loadingPrayers}
+        toggleBookmark={toggleBookmark}
+        handleDeletePrayer={handleDeletePrayer}
+        onSelectPrayer={handleSelectPrayer}
+        isEntryOpen={prayerEntryVisible}
+      />
+      <BookmarksModal
+        visible={bookmarksModalVisible}
+        onClose={() => setBookmarksModalVisible(false)}
         userId={userId}
+        onSelectPrayer={openPrayerEntry}
       />
-      {/* Milestone Modal */}
-      <MilestoneModal
-        visible={milestoneModalVisible}
-        milestone={unlockedMilestone}
+      <PrayerEntryModal
+        visible={prayerEntryVisible}
+        prayer={selectedPrayer}
         onClose={() => {
-          setMilestoneModalVisible(false);
-          setUnlockedMilestone(null);
+          setPrayerEntryVisible(false);
+          setSelectedPrayer(null);
         }}
+        isPlaying={!!selectedPrayer && playingId === selectedPrayer.id}
+        isLoadingAudio={!!selectedPrayer && loadingAudioId === selectedPrayer.id}
+        playbackPositionMs={playbackPosition}
+        playbackDurationMs={playbackDuration}
+        onPlayPause={(p) => handlePlayPause(p as any)}
+        onToggleBookmark={(id) => toggleBookmark(id)}
+        onDeletePrayer={(p) => handleDeletePrayer(p as any)}
+        onToggleTranscript={toggleTranscript}
       />
-    </SafeAreaView>
+      <Portal>
+        <SettingsModal
+          visible={showSettings}
+          onClose={() => setShowSettings(false)}
+          userId={userId}
+        />
+      </Portal>
+      <Portal>
+        <MilestoneModal
+          visible={milestoneModalVisible}
+          milestone={unlockedMilestone}
+          onClose={() => {
+            setMilestoneModalVisible(false);
+            setUnlockedMilestone(null);
+          }}
+        />
+      </Portal>
+    </PortalProvider>
   );
 }
 
@@ -1443,6 +1537,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
+  
+  // Bookmarked prayers
+  bookmarkPrayerText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    lineHeight: 18,
+    flexWrap: "wrap",
+  },
 
   // Prayer cards (used in modal)
   prayerCard: {
@@ -1484,6 +1586,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 11,
   },
+  prayerMeta: { fontFamily: fonts.body, fontSize: 10, lineHeight: 18 },
 
   prayerText: { fontFamily: fonts.body, fontSize: 13, lineHeight: 18 },
   transcriptToggleRow: {
@@ -1518,5 +1621,8 @@ const styles = StyleSheet.create({
   },
   modalScrollContent: {
     paddingBottom: spacing.xl,
+  },
+  speakerToggle: {
+    marginLeft: spacing.sm,
   },
 });

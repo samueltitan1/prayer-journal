@@ -1,3 +1,5 @@
+// supabase/functions/transcribe/index.ts
+// @ts-nocheck  // 👈 Removes Deno/TS import noise inside Cursor
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 serve(async (req) => {

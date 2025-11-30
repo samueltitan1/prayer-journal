@@ -1,18 +1,18 @@
 // components/MilestoneModal.tsx
 
+import type { MilestoneConfig } from "@/app/constants/milestonesConfig";
+import { useTheme } from "@/contexts/ThemeContext";
+import { fonts, spacing } from "@/theme/theme";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useRef } from "react";
 import {
-    Animated,
-    Modal,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Animated,
+  Modal,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import type { MilestoneConfig } from "../app/constants/milestonesConfig";
-import { useTheme } from "../contexts/ThemeContext";
-import { fonts, spacing } from "../theme/theme";
 
 interface Props {
   visible: boolean;

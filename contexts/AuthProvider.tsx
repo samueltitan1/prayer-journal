@@ -1,11 +1,24 @@
+// contexts/AuthProvider.tsx
 import { supabase } from "@/lib/supabaseClient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { createContext, useContext, useEffect, useState } from "react";
+import type { User } from "@supabase/supabase-js";
+import { createContext, ReactNode, useContext, useEffect, useState } from "react";
 
-const AuthContext = createContext(null);
+// ---- Types ----
+type AuthContextType = {
+  user: User | null;
+  loading: boolean;
+};
 
-export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+type AuthProviderProps = {
+  children: ReactNode;
+};
+
+// ---- Context ----
+const AuthContext = createContext<AuthContextType | null>(null);
+
+export const AuthProvider = ({ children }: AuthProviderProps) => {
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

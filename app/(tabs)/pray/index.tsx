@@ -47,6 +47,12 @@ export default function PrayScreen() {
   const [draftDuration, setDraftDuration] = useState<number | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
 
+  // last reflection Seen
+  const [lastReflectionSeen, setLastReflectionSeen] = useState<string | null>(null);
+  const [showReflectionToast, setShowReflectionToast] = useState(false);
+  const [reflectionToastMessage, setReflectionToastMessage] = useState("");
+
+
   // Load user ID
   useEffect(() => {
     const getUserId = async () => {
@@ -537,35 +543,6 @@ useEffect(() => {
           />
           <Text style={[styles.toastText, { color: colors.textPrimary }]}>
             Day {dayCount} complete ⚡️
-          </Text>
-        </View>
-      )}
-
-      {showReflectionToast && (
-        <View
-          style={{
-            position: "absolute",
-            left: spacing.lg,
-            right: spacing.lg,
-            bottom: spacing.lg,
-            backgroundColor: colors.card,
-            padding: spacing.md,
-            borderRadius: 16,
-            flexDirection: "row",
-            alignItems: "center",
-            shadowColor: "#000",
-            shadowOpacity: 0.1,
-            shadowRadius: 8,
-          }}
-        >
-          <Ionicons
-            name="sparkles-outline"
-            size={18}
-            color={colors.accent}
-            style={{ marginRight: 8 }}
-          />
-          <Text style={{ color: colors.textPrimary, fontFamily: fonts.body }}>
-            {reflectionToastMessage}
           </Text>
         </View>
       )}

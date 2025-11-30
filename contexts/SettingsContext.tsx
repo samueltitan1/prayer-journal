@@ -1,7 +1,8 @@
+// contexts/settingsContext.tsx
 import {
-    cancelDailyPrayerNotification,
-    requestNotificationPermissions,
-    scheduleDailyPrayerNotification,
+  cancelDailyPrayerNotification,
+  requestNotificationPermissions,
+  scheduleDailyPrayerNotification,
 } from "@/lib/notifications";
 import { supabase } from "@/lib/supabaseClient";
 import React, { createContext, useContext, useEffect, useState } from "react";

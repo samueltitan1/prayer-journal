@@ -1,3 +1,4 @@
+// app/_layout.tsx
 import { Inter_400Regular } from "@expo-google-fonts/inter";
 import {
   PlayfairDisplay_500Medium,
@@ -15,7 +16,8 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { requestNotificationPermissions } from "@/lib/notifications";
 
 function RootNavigator() {
-  const { user } = useAuth();
+  const auth = useAuth();
+  const user = auth?.user ?? null;
 
   return (
     <SettingsProvider userId={user?.id ?? null}>
