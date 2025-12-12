@@ -89,3 +89,4 @@ export const MILESTONES: MilestoneConfig[] = [
       "A full year of meeting with God. You're a tree of life, bringing healing to others.",
   },
 ];
+export default MILESTONES;

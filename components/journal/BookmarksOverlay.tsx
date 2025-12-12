@@ -8,13 +8,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  KeyboardAvoidingView,
   LayoutAnimation,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
 
 
@@ -27,30 +29,31 @@ type Props = {
   onSelectPrayer?: (p: Prayer) => void;
 };
 
-// Format date + time + duration in one clean line
+// Format date + time + duration in one clean line (with AM/PM and spacing)
 const formatPrayerMeta = (p: Prayer) => {
-    const d = new Date(p.prayed_at);
-  
-    const date = d.toLocaleDateString("en-GB", {
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-    });
-  
-    const time = d.toLocaleTimeString("en-GB", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  
-    const duration =
-      p.duration_seconds != null
-        ? `${Math.floor(p.duration_seconds / 60)}:${String(
-            p.duration_seconds % 60
-          ).padStart(2, "0")}`
-        : "";
-  
-    return `${date} • ${time}${duration ? ` • ${duration}` : ""}`;
-  };
+  const d = new Date(p.prayed_at);
+
+  const date = d.toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+
+  const time = d.toLocaleTimeString("en-GB", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  const duration =
+    p.duration_seconds != null
+      ? `${Math.floor(p.duration_seconds / 60)}:${String(
+          p.duration_seconds % 60
+        ).padStart(2, "0")}`
+      : "";
+
+  return `${date} • ${time}${duration ? `   •   ${duration}` : ""}`;
+};
 // ---- Helper ----------------------------------------------------------
 
 const formatDateKey = (d: Date) =>
@@ -125,7 +128,8 @@ export default function BookmarksModal({ visible, onClose, userId, onSelectPraye
   const [bookmarked, setBookmarked] = useState<Prayer[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
-  const [searchResults, setSearchResults] = useState<Prayer[]>([]);
+  const [allPrayers, setAllPrayers] = useState<Prayer[]>([]);
+  const [bookmarkedIds, setBookmarkedIds] = useState<string[]>([]);
   const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
 
@@ -143,109 +147,113 @@ export default function BookmarksModal({ visible, onClose, userId, onSelectPraye
 
   const soundRef = useRef<Audio.Sound | null>(null);
 
-  // ---- Fetch bookmarked prayers when modal opens ----
+  // ---- Fetch bookmarked prayers + cache ALL prayers when modal opens ----
   useEffect(() => {
     if (!visible || !userId) return;
 
-    const fetchBookmarks = async () => {
-      setLocallyUnbookmarkedIds([]); // reset session state when opening
-
-      const { data, error } = await supabase
-        .from("bookmarked_prayers")
-        .select(`
-          id,
-          prayer_id,
-          prayers (
-            id,
-            prayed_at,
-            transcript_text,
-            duration_seconds,
-            audio_path
-          )
-        `)
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
-
-      if (error) {
-        console.warn("Bookmark fetch error:", error.message);
-        setBookmarked([]);
-        setBookmarkedPrayers([]);
-        return;
-      }
-
-      const prayersRaw = (data || []).map((row: any) => row.prayers);
-      const withUrls: Prayer[] = [];
-
-      for (const p of prayersRaw) {
-        if (!p.audio_path) {
-          withUrls.push({ ...p, signed_audio_url: null });
-          continue;
-        }
-
-        const { data: signed } = await supabase.storage
-          .from("prayer-audio")
-          .createSignedUrl(p.audio_path, 60 * 60 * 24 * 365); // 1 year
-
-        withUrls.push({
-          ...p,
-          signed_audio_url: signed?.signedUrl ?? null,
-        });
-      }
-
-      setBookmarked(withUrls);
-      setBookmarkedPrayers(withUrls);
-    };
-
-    fetchBookmarks();
-  }, [visible, userId]);
-// ---- Fetch ALL prayers when searching (full search mode) ----
-useEffect(() => {
-    if (!visible || !userId) return;
-    if (!searchQuery.trim()) {
-      setSearchResults([]); // reset
-      return;
-    }
-  
     let active = true;
-  
-    const fetchAll = async () => {
-      const { data, error } = await supabase
-        .from("prayers")
-        .select("*")
-        .eq("user_id", userId)
-        .order("prayed_at", { ascending: false });
-  
-      if (error) {
-        console.warn("Full search fetch error:", error.message);
-        return;
-      }
-  
-      const withUrls: Prayer[] = [];
-  
-      for (const p of data || []) {
-        if (!p.audio_path) {
-          withUrls.push({ ...p, signed_audio_url: null });
-          continue;
+
+    const fetchData = async () => {
+      try {
+        setLocallyUnbookmarkedIds([]);
+        setLoading(true);
+
+        // 1) Bookmarked prayers
+        const { data, error } = await supabase
+          .from("bookmarked_prayers")
+          .select(`
+            id,
+            prayer_id,
+            prayers (
+              id,
+              prayed_at,
+              transcript_text,
+              duration_seconds,
+              audio_path
+            )
+          `)
+          .eq("user_id", userId)
+          .order("created_at", { ascending: false });
+
+        if (error) {
+          console.warn("Bookmark fetch error:", error.message);
+          if (active) {
+            setBookmarked([]);
+            setBookmarkedPrayers([]);
+            setBookmarkedIds([]);
+          }
+        } else {
+          const prayersRaw = (data || []).map((row: any) => row.prayers);
+          const bookmarkedWithUrls: Prayer[] = [];
+
+          for (const p of prayersRaw) {
+            if (!p.audio_path) {
+              bookmarkedWithUrls.push({ ...p, signed_audio_url: null });
+              continue;
+            }
+
+            const { data: signed } = await supabase.storage
+              .from("prayer-audio")
+              .createSignedUrl(p.audio_path, 60 * 60 * 24 * 365); // 1 year
+
+            bookmarkedWithUrls.push({
+              ...p,
+              signed_audio_url: signed?.signedUrl ?? null,
+            });
+          }
+
+          if (active) {
+            setBookmarked(bookmarkedWithUrls);
+            setBookmarkedPrayers(bookmarkedWithUrls);
+            setBookmarkedIds(bookmarkedWithUrls.map((p) => p.id));
+          }
         }
-  
-        const { data: signed } = await supabase.storage
-          .from("prayer-audio")
-          .createSignedUrl(p.audio_path, 60 * 60 * 24 * 365);
-  
-        withUrls.push({
-          ...p,
-          signed_audio_url: signed?.signedUrl ?? null,
-        });
+
+        // 2) All prayers (for global search), cached once per open
+        const { data: allData, error: allError } = await supabase
+          .from("prayers")
+          .select("*")
+          .eq("user_id", userId)
+          .order("prayed_at", { ascending: false });
+
+        if (allError) {
+          console.warn("Full search fetch error:", allError.message);
+          if (active) setAllPrayers([]);
+        } else {
+          const allWithUrls: Prayer[] = [];
+
+          for (const p of allData || []) {
+            if (!p.audio_path) {
+              allWithUrls.push({ ...p, signed_audio_url: null });
+              continue;
+            }
+
+            const { data: signed } = await supabase.storage
+              .from("prayer-audio")
+              .createSignedUrl(p.audio_path, 60 * 60 * 24 * 365);
+
+            allWithUrls.push({
+              ...p,
+              signed_audio_url: signed?.signedUrl ?? null,
+            });
+          }
+
+          if (active) {
+            setAllPrayers(allWithUrls);
+          }
+        }
+      } finally {
+        if (active) setLoading(false);
       }
-  
-      if (active) setSearchResults(withUrls);
     };
-  
-    fetchAll();
+
+    fetchData();
+
     return () => {
       active = false;
     };
-  }, [visible, userId, searchQuery]);
+  }, [visible, userId]);
+// (removed fetching ALL prayers on search; now handled in modal open effect)
 
   // ---- Audio playback -------------------------------------------------
 
@@ -385,29 +393,33 @@ useEffect(() => {
 
 // ---- Search filter (works across entire journal) ----
 const filtered = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-  
-    // Normal mode → show ONLY bookmarks
-    if (!q) return bookmarked;
-  
-    // Search mode → filter ALL prayers
-    return searchResults.filter((p) => {
-      const fields = [
-        p.transcript_text || "",
-        new Date(p.prayed_at).toLocaleDateString("en-GB"),
-        new Date(p.prayed_at).toLocaleTimeString("en-GB"),
-        String(p.duration_seconds || ""),
-      ];
-      return fields.some((f) => f.toLowerCase().includes(q));
-    });
-  }, [searchQuery, bookmarked, searchResults]);
+  const q = searchQuery.trim().toLowerCase();
+
+  // Normal mode → show ONLY bookmarks
+  if (!q) return bookmarked;
+
+  // Search mode → filter ALL prayers (cached)
+  return allPrayers.filter((p) => {
+    const fields = [
+      p.transcript_text || "",
+      new Date(p.prayed_at).toLocaleDateString("en-GB"),
+      new Date(p.prayed_at).toLocaleTimeString("en-GB"),
+      String(p.duration_seconds || ""),
+    ];
+    return fields.some((f) => f.toLowerCase().includes(q));
+  });
+}, [searchQuery, bookmarked, allPrayers]);
 
   // --------------------------------------------------------------------
   // UI
   // --------------------------------------------------------------------
 if (!visible) return null;
   return (
-
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
+    >
       <View
         style={[styles.container, { backgroundColor: colors.background }]}
       >
@@ -534,18 +546,23 @@ if (!visible) return null;
                 month: "short",
             });
 
-            const timeLabel = dateObj.toLocaleTimeString("en-GB", {
-                hour: "2-digit",
+            const timeLabel = dateObj
+              .toLocaleTimeString("en-GB", {
+                hour: "numeric",
                 minute: "2-digit",
-            });
+                hour12: true,
+              })
+              .toUpperCase();
 
             const isPlaying = playingId === p.id;
             const isUnbookmarked = locallyUnbookmarkedIds.includes(p.id);
+            const isBookmarked =
+              bookmarkedIds.includes(p.id) && !isUnbookmarked;
             const isExpanded = expandedPrayerId === p.id;
             const progress =
-                            isPlaying && playbackDuration
-                                ? playbackPosition / playbackDuration
-                                : 0;
+              isPlaying && playbackDuration
+                ? playbackPosition / playbackDuration
+                : 0;
 
             return (
                 <View
@@ -555,7 +572,7 @@ if (!visible) return null;
 
 {/* ---- CONTENT AREA (TAPPABLE) ---- */}
 <TouchableOpacity
-  style={{ flex: 1, paddingRight: spacing.sm }}
+  style={{ flex: 1 }}
   activeOpacity={0.8}
   onPress={() => {
     if (onSelectPrayer) {
@@ -566,55 +583,58 @@ if (!visible) return null;
     }
   }}
 >
-  {/* bookmark icon */}
-  <View>
+
+  {/* FIRST ROW: transcript preview + bookmark icon INLINE */}
+  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+    <Text
+      style={[styles.prayerText, { flex: 1, color: colors.textPrimary, marginRight: spacing.sm }]}
+      numberOfLines={2}
+    >
+      {p.transcript_text || ""}
+    </Text>
+
     <TouchableOpacity
       onPress={() => handleToggleBookmark(p.id)}
-      style={{ marginRight: spacing.sm }}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      style={{ paddingLeft: spacing.xs, marginTop: 14 }}
     >
       <Ionicons
-        name={
-          locallyUnbookmarkedIds.includes(p.id)
-            ? "heart-outline"
-            : "heart"
-        }
-        size={20}
+        name={isBookmarked ? "heart" : "heart-outline"}
+        size={22}
         color={colors.accent}
       />
     </TouchableOpacity>
   </View>
 
-  {/* Transcript preview */}
-  {p.transcript_text && (
-    <View style={{ marginTop: spacing.sm }}>
-      <Text
-        style={[styles.prayerText, { color: colors.textPrimary }]}
-        numberOfLines={2}
-      >
-        {p.transcript_text}
-      </Text>
+  {/* SECOND ROW: meta info including duration */}
+  <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.xs }}>
+    <Text style={[styles.prayerMeta, { color: colors.textSecondary }]}>
+      {dateLabel} • {timeLabel}
+    </Text>
+    <Text style={[styles.prayerMeta, { color: colors.textSecondary }]}>
+      {formatDuration(p.duration_seconds)}
+    </Text>
+  </View>
 
-      <Text
-        style={[
-          styles.prayerMeta,
-          { color: colors.textSecondary },
-        ]}
-      >
-        {dateLabel} • {timeLabel} • {formatDuration(p.duration_seconds)}
-      </Text>
-    </View>
-  )}
 </TouchableOpacity>
                 </View>
             );
             })}
         </ScrollView>
       </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: {
+    flex: 1,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
   header: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,

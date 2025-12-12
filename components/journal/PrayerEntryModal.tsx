@@ -1,16 +1,19 @@
-// components/journal/PrayerEntryModal.tsx
-
 import { useTheme } from "@/contexts/ThemeContext";
 import { fonts, spacing } from "@/theme/theme";
 import { Prayer } from "@/types/Prayer";
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
+import { Audio } from "expo-av";
+import * as Haptics from "expo-haptics";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Modal,
+  PanResponder,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 
@@ -33,6 +36,8 @@ type Props = {
   onToggleBookmark: (id: string) => void;
   onDeletePrayer: (p: Prayer) => void;
   onToggleTranscript: (id: string) => void;
+  onSeek: (prayer: Prayer, positionMs: number) => void;
+  onSeekCompleteCooldown: () => void;
 };
 
 // ---- Helpers ----------------------------------------------------------
@@ -72,24 +77,110 @@ const PrayerEntryModal: React.FC<Props> = ({
   onPlayPause,
   onToggleBookmark,
   onDeletePrayer,
+  onToggleTranscript,
+  onSeek,
+  onSeekCompleteCooldown,
 }) => {
   const { colors } = useTheme();
+  const [loadedDurationMs, setLoadedDurationMs] = useState<number | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const progressTrackWidth = useRef<number>(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragPosition, setDragPosition] = useState<number | null>(null);
+  const dragPositionRef = useRef<number | null>(null);
   console.log(
     "PrayerEntryModal render",
     "visible:", visible,
     "hasPrayer:", !!prayer,
     "prayerId:", prayer?.id
   );
+  
+  useEffect(() => {
+    let sound: any;
 
-  if (!prayer) return null;
+    (async () => {
+      if (!prayer?.audio_path) return;
+      try {
+        const { sound: snd, status } = await Audio.Sound.createAsync(
+          { uri: prayer.signed_audio_url || prayer.audio_path },
+          { shouldPlay: false }
+        );
+        sound = snd;
+        soundRef.current = snd;
+        if (status.isLoaded && status.durationMillis) {
+          setLoadedDurationMs(status.durationMillis);
+        }
+      } catch (e) {
+        console.log("audio preload error", e);
+      }
+    })();
+
+    return () => {
+      if (sound) sound.unloadAsync();
+    };
+  }, [prayer?.audio_path]);
 
   const totalMs =
-    playbackDurationMs ?? (prayer.duration_seconds ?? 0) * 1000;
+    loadedDurationMs ??
+    playbackDurationMs ??
+    (prayer?.duration_seconds ?? 0) * 1000;
+
+  const effectivePositionMs =
+    isDragging && dragPosition != null ? dragPosition : playbackPositionMs;
 
   const progress =
-    totalMs > 0 ? Math.min(1, Math.max(0, playbackPositionMs / totalMs)) : 0;
+    totalMs > 0
+      ? Math.min(1, Math.max(0, effectivePositionMs / totalMs))
+      : 0;
 
-  const metaLabel = formatHeaderDateTime(prayer.prayed_at);
+  const metaLabel = prayer ? formatHeaderDateTime(prayer.prayed_at) : "";
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onPanResponderGrant: (evt) => {
+          if (!progressTrackWidth.current || !totalMs) return;
+          setIsDragging(true);
+          const { locationX } = evt.nativeEvent;
+          const clampedX = Math.max(
+            0,
+            Math.min(progressTrackWidth.current, locationX)
+          );
+          const ratio = clampedX / progressTrackWidth.current;
+          const newMs = totalMs * ratio;
+          setDragPosition(newMs);
+          dragPositionRef.current = newMs;
+        },
+        onPanResponderMove: (evt) => {
+          if (!progressTrackWidth.current || !totalMs) return;
+          const { locationX } = evt.nativeEvent;
+          const clampedX = Math.max(
+            0,
+            Math.min(progressTrackWidth.current, locationX)
+          );
+          const ratio = clampedX / progressTrackWidth.current;
+          const newMs = totalMs * ratio;
+          setDragPosition(newMs);
+          dragPositionRef.current = newMs;
+        },
+        onPanResponderRelease: () => {
+          setIsDragging(false);
+          const finalMs = dragPositionRef.current;
+          if (finalMs != null && prayer) {
+            onSeek(prayer, finalMs);
+            Haptics.selectionAsync();
+            onSeekCompleteCooldown();
+          }
+          setDragPosition(null);
+          dragPositionRef.current = null;
+        },
+      }),
+    [totalMs, prayer]
+  );
+
+  if (!prayer) return null;
 
   return (
     <Modal
@@ -99,9 +190,14 @@ const PrayerEntryModal: React.FC<Props> = ({
       presentationStyle="overFullScreen"
       onRequestClose={onClose}
     >
-      {/* ===== Backdrop ===== */}
+      {/* ===== Backdrop + card ===== */}
       <View style={styles.backdrop}>
-        {/* ===== Card container ===== */}
+        {/* Tap outside card to close */}
+        <TouchableWithoutFeedback onPress={onClose}>
+          <View style={StyleSheet.absoluteFillObject} />
+        </TouchableWithoutFeedback>
+
+        {/* Card */}
         <SafeAreaView
           style={[
             styles.cardContainer,
@@ -129,37 +225,6 @@ const PrayerEntryModal: React.FC<Props> = ({
             </View>
 
             <View style={styles.headerActions}>
-              {/* Bookmark */}
-              {onToggleBookmark && (
-                <TouchableOpacity
-                  onPress={() => onToggleBookmark(prayer.id)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  style={{ marginRight: 12 }}
-                >
-                  <Ionicons
-                    name={
-                      prayer.is_bookmarked ? "heart" : "heart-outline"
-                    }
-                    size={22}
-                    color={colors.accent}
-                  />
-                </TouchableOpacity>
-              )}
-
-              {/* Delete */}
-              {onDeletePrayer && (
-                <TouchableOpacity
-                  onPress={() => onDeletePrayer(prayer)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  style={{ marginRight: 12 }}
-                >
-                  <Ionicons
-                    name="trash-outline"
-                    size={20}
-                    color={colors.textSecondary}
-                  />
-                </TouchableOpacity>
-              )}
 
               {/* Close */}
               <TouchableOpacity
@@ -177,105 +242,185 @@ const PrayerEntryModal: React.FC<Props> = ({
 
           {/* ===== Body ===== */}
           <View style={styles.body}>
-            {/* --- Audio block (big play button + progress) --- */}
-            <View
-              style={[
-                styles.audioCard,
-                { backgroundColor: colors.card },
-              ]}
-            >
-              {/* Play button */}
-              <TouchableOpacity
+            <View>
+              {/* --- Audio block (big play button + progress) --- */}
+              <View
                 style={[
-                  styles.bigPlayButton,
-                  { backgroundColor: colors.accent + "30" },
+                  styles.audioCard,
+                  { backgroundColor: colors.card },
                 ]}
-                onPress={() => onPlayPause(prayer)}
-                disabled={isLoadingAudio}
               >
-                {isLoadingAudio ? (
-                  <Ionicons
-                    name="ellipse-outline"
-                    size={32}
-                    color={colors.accent}
-                  />
-                ) : (
-                  <Ionicons
-                    name={isPlaying ? "pause" : "play"}
-                    size={32}
-                    color={colors.accent}
-                  />
-                )}
-              </TouchableOpacity>
-
-              {/* Progress + times */}
-              <View style={styles.audioRight}>
-                {/* Progress bar */}
-                <View
+                {/* Play button */}
+                <TouchableOpacity
                   style={[
-                    styles.progressTrack,
-                    { backgroundColor: colors.textSecondary + "22" },
+                    styles.bigPlayButton,
+                    { backgroundColor: colors.accent + "30" },
                   ]}
+                  onPress={() => onPlayPause(prayer)}
+                  disabled={isLoadingAudio}
                 >
-                  <View
-                    style={[
-                      styles.progressFill,
-                      {
-                        backgroundColor: colors.accent,
-                        width: `${progress * 100}%`,
-                      },
-                    ]}
-                  />
-                </View>
+                  {isLoadingAudio ? (
+                    <Ionicons
+                      name="ellipse-outline"
+                      size={32}
+                      color={colors.accent}
+                    />
+                  ) : (
+                    <Ionicons
+                      name={isPlaying ? "pause" : "play"}
+                      size={32}
+                      color={colors.accent}
+                    />
+                  )}
+                </TouchableOpacity>
 
-                {/* Times */}
-                <View style={styles.timesRow}>
-                  <Text
+                {/* Progress + times */}
+                <View style={styles.audioRight}>
+                  {/* Progress bar */}
+                  <View
+                    {...panResponder.panHandlers}
+                    onLayout={(e) => {
+                      progressTrackWidth.current = e.nativeEvent.layout.width;
+                    }}
                     style={[
-                      styles.timeLabel,
-                      { color: colors.textSecondary },
+                      styles.progressTrack,
+                      { backgroundColor: colors.textSecondary + "22" },
                     ]}
                   >
-                    {isPlaying
-                      ? formatMsToClock(playbackPositionMs)
-                      : "0:00"}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.timeLabel,
-                      { color: colors.textSecondary },
-                    ]}
+                    <View
+                      style={[
+                        styles.progressFill,
+                        {
+                          backgroundColor: colors.accent,
+                          width: `${progress * 100}%`,
+                        },
+                      ]}
+                    />
+                    {/* Small scrub handle (Spotify-style) */}
+                    <View
+                      style={[
+                        styles.scrubHitbox,
+                        {
+                          left:
+                            progressTrackWidth.current > 0
+                              ? progressTrackWidth.current * progress - 16
+                              : 0,
+                        },
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.scrubHandle,
+                          {
+                            backgroundColor: colors.accent,
+                            shadowColor: "#000",
+                            shadowOpacity: 0.15,
+                            shadowRadius: 4,
+                            shadowOffset: { width: 0, height: 2 },
+                            transform: [{ scale: isDragging ? 1.1 : 1 }],
+                          },
+                        ]}
+                      />
+                    </View>
+                  </View>
+
+                  {/* Times */}
+                  <View style={styles.timesRow}>
+                    <Text
+                      style={[
+                        styles.timeLabel,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      {formatMsToClock(effectivePositionMs)}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.timeLabel,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      {formatMsToClock(totalMs)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* --- Transcript label --- */}
+              {!!prayer.transcript_text && (
+                <>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
                   >
-                    {formatMsToClock(totalMs)}
-                  </Text>
+                    <Text
+                      style={[
+                        styles.transcriptLabel,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      TRANSCRIPT
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => onToggleBookmark(prayer.id)}
+                    >
+                      <Ionicons
+                        name={
+                          prayer.is_bookmarked ? "heart" : "heart-outline"
+                        }
+                        size={22}
+                        color={colors.accent}
+                      />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Full transcript */}
+                  <ScrollView
+                    style={{ maxHeight: 250 }}
+                    nestedScrollEnabled={true}
+                    showsVerticalScrollIndicator={false}
+                  >
+                    <Text
+                      style={[
+                        styles.transcriptBody,
+                        { color: colors.textPrimary },
+                      ]}
+                    >
+                      {prayer.transcript_text}
+                    </Text>
+                  </ScrollView>
+                </>
+              )}
+            </View>
+
+            <TouchableOpacity
+              onPress={() => setShowDeleteConfirm(true)}
+              style={{ alignSelf: "flex-end", marginTop: spacing.lg }}
+            >
+              <Ionicons name="trash-outline" size={22} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+
+          {showDeleteConfirm && (
+            <View style={styles.confirmOverlay}>
+              <View style={[styles.confirmBox, { backgroundColor: colors.card }]}>
+                <Text style={[styles.confirmText, { color: colors.textPrimary }]}>
+                  Are you sure you want to delete this prayer entry?
+                </Text>
+                <View style={styles.confirmButtons}>
+                  <TouchableOpacity onPress={() => setShowDeleteConfirm(false)}>
+                    <Text style={[styles.cancelBtn, { color: colors.textSecondary }]}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => { setShowDeleteConfirm(false); onDeletePrayer(prayer); }}>
+                    <Text style={[styles.deleteBtn, { color: colors.accent }]}>Delete</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             </View>
-
-            {/* --- Transcript label --- */}
-            {!!prayer.transcript_text && (
-              <>
-                <Text
-                  style={[
-                    styles.transcriptLabel,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  TRANSCRIPT
-                </Text>
-
-                {/* Full transcript */}
-                <Text
-                  style={[
-                    styles.transcriptBody,
-                    { color: colors.textPrimary },
-                  ]}
-                >
-                  {prayer.transcript_text}
-                </Text>
-              </>
-            )}
-          </View>
+          )}
         </SafeAreaView>
       </View>
     </Modal>
@@ -295,6 +440,7 @@ const styles = StyleSheet.create({
   cardContainer: {
     borderRadius: 24,
     overflow: "hidden",
+    maxHeight: "85%",
   },
 
   // Header row
@@ -346,14 +492,30 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   progressTrack: {
-    height: 4,
+    height: 8, // increased for better touch target
     borderRadius: 999,
     overflow: "hidden",
     marginBottom: spacing.xs,
+    position: "relative",
   },
   progressFill: {
     height: "100%",
     borderRadius: 999,
+  },
+  scrubHandle: {
+    position: "absolute",
+    top: -3, // centers the 14px circle on the 8px track
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+  },
+  scrubHitbox: {
+    position: "absolute",
+    top: -12,
+    width: 32,
+    height: 32,
+    justifyContent: "center",
+    alignItems: "center",
   },
   timesRow: {
     flexDirection: "row",
@@ -375,6 +537,36 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     fontSize: 14,
     lineHeight: 22,
+  },
+
+  confirmOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  confirmBox: {
+    padding: spacing.lg,
+    borderRadius: 16,
+    width: "80%",
+  },
+  confirmText: {
+    fontFamily: fonts.body,
+    fontSize: 15,
+    marginBottom: spacing.md,
+  },
+  confirmButtons: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: spacing.lg,
+  },
+  cancelBtn: {
+    fontFamily: fonts.body,
+    fontSize: 15,
+  },
+  deleteBtn: {
+    fontFamily: fonts.heading,
+    fontSize: 15,
   },
 });
 

@@ -74,13 +74,12 @@ serve(async (req: Request): Promise<Response> => {
       rangeStart = startOfMonth();
       rangeEnd = endOfMonth();
 
-      const isLastDay =
-        today.toDateString() === endOfMonth().toDateString();
+     // ✅ Only run on the 1st of the month
       const isFirstDay = today.getDate() === 1;
 
-      if (!isLastDay && !isFirstDay) {
+      if (!isFirstDay) {
         return new Response(
-          JSON.stringify({ skipped: "Not end/start of month" }),
+          JSON.stringify({ skipped: "Not first day of month" }),
           { status: 200 }
         );
       }
@@ -94,15 +93,26 @@ serve(async (req: Request): Promise<Response> => {
       .select("id")
       .eq("user_id", user_id)
       .eq("type", type)
-      .gte("created_at", rangeStart.toISOString())
-      .lte("created_at", rangeEnd.toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
-
-    if (existing) {
-      return new Response(
-        JSON.stringify({ skipped: "Reflection already exists" }),
-        { status: 200 }
-      );
+    
+    if (lastErr) {
+      console.error("Error checking existing reflections:", lastErr);
+    }
+    
+    if (lastReflection) {
+      const lastCreated = new Date(lastReflection.created_at);
+    
+      // If the latest reflection already falls inside this week's/month's range, skip
+      if (lastCreated >= rangeStart && lastCreated <= rangeEnd) {
+        return new Response(
+          JSON.stringify({
+            skipped: "Reflection already exists for this period",
+          }),
+          { status: 200 }
+        );
+      }
     }
 
     // -----------------------------------------------------

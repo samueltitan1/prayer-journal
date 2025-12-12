@@ -196,65 +196,70 @@ const PrayerDayModal: React.FC<Props> = ({
               >
                 {/* Content */}
                 <View style={{ flex: 1 }}>
-                  <View style={styles.prayerHeaderRow}>
-                    <Text
-                      style={[
-                        styles.prayerTime,
-                        { color: colors.textPrimary },
-                      ]}
-                    >
-                      {new Date(p.prayed_at).toLocaleTimeString("en-GB", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}{" "}
-                      • {formatDuration(p.duration_seconds)}
-                    </Text>
-          
-                    {/* Bookmark icon */}
-                    <TouchableOpacity
-                      onPress={(e) => 
-                        {e.stopPropagation();
-                        toggleBookmark(p.id)}}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      style={{ marginRight: 14 }}
-                    >
-                      <Ionicons
-                        name={p.is_bookmarked ? "heart" : "heart-outline"}
-                        size={20}
-                        color={colors.accent}
-                      />
-                    </TouchableOpacity>
-          
-                    {/* Delete icon */}
-                    <TouchableOpacity
-                      onPress={(e) => 
-                        {e.stopPropagation();
-                        handleDeletePrayer(p)}}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Ionicons
-                        name="trash-outline"
-                        size={18}
-                        color={colors.textSecondary}
-                      />
-                    </TouchableOpacity>
-                  </View>
-          
-                  {/* Transcript (collapsible) */}
+                  {/* Transcript (collapsible) with inline bookmark */}
                   {p.transcript_text && (
-                    <View style={{ marginTop: spacing.sm }}>
-                      <Text
-                        style={[
-                          styles.prayerText,
-                          { color: colors.textSecondary },
-                        ]}
-                        numberOfLines={isExpanded ? undefined : 2}
+                    <View style={{ flexDirection: "row", marginTop: spacing.sm }}>
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[
+                            styles.prayerText,
+                            { color: colors.textPrimary },
+                          ]}
+                          numberOfLines={isExpanded ? undefined : 2}
+                        >
+                          {p.transcript_text}
+                        </Text>
+                      </View>
+
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          toggleBookmark(p.id);
+                        }}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        style={{ marginLeft: spacing.sm, alignSelf: "center" }}
                       >
-                        {p.transcript_text}
-                      </Text>
+                        <Ionicons
+                          name={p.is_bookmarked ? "heart" : "heart-outline"}
+                          size={22}
+                          color={colors.accent}
+                        />
+                      </TouchableOpacity>
                     </View>
                   )}
                 </View>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    marginTop: spacing.sm,
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.prayerMeta,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {new Date(p.prayed_at)
+                      .toLocaleTimeString("en-GB", {
+                        hour: "numeric",
+                        minute: "2-digit",
+                        hour12: true,
+                      })
+                      .toUpperCase()}
+                  </Text>
+
+                  <Text
+                    style={[
+                      styles.prayerMeta,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {formatDuration(p.duration_seconds)}
+                  </Text>
+                </View>
+          
               </TouchableOpacity>
             );
           })
@@ -394,6 +399,7 @@ const styles = StyleSheet.create({
   playbackMeta: {
     marginBottom: spacing.xs,
   },
+  prayerMeta: { fontFamily: fonts.body, fontSize: 11, lineHeight: 18 },
 });
 
 export default PrayerDayModal;

@@ -1,6 +1,7 @@
 // app/(tabs)/journal/index.tsx
 
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
 import { useRouter } from "expo-router";
 import React, {
@@ -30,6 +31,7 @@ import Calendar from "@/components/journal/Calendar";
 import MilestoneModal from "@/components/journal/MilestoneModal";
 import PrayerDayModal from "@/components/journal/PrayerDayOverlay";
 import PrayerEntryModal from "@/components/journal/PrayerEntryModal";
+import ReflectionModal from "@/components/journal/ReflectionModal";
 import ReminderBanner from "@/components/ReminderBanner";
 import ShimmerCard from "@/components/ShimmerCard";
 import { useAuth } from "@/contexts/AuthProvider";
@@ -85,11 +87,18 @@ const triggerReflection = async (
   type: "weekly" | "monthly"
 ) => {
   try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const accessToken = session?.access_token;
     const res = await fetch(
       `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generate_reflection`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({ user_id: userId, type }),
       }
     );
@@ -145,6 +154,10 @@ export default function JournalScreen() {
   const [useSpeaker, setUseSpeaker] = useState(true);
   const onToggleSpeaker = () => setUseSpeaker((prev) => !prev);
   const soundRef = useRef<Audio.Sound | null>(null);
+  const milestoneCheckRef = useRef(false);
+  const ignorePlaybackUntil = useRef(0); // prevent snapback glitch after dragging
+
+  const todayKey = () => new Date().toISOString().slice(0, 10);
 
   
   const [showReflectionBadge, setShowReflectionBadge] = useState<"weekly" | "monthly" | null>(null);
@@ -157,6 +170,9 @@ export default function JournalScreen() {
 // Milestone state
 const [milestoneModalVisible, setMilestoneModalVisible] = useState(false);
 const [unlockedMilestone, setUnlockedMilestone] = useState<MilestoneConfig | null>(null);
+// ---- Full reflection modal (weekly/monthly) ----
+const [reflectionModalVisible, setReflectionModalVisible] = useState(false);
+const [activeReflection, setActiveReflection] = useState<Reflection | null>(null);
 
 // ---- Bookmarked prayers state ----
 const [bookmarkedPrayers, setBookmarkedPrayers] = useState<Prayer[]>([]);
@@ -252,10 +268,15 @@ const [locallyUnbookmarkedIds, setLocallyUnbookmarkedIds] = useState<string[]>([
       setLoadingPrayers(true);
 
       try {
+        const monthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).toISOString();
+        const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0, 23, 59, 59).toISOString();
+
         const { data: rows, error } = await supabase
           .from("prayers")
           .select("*")
           .eq("user_id", userId)
+          .gte("prayed_at", monthStart)
+          .lte("prayed_at", monthEnd)
           .order("prayed_at", { ascending: false });
 
         if (error) {
@@ -308,7 +329,7 @@ const [locallyUnbookmarkedIds, setLocallyUnbookmarkedIds] = useState<string[]>([
     };
 
     fetchMonthPrayers();
-  }, [userId, refreshKey]);
+  }, [userId, refreshKey, currentMonth]);
 
   // ---- Supabase realtime: instant INSERT / UPDATE / DELETE -------------
 
@@ -443,6 +464,11 @@ const [locallyUnbookmarkedIds, setLocallyUnbookmarkedIds] = useState<string[]>([
   }, [userId]);
 
   // ---- Reflections ----------------------------------------------------
+  // ---- Reflection generation (separate effect to avoid loops) ----
+  useEffect(() => {
+    if (!userId) return;
+    checkReflectionGeneration(); // run generation logic separately
+  }, [userId, allPrayers]);
 
   // ---- Check if weekly + monthly reflections should be generated ----
   const checkReflectionGeneration = async () => {
@@ -469,7 +495,7 @@ const [locallyUnbookmarkedIds, setLocallyUnbookmarkedIds] = useState<string[]>([
     }
 
     // ------- MONTHLY LOGIC -------
-    if (day === lastDayOfMonth) {
+    if (day === 1) {
       const prayersThisMonth = allPrayers.filter((p) => {
         const d = new Date(p.prayed_at);
         return d.getMonth() === today.getMonth();
@@ -489,9 +515,6 @@ const [locallyUnbookmarkedIds, setLocallyUnbookmarkedIds] = useState<string[]>([
       setLoadingReflections(true);
       
       try {
-        // 🔥 Step 1 — check if we should generate weekly/monthly reflections
-        await checkReflectionGeneration();
-  
         // fetch weekly reflections
         const { data: weekly } = await supabase
           .from("reflections")
@@ -544,7 +567,7 @@ const [locallyUnbookmarkedIds, setLocallyUnbookmarkedIds] = useState<string[]>([
     };
   
     fetchReflections();
-  }, [userId, allPrayers, lastReflectionSeen]); // 🔥 listen for new prayers
+  }, [userId, allPrayers]); // 🔥 listen for new prayers
 
 // ---- Fetch bookmarked prayers ----
 useEffect(() => {
@@ -585,40 +608,81 @@ useEffect(() => {
     return set;
   }, [prayers]);
 
-  const daysPrayedThisMonth = daysWithPrayer.size;
+  const daysPrayedThisMonth = useMemo(() => {
+    const set = new Set<string>();
+    const month = currentMonth.getMonth();
+    const year = currentMonth.getFullYear();
+
+    prayers.forEach((p) => {
+      const d = new Date(p.prayed_at);
+      if (d.getMonth() === month && d.getFullYear() === year) {
+        set.add(p.prayed_at.slice(0, 10));
+      }
+    });
+
+    return set.size;
+  }, [prayers, currentMonth]);
 
   const currentStreak = useMemo(() => {
     if (!userId) return 0;
-
-    // If zero prayers loaded yet, streak is 0
     if (allPrayers.length === 0) return 0;
 
-    // Use ALL unique prayer days
-    const allDates = Array.from(
+    // Build unique sorted date list
+    const uniqueDates = Array.from(
       new Set(allPrayers.map((p) => p.prayed_at.slice(0, 10)))
-    );
+    ).sort().reverse(); // newest → oldest
 
-    let streak = 0;
-    let day = new Date();
+    const today = new Date();
+    const todayStr = formatDateKey(today);
 
-    while (true) {
-      const key = formatDateKey(day);
-      if (allDates.includes(key)) {
-        streak++;
-        day.setDate(day.getDate() - 1);
-      } else {
-        break;
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+    const yesterdayStr = formatDateKey(yesterday);
+
+    const lastDate = uniqueDates[0];
+
+    // Helper to count consecutive days backwards starting from a date
+    const countConsecutive = (startDate: Date) => {
+      let count = 0;
+      let d = new Date(startDate);
+
+      while (true) {
+        const key = formatDateKey(d);
+        if (uniqueDates.includes(key)) {
+          count++;
+          d.setDate(d.getDate() - 1);
+        } else {
+          break;
+        }
       }
+      return count;
+    };
+
+    // Case 1 — streak includes today
+    if (lastDate === todayStr) {
+      return countConsecutive(today);
     }
 
-    return streak;
-  }, [allPrayers, userId])
+    // Case 2 — today not prayed yet, but yesterday continues the streak
+    if (lastDate === yesterdayStr) {
+      return countConsecutive(yesterday);
+    }
+
+    // Else — no streak
+    return 0;
+  }, [allPrayers, userId]);
   
   // ---- Milestone detection ----
   useEffect(() => {
     if (!userId) return;
+    if (milestoneCheckRef.current) return;
+    milestoneCheckRef.current = true;
 
     const checkMilestones = async () => {
+      // Only check once per day
+      const lastCheck = await AsyncStorage.getItem("milestone_check_date");
+      const today = todayKey();
+      if (lastCheck === today) return;
       try {
         // 1. Fetch user's unlocked milestones from supabase
         const { data: unlockedRows, error } = await supabase
@@ -638,7 +702,10 @@ useEffect(() => {
           (m) => currentStreak >= m.requiredStreak && !unlockedIds.has(m.key)
         );
 
-        if (!newlyUnlocked) return;
+        if (!newlyUnlocked) {
+          await AsyncStorage.setItem("milestone_check_date", today);
+          return;
+        }
 
         // 3. Insert into milestones_unlocked table
         const { error: insertErr } = await supabase
@@ -646,10 +713,12 @@ useEffect(() => {
           .insert({
             user_id: userId,
             milestone_key: newlyUnlocked.key,
+            streak_at_unlock: currentStreak,
           });
 
         if (insertErr) {
           console.warn("Failed to unlock milestone:", insertErr.message);
+          await AsyncStorage.setItem("milestone_check_date", today);
           return;
         }
 
@@ -657,13 +726,14 @@ useEffect(() => {
         setUnlockedMilestone(newlyUnlocked);
         setMilestoneModalVisible(true);
 
-    } catch (err) {
-      console.warn("Unexpected milestone error:", err);
-    }
-  };
+        await AsyncStorage.setItem("milestone_check_date", today);
+      } catch (err) {
+        console.warn("Unexpected milestone error:", err);
+      }
+    };
 
-  checkMilestones();
-}, [currentStreak, userId]);
+    checkMilestones();
+  }, [userId]);
 
   const prayersForSelectedDate = useMemo(() => {
     if (!selectedDateKey) return [];
@@ -744,6 +814,11 @@ useEffect(() => {
       sound.setOnPlaybackStatusUpdate((playbackStatus) => {
         if (!playbackStatus.isLoaded) return;
 
+        // Prevent snapback: ignore old playback events after a manual seek
+        if (Date.now() < ignorePlaybackUntil.current) {
+          return;
+        }
+
         if (playbackStatus.positionMillis != null) {
           setPlaybackPosition(playbackStatus.positionMillis);
         }
@@ -763,6 +838,22 @@ useEffect(() => {
       console.warn("Audio playback error:", err);
       setLoadingAudioId(null);
       setPlayingId(null);
+    }
+  };
+
+  // ---- Seek audio manually (used by PrayerEntryModal) ----
+  const handleSeek = async (prayer: Prayer, positionMs: number) => {
+    try {
+      if (!soundRef.current) {
+        console.log("Seek attempted but no sound loaded");
+        return;
+      }
+      // Block AVFoundation stale callbacks for 250ms
+      ignorePlaybackUntil.current = Date.now() + 250;
+      await soundRef.current.setPositionAsync(positionMs);
+      setPlaybackPosition(positionMs);
+    } catch (err) {
+      console.log("Seek error:", err);
     }
   };
 
@@ -907,6 +998,54 @@ const handleSelectPrayer = (p: Prayer) => {
   setPrayerEntryVisible(true);
 
 };
+
+// Open full reflection modal
+const openReflection = (reflection: Reflection) => {
+  setActiveReflection(reflection);
+  setReflectionModalVisible(true);
+};
+
+// Close full reflection modal
+const closeReflection = () => {
+  setReflectionModalVisible(false);
+  setActiveReflection(null);
+};
+
+  // ---- Open milestones modal (lifetime-based) ----
+  const openMilestones = async () => {
+    if (!userId) return;
+
+    try {
+      // Fetch lifetime unlocked milestones
+      const { data, error } = await supabase
+        .from("milestones_unlocked")
+        .select("milestone_key, streak_at_unlock")
+        .eq("user_id", userId)
+        .order("streak_at_unlock", { ascending: false });
+
+      if (error) {
+        console.warn("Failed to fetch unlocked milestones:", error.message);
+      }
+
+      let highest: MilestoneConfig | null = null;
+
+      if (data && data.length > 0) {
+        const key = data[0].milestone_key;
+        highest = MILESTONES.find((m) => m.key === key) || null;
+      }
+
+      // Fallback: if no milestones have been unlocked yet, still show the first milestone
+      if (!highest && MILESTONES.length > 0) {
+        highest = MILESTONES[0];
+      }
+
+      setUnlockedMilestone(highest);
+      setMilestoneModalVisible(true);
+    } catch (err) {
+      console.warn("Unexpected milestone fetch error:", err);
+    }
+  };
+
   // ---- Handlers for calendar & modal ---------------------------------
 
   const handleMonthChange = (nextMonth: Date) => {
@@ -978,14 +1117,11 @@ const handleSelectPrayer = (p: Prayer) => {
                     { color: colors.textSecondary },
                   ]}
                 >
-                  You’ve prayed {daysPrayedThisMonth} days this month
+                  You’ve journaled {daysPrayedThisMonth} days this month
                 </Text>
               </View>
               <TouchableOpacity
-                onPress={() => {
-                  // Open the milestone modal manually
-                  setMilestoneModalVisible(true);
-                }}
+                onPress={openMilestones}
                 style={[
                   styles.streakChip,
                   { backgroundColor: colors.accent + "20" },
@@ -1030,7 +1166,9 @@ const handleSelectPrayer = (p: Prayer) => {
             {loadingReflections ? (
               <ShimmerCard height={110} />
             ) : weeklyReflection ? (
-              <View
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => openReflection(weeklyReflection)}
                 style={[
                   styles.reflectionCard,
                   { backgroundColor: colors.card },
@@ -1071,7 +1209,7 @@ const handleSelectPrayer = (p: Prayer) => {
                     {weeklyReflection.verse_text}
                   </Text>
                 )}
-              </View>
+              </TouchableOpacity>
             ) : (
               <View style={[styles.emptyCard, { backgroundColor: colors.card }]}>
                 <Ionicons
@@ -1090,7 +1228,7 @@ const handleSelectPrayer = (p: Prayer) => {
             )}
           </View>
 
-          {/* Recent prayers (last 3) */}
+            {/* Recent prayers (last 3) 
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
               Recent prayers
@@ -1136,7 +1274,8 @@ const handleSelectPrayer = (p: Prayer) => {
                       { backgroundColor: colors.card },
                     ]}
                   >
-                    {/* Tap left side to open modal for that prayer */}
+                    */}
+                    {/* Tap left side to open modal for that prayer 
                     <TouchableOpacity
                       style={{ flex: 1 }}
                       onPress={() => {
@@ -1165,8 +1304,8 @@ const handleSelectPrayer = (p: Prayer) => {
                         {dateLabel} • {timeLabel}
                       </Text>
                     </TouchableOpacity>
-
-                    {/* Bookmark icon */}
+*/}
+                    {/* Bookmark icon 
                     <TouchableOpacity
                       onPress={() => toggleBookmark(p.id)}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -1184,75 +1323,8 @@ const handleSelectPrayer = (p: Prayer) => {
                 );
               })
             )}
-          </View>
-
-          {/* Monthly reflection / score-card style */}
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-              Monthly reflection
-            </Text>
-            {loadingReflections ? (
-              <ShimmerCard height={130} />
-            ) : monthlyReflection ? (
-              <View
-                style={[
-                  styles.reflectionCard,
-                  { backgroundColor: colors.card },
-                ]}
-              >
-                <Text
-                  style={[styles.reflectionTitle, { color: colors.textPrimary }]}
-                >
-                  {monthlyReflection.title}
-                </Text>
-
-                {!!monthlyReflection.subtitle && (
-                  <Text
-                    style={[
-                      styles.reflectionSubtitle,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {monthlyReflection.subtitle}
-                  </Text>
-                )}
-
-                <Text
-                  style={[styles.reflectionBody, { color: colors.textSecondary }]}
-                  numberOfLines={4}
-                >
-                  {monthlyReflection.body}
-                </Text>
-
-                {!!monthlyReflection.verse_reference && (
-                  <Text
-                    style={[
-                      styles.reflectionVerse,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {monthlyReflection.verse_reference} —{" "}
-                    {monthlyReflection.verse_text}
-                  </Text>
-                )}
-              </View>
-            ) : (
-              <View style={[styles.emptyCard, { backgroundColor: colors.card }]}>
-                <Ionicons
-                  name="calendar-outline"
-                  size={18}
-                  color={colors.accent}
-                  style={{ marginRight: spacing.sm }}
-                />
-                <Text
-                  style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
-                >
-                  No monthly reflection yet — keep showing up in prayer and
-                  you’ll unlock a monthly summary here.
-                </Text>
-              </View>
-            )}
-          </View>
+          </View> 
+*/}
 
           {/* Bookmarked Prayers */}
           <View style={styles.section}>
@@ -1357,6 +1429,78 @@ const handleSelectPrayer = (p: Prayer) => {
               </>
             )}
           </View>
+
+          {/* Monthly reflection / score-card style */}
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+              Monthly reflection
+            </Text>
+            {loadingReflections ? (
+              <ShimmerCard height={130} />
+            ) : monthlyReflection ? (
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => openReflection(monthlyReflection)}
+                style={[
+                  styles.reflectionCard,
+                  { backgroundColor: colors.card },
+                ]}
+              >
+                <Text
+                  style={[styles.reflectionTitle, { color: colors.textPrimary }]}
+                >
+                  {monthlyReflection.title}
+                </Text>
+
+                {!!monthlyReflection.subtitle && (
+                  <Text
+                    style={[
+                      styles.reflectionSubtitle,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {monthlyReflection.subtitle}
+                  </Text>
+                )}
+
+                <Text
+                  style={[styles.reflectionBody, { color: colors.textSecondary }]}
+                  numberOfLines={4}
+                >
+                  {monthlyReflection.body}
+                </Text>
+
+                {!!monthlyReflection.verse_reference && (
+                  <Text
+                    style={[
+                      styles.reflectionVerse,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    {monthlyReflection.verse_reference} —{" "}
+                    {monthlyReflection.verse_text}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            ) : (
+              <View style={[styles.emptyCard, { backgroundColor: colors.card }]}>
+                <Ionicons
+                  name="calendar-outline"
+                  size={18}
+                  color={colors.accent}
+                  style={{ marginRight: spacing.sm }}
+                />
+                <Text
+                  style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
+                >
+                  No monthly reflection yet — keep showing up in prayer and
+                  you’ll unlock a monthly summary here.
+                </Text>
+              </View>
+            )}
+          </View>
+
+
         </ScrollView>
 
         {/* Reflection Toast stays inside normal layout */}
@@ -1403,12 +1547,18 @@ const handleSelectPrayer = (p: Prayer) => {
         onSelectPrayer={handleSelectPrayer}
         isEntryOpen={prayerEntryVisible}
       />
+      {bookmarksModalVisible && (
+  <View style={styles.bookmarksOverlayRoot}>
+    {/* Sheet */}
+    <View style={styles.bookmarksSheet}></View>
       <BookmarksModal
         visible={bookmarksModalVisible}
         onClose={() => setBookmarksModalVisible(false)}
         userId={userId}
         onSelectPrayer={openPrayerEntry}
       />
+          </View>
+)}
       <PrayerEntryModal
         visible={prayerEntryVisible}
         prayer={selectedPrayer}
@@ -1424,6 +1574,10 @@ const handleSelectPrayer = (p: Prayer) => {
         onToggleBookmark={(id) => toggleBookmark(id)}
         onDeletePrayer={(p) => handleDeletePrayer(p as any)}
         onToggleTranscript={toggleTranscript}
+        onSeek={handleSeek}
+        onSeekCompleteCooldown={() => {
+          ignorePlaybackUntil.current = Date.now() + 250;
+        }}
       />
       <Portal>
         <SettingsModal
@@ -1442,6 +1596,11 @@ const handleSelectPrayer = (p: Prayer) => {
           }}
         />
       </Portal>
+      <ReflectionModal
+        visible={reflectionModalVisible}
+        reflection={activeReflection}
+        onClose={closeReflection}
+      />
     </PortalProvider>
   );
 }
@@ -1624,5 +1783,23 @@ const styles = StyleSheet.create({
   },
   speakerToggle: {
     marginLeft: spacing.sm,
+  },
+
+  bookmarksOverlayRoot: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: "flex-end", // sheet rises from bottom
+    // optional dim:
+    // backgroundColor: "rgba(0,0,0,0.35)",
+  },
+  
+  bookmarksSheet: {
+    height: "10%",          // 👈 this is the “come up higher” bit
+    // borderTopLeftRadius: 24,   // you said ignore radius for now
+    // borderTopRightRadius: 24,
+    overflow: "hidden",
   },
 });

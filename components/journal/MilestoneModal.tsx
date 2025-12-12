@@ -11,6 +11,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 
@@ -48,75 +49,79 @@ export default function MilestoneModal({ visible, milestone, onClose }: Props) {
     }
   }, [visible]);
 
-  if (!milestone) return null;
+  if (!visible || !milestone) return null;
 
   return (
     <Modal transparent visible={visible} animationType="none">
-      <Animated.View
-        style={[
-          styles.backdrop,
-          {
-            backgroundColor: colors.background + "CC",
-            opacity: fadeAnim,
-          },
-        ]}
-      />
-
-      <View style={styles.centerWrapper}>
+      <TouchableWithoutFeedback onPress={onClose}>
         <Animated.View
           style={[
-            styles.card,
-            { backgroundColor: colors.card, transform: [{ scale: scaleAnim }] },
+            styles.backdrop,
+            {
+              backgroundColor: colors.background + "CC",
+              opacity: fadeAnim,
+            },
           ]}
-        >
-          <Ionicons
-            name="trophy-outline"
-            size={40}
-            color={colors.accent}
-            style={{ marginBottom: spacing.md }}
-          />
+        />
+      </TouchableWithoutFeedback>
 
-          <Text style={[styles.title, { color: colors.textPrimary }]}>
-            {milestone.name}
-          </Text>
-
-          <Text
-            style={[styles.streak, { color: colors.accent }]}
-          >{`${milestone.requiredStreak} Days`}</Text>
-
-          {/* Verse */}
-          <View style={{ marginVertical: spacing.md }}>
-            <Text
-              style={[
-                styles.verseRef,
-                { color: colors.textSecondary },
-              ]}
-            >
-              {milestone.verseReference}
-            </Text>
-            <Text
-              style={[
-                styles.verse,
-                { color: colors.textSecondary },
-              ]}
-            >
-              "{milestone.verseText}"
-            </Text>
-          </View>
-
-          {/* Description */}
-          <Text style={[styles.description, { color: colors.textPrimary }]}>
-            {milestone.description}
-          </Text>
-
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: colors.accent }]}
-            onPress={onClose}
+      <TouchableWithoutFeedback onPress={() => {}}>
+        <View style={styles.centerWrapper}>
+          <Animated.View
+            style={[
+              styles.card,
+              { backgroundColor: colors.card, transform: [{ scale: scaleAnim }] },
+            ]}
           >
-            <Text style={[styles.buttonText, { color: "#000" }]}>Continue</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      </View>
+            <Ionicons
+              name="trophy-outline"
+              size={40}
+              color={colors.accent}
+              style={{ marginBottom: spacing.md }}
+            />
+
+            <Text style={[styles.title, { color: colors.textPrimary }]}>
+              {milestone.name}
+            </Text>
+
+            <Text
+              style={[styles.streak, { color: colors.accent }]}
+            >{`${milestone.requiredStreak} Days`}</Text>
+
+            {/* Verse */}
+            <View style={{ marginVertical: spacing.md }}>
+              <Text
+                style={[
+                  styles.verseRef,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                {milestone.verseReference}
+              </Text>
+              <Text
+                style={[
+                  styles.verse,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                "{milestone.verseText}"
+              </Text>
+            </View>
+
+            {/* Description */}
+            <Text style={[styles.description, { color: colors.textPrimary }]}>
+              {milestone.description}
+            </Text>
+
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: colors.accent }]}
+              onPress={onClose}
+            >
+              <Text style={[styles.buttonText, { color: "#000" }]}>Continue</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+      </TouchableWithoutFeedback>
     </Modal>
   );
 }

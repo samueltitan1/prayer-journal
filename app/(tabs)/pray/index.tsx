@@ -46,6 +46,7 @@ export default function PrayScreen() {
   const [draftTranscript, setDraftTranscript] = useState("");
   const [draftDuration, setDraftDuration] = useState<number | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [isBookmarked, setIsBookmarked] = useState(false);
 
   // last reflection Seen
   const [lastReflectionSeen, setLastReflectionSeen] = useState<string | null>(null);
@@ -246,20 +247,33 @@ useEffect(() => {
 
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
-      const status = await recording.getStatusAsync();
       setRecording(null);
 
       if (!uri) throw new Error("No recording URI");
 
-      const durationSeconds = status.durationMillis
-        ? Math.round(status.durationMillis / 1000)
-        : null;
+      // --- FIXED: Always compute accurate duration by reloading file ---
+      let durationSeconds: number | null = null;
+      try {
+        const { sound, status } = await Audio.Sound.createAsync(
+          { uri },
+          { shouldPlay: false }
+        );
+
+        if (status.isLoaded && status.durationMillis) {
+          durationSeconds = Math.round(status.durationMillis / 1000);
+        }
+
+        await sound.unloadAsync();
+      } catch (e) {
+        console.log("Failed to compute duration:", e);
+      }
 
       const transcript = await transcribeAudioWithWhisper(uri);
 
       setDraftAudioUri(uri);
       setDraftDuration(durationSeconds);
       setDraftTranscript(transcript || "");
+      setIsBookmarked(false);
       setShowEditModal(true);
     } catch {
       Alert.alert("Error", "Failed to process prayer.");
@@ -328,7 +342,9 @@ useEffect(() => {
     }
   };
 
-  const handleSavePrayer = async () => {
+  const handleSavePrayer = async (
+    opts?: { isBookmarked?: boolean }
+  ) => {
     if (!userId || !draftAudioUri) {
       return Alert.alert("Error", "Missing recording.");
     }
@@ -339,7 +355,9 @@ useEffect(() => {
       const storagePath = await uploadAudioToSupabase(userId, draftAudioUri);
       if (!storagePath) throw new Error("Upload failed");
 
-      await supabase.from("prayers").insert([
+      const bookmarkToSave = opts?.isBookmarked ?? isBookmarked;
+
+      const { data: insertedPrayer, error: insertError } = await supabase.from("prayers").insert([
         {
           user_id: userId,
           prayed_at: new Date().toISOString(),
@@ -347,9 +365,29 @@ useEffect(() => {
           duration_seconds: draftDuration ?? null,
           audio_path: storagePath,
         },
-      ]);
+      ])
+      .select()
+      .single();
+      if (bookmarkToSave && insertedPrayer?.id) {
+        const { error: bookmarkError } = await supabase
+          .from("bookmarked_prayers")
+          .insert({
+            user_id: userId,
+            prayer_id: insertedPrayer.id,
+          });
 
+        if (bookmarkError) throw bookmarkError;
+      }
+
+      if (insertError) throw insertError;
+
+      // Reset draft state for the next prayer
       setShowEditModal(false);
+      setDraftAudioUri(null);
+      setDraftTranscript("");
+      setDraftDuration(null);
+      setIsBookmarked(false);
+
       setPrayState("saved");
       setShowToast(true);
       setTimeout(() => setShowToast(false), 3000);
@@ -366,6 +404,7 @@ useEffect(() => {
     setDraftTranscript("");
     setDraftDuration(null);
     setPrayState("idle");
+    setIsBookmarked(false);
   };
 
   // Greeting + date
@@ -420,13 +459,13 @@ useEffect(() => {
 
       {/* Greeting */}
       <View style={styles.subHeader}>
-        <Text style={[styles.greeting, { color: colors.textPrimary }]}>
+        {/*<Text style={[styles.greeting, { color: colors.textPrimary }]}>
           {greeting}, Friend
-        </Text>
+        </Text>*/}
         <Text style={[styles.date, { color: colors.textSecondary }]}>
           {today}
         </Text>
-      </View>
+      </View> 
 
       {/* Main */}
       <View style={styles.main}>
@@ -473,7 +512,7 @@ useEffect(() => {
             </View>
           ) : (
             <Text style={[styles.hint, { color: colors.textSecondary }]}>
-              Tap to begin your prayer. Speak from your heart.
+              Tap and begin your prayer.
             </Text>
           )}
         </View>
@@ -562,6 +601,8 @@ useEffect(() => {
         onSave={handleSavePrayer}
         onDiscard={handleDiscardDraft}
         loading={isProcessing}
+        isBookmarked={isBookmarked}
+        onToggleBookmark={() => setIsBookmarked((v) => !v)}
       />
     </SafeAreaView>
   );

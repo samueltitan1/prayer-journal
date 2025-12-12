@@ -8,10 +8,16 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: Platform.OS === "ios",
     shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
 export async function requestNotificationPermissions() {
+  if (Platform.OS === "web") {
+    console.log("Notifications permissions not supported on web; skipping request.");
+    return false;
+  }
   const { status } = await Notifications.getPermissionsAsync();
   if (status !== "granted") {
     const { status: newStatus } = await Notifications.requestPermissionsAsync();
@@ -24,6 +30,10 @@ export async function requestNotificationPermissions() {
  * Schedule a daily notification at a given "HH:mm" time (24h)
  */
 export async function scheduleDailyPrayerNotification(time: string) {
+  if (Platform.OS === "web") {
+    console.log("Notifications not supported on web; skipping scheduleDailyPrayerNotification.");
+    return null;
+  }
   const [hStr, mStr] = time.split(":");
   const hour = parseInt(hStr || "8", 10);
   const minute = parseInt(mStr || "0", 10);
@@ -38,6 +48,7 @@ export async function scheduleDailyPrayerNotification(time: string) {
       sound: Platform.OS === "ios" ? "default" : undefined,
     },
     trigger: {
+      type: "calendar",
       hour,
       minute,
       repeats: true,
@@ -46,5 +57,9 @@ export async function scheduleDailyPrayerNotification(time: string) {
 }
 
 export async function cancelDailyPrayerNotification() {
+  if (Platform.OS === "web") {
+    console.log("Notifications not supported on web; skipping cancelDailyPrayerNotification.");
+    return;
+  }
   await Notifications.cancelAllScheduledNotificationsAsync();
 }

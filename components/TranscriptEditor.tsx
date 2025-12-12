@@ -1,17 +1,19 @@
 // components/TranscriptEditor.tsx
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import React from "react";
 import {
-    ActivityIndicator,
-    Keyboard,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  ActivityIndicator,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import { useTheme } from "../contexts/ThemeContext";
 import { fonts, spacing } from "../theme/theme";
@@ -20,9 +22,11 @@ interface TranscriptEditorProps {
   visible: boolean;
   transcript: string;
   onChangeText: (text: string) => void;
-  onSave: () => void;
+  onSave: (opts?: { isBookmarked?: boolean }) => void;
   onDiscard: () => void;
   loading?: boolean;
+  isBookmarked: boolean;
+  onToggleBookmark: () => void;
 }
 
 export default function TranscriptEditor({
@@ -32,6 +36,8 @@ export default function TranscriptEditor({
   onSave,
   onDiscard,
   loading,
+  isBookmarked,
+  onToggleBookmark,
 }: TranscriptEditorProps) {
   const { colors } = useTheme();
 
@@ -43,9 +49,25 @@ export default function TranscriptEditor({
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={[styles.modal, { backgroundColor: colors.card }]}>
-            <Text style={[styles.title, { color: colors.textPrimary }]}>
-              Review your prayer
-            </Text>
+          <View style={styles.headerRow}>
+              <Text style={[styles.title, { color: colors.textPrimary }]}>
+                Review your prayer
+              </Text>
+
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  onToggleBookmark();
+                }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons
+                  name={isBookmarked ? "heart" : "heart-outline"}
+                  size={22}
+                  color={isBookmarked ? colors.accent : colors.textSecondary}
+                />
+              </TouchableOpacity>
+            </View>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
               You can correct any words before saving.
             </Text>
@@ -81,7 +103,7 @@ export default function TranscriptEditor({
 
               <TouchableOpacity
                 style={[styles.btn, { backgroundColor: colors.accent }]}
-                onPress={onSave}
+                onPress={() => onSave({ isBookmarked })}
                 disabled={loading}
               >
                 {loading ? (
@@ -114,6 +136,11 @@ const styles = StyleSheet.create({
     fontFamily: fonts.heading,
     fontSize: 18,
     marginBottom: 4,
+  },
+  headerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   subtitle: {
     fontFamily: fonts.body,
