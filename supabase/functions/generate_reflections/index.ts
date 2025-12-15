@@ -88,21 +88,21 @@ serve(async (req: Request): Promise<Response> => {
     // -----------------------------------------------------
     // PREVENT DUPLICATE REFLECTIONS
     // -----------------------------------------------------
-    const { data: existing } = await supabase
+    const { data: existing, error } = await supabase
       .from("reflections")
-      .select("id")
+      .select("id, created_at")
       .eq("user_id", user_id)
       .eq("type", type)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
     
-    if (lastErr) {
-      console.error("Error checking existing reflections:", lastErr);
-    }
-    
-    if (lastReflection) {
-      const lastCreated = new Date(lastReflection.created_at);
+      if (error) {
+        console.error("Error checking existing reflections:", error);
+      }
+      
+      if (existing) {
+        const lastCreated = new Date(existing.created_at);
     
       // If the latest reflection already falls inside this week's/month's range, skip
       if (lastCreated >= rangeStart && lastCreated <= rangeEnd) {

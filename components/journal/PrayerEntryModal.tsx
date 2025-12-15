@@ -177,7 +177,7 @@ const PrayerEntryModal: React.FC<Props> = ({
           dragPositionRef.current = null;
         },
       }),
-    [totalMs, prayer]
+      [totalMs, prayer, onSeek, onSeekCompleteCooldown]
   );
 
   if (!prayer) return null;

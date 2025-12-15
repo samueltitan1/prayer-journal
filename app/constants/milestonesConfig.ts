@@ -24,9 +24,9 @@ export const MILESTONES: MilestoneConfig[] = [
     key: "seed_planted",
     name: "Seed Planted",
     requiredStreak: 1,
-    verseReference: "Mark 4:31",
+    verseReference: "Mark 4:31-32",
     verseText:
-      "It is like a mustard seed, which is the smallest of all seeds on earth.",
+      "It is like a mustard seed, which is the smallest of all seeds on earth; but when it is planted, it grows and becomes the largest of all plants and puts out large branches, so that the birds of the air can make nests in its shade.",
     description: "1 day of meeting with God. You're planting seeds.",
   },
   {

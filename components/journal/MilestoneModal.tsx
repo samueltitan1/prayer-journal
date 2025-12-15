@@ -1,4 +1,9 @@
 // components/MilestoneModal.tsx
+// MilestoneToast
+// -----------------
+// This component is a one-time celebratory toast shown ONLY when a milestone
+// is first unlocked. It should NOT be used as a milestone history or timeline.
+// The streak icon will open a separate MilestoneTimelineModal.
 
 import type { MilestoneConfig } from "@/app/constants/milestonesConfig";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -19,9 +24,15 @@ interface Props {
   visible: boolean;
   milestone: MilestoneConfig | null;
   onClose: () => void;
+  onViewTimeline: () => void;
 }
 
-export default function MilestoneModal({ visible, milestone, onClose }: Props) {
+export default function MilestoneToast({
+  visible,
+  milestone,
+  onClose,
+  onViewTimeline,
+}: Props) {
   const { colors } = useTheme();
 
   // Fade animation
@@ -115,7 +126,10 @@ export default function MilestoneModal({ visible, milestone, onClose }: Props) {
 
             <TouchableOpacity
               style={[styles.button, { backgroundColor: colors.accent }]}
-              onPress={onClose}
+              onPress={() => {
+                onClose();
+                onViewTimeline();
+              }}
             >
               <Text style={[styles.buttonText, { color: "#000" }]}>Continue</Text>
             </TouchableOpacity>

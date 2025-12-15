@@ -29,6 +29,7 @@ import { MILESTONES } from "@/app/constants/milestonesConfig";
 import BookmarksModal from "@/components/journal/BookmarksOverlay";
 import Calendar from "@/components/journal/Calendar";
 import MilestoneModal from "@/components/journal/MilestoneModal";
+import MilestoneTimelineModal from "@/components/journal/MilestoneTimelineModal";
 import PrayerDayModal from "@/components/journal/PrayerDayOverlay";
 import PrayerEntryModal from "@/components/journal/PrayerEntryModal";
 import ReflectionModal from "@/components/journal/ReflectionModal";
@@ -170,15 +171,24 @@ export default function JournalScreen() {
 // Milestone state
 const [milestoneModalVisible, setMilestoneModalVisible] = useState(false);
 const [unlockedMilestone, setUnlockedMilestone] = useState<MilestoneConfig | null>(null);
+const [milestoneTimelineVisible, setMilestoneTimelineVisible] = useState(false);
 // ---- Full reflection modal (weekly/monthly) ----
 const [reflectionModalVisible, setReflectionModalVisible] = useState(false);
 const [activeReflection, setActiveReflection] = useState<Reflection | null>(null);
 
 // ---- Bookmarked prayers state ----
-const [bookmarkedPrayers, setBookmarkedPrayers] = useState<Prayer[]>([]);
 const [bookmarksModalVisible, setBookmarksModalVisible] = useState(false);
 const [searchQuery, setSearchQuery] = useState("");
-const [locallyUnbookmarkedIds, setLocallyUnbookmarkedIds] = useState<string[]>([]);
+
+// Derive bookmarks from `allPrayers` so the Journal preview updates instantly
+const bookmarkedPrayers = useMemo(() => {
+  return [...allPrayers]
+    .filter((p) => !!p.is_bookmarked)
+    .sort(
+      (a, b) =>
+        new Date(b.prayed_at).getTime() - new Date(a.prayed_at).getTime()
+    );
+}, [allPrayers]);
 
   // ---- Fetch ALL prayers (for streak + recents) -------------------------
 
@@ -496,9 +506,13 @@ const [locallyUnbookmarkedIds, setLocallyUnbookmarkedIds] = useState<string[]>([
 
     // ------- MONTHLY LOGIC -------
     if (day === 1) {
+      // Calculate previous month and year (handle year rollover for January)
+      const previousMonth = today.getMonth() === 0 ? 11 : today.getMonth() - 1;
+      const previousYear = today.getMonth() === 0 ? today.getFullYear() - 1 : today.getFullYear();
+
       const prayersThisMonth = allPrayers.filter((p) => {
         const d = new Date(p.prayed_at);
-        return d.getMonth() === today.getMonth();
+        return d.getMonth() === previousMonth && d.getFullYear() === previousYear;
       });
 
       if (prayersThisMonth.length >= 4) {
@@ -569,34 +583,6 @@ const [locallyUnbookmarkedIds, setLocallyUnbookmarkedIds] = useState<string[]>([
     fetchReflections();
   }, [userId, allPrayers]); // 🔥 listen for new prayers
 
-// ---- Fetch bookmarked prayers ----
-useEffect(() => {
-  if (!userId) return;
-
-  const fetchBookmarks = async () => {
-    const { data, error } = await supabase
-      .from("bookmarked_prayers")
-      .select("prayer_id, prayers(*)")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.warn("Failed to fetch bookmarks:", error.message);
-      return;
-    }
-
-    // Extract the prayer rows, attach is_bookmarked
-    const mapped: Prayer[] = data
-      ? data.map((row: any) => ({
-        ...(row.prayers as Prayer),
-        is_bookmarked: true,
-      })) : [];
-
-    setBookmarkedPrayers(mapped);
-  };
-
-  fetchBookmarks();
-}, [userId]);
 
   // ---- Derived data ---------------------------------------------------
 
@@ -737,8 +723,13 @@ useEffect(() => {
 
   const prayersForSelectedDate = useMemo(() => {
     if (!selectedDateKey) return [];
-    return prayers.filter((p) => p.prayed_at.startsWith(selectedDateKey));
-  }, [selectedDateKey, prayers]);
+    return prayers
+      .filter((p) => p.prayed_at.startsWith(selectedDateKey))
+      .map((p) => {
+        const full = allPrayers.find((ap) => ap.id === p.id);
+        return full ? full : p;
+      });
+  }, [selectedDateKey, prayers, allPrayers]);
 
   const recentPrayers = useMemo(() => {
     return [...allPrayers]
@@ -960,6 +951,8 @@ useEffect(() => {
             p.id === prayerId ? { ...p, is_bookmarked: false } : p
           )
         );
+        // Keep the Journal "Bookmarked prayers" preview in sync instantly
+        // (preview is derived from allPrayers, so no extra state update needed)
       } else {
         // Add bookmark
         await supabase
@@ -980,6 +973,8 @@ useEffect(() => {
             p.id === prayerId ? { ...p, is_bookmarked: true } : p
           )
         );
+        // Keep the Journal "Bookmarked prayers" preview in sync instantly
+        // (preview is derived from allPrayers, so no extra state update needed)
       }
     } catch (err) {
       console.warn("Bookmark toggle error:", err);
@@ -1121,7 +1116,7 @@ const closeReflection = () => {
                 </Text>
               </View>
               <TouchableOpacity
-                onPress={openMilestones}
+                onPress={() => setMilestoneTimelineVisible(true)}
                 style={[
                   styles.streakChip,
                   { backgroundColor: colors.accent + "20" },
@@ -1594,6 +1589,15 @@ const closeReflection = () => {
             setMilestoneModalVisible(false);
             setUnlockedMilestone(null);
           }}
+          onViewTimeline={() => setMilestoneTimelineVisible(true)}
+        />
+      </Portal>
+      <Portal>
+        <MilestoneTimelineModal
+          visible={milestoneTimelineVisible}
+          currentStreak={currentStreak}
+          unlockedMilestones={[]}
+          onClose={() => setMilestoneTimelineVisible(false)}
         />
       </Portal>
       <ReflectionModal
