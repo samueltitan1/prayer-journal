@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabase } from "@/lib/supabaseClient";
 import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 
@@ -9,7 +9,7 @@ export default function ReminderBanner({ userId }: { userId: string }) {
     const handleExpiry = async () => {
       try {
         // 1️⃣ Mark expired prayers as deleted
-        await supabase
+        await getSupabase()
           .from("prayers")
           .update({ deleted_at: new Date() })
           .eq("is_premium", false)
@@ -19,7 +19,7 @@ export default function ReminderBanner({ userId }: { userId: string }) {
 
         // 2️⃣ Find soon-expiring prayers (7 days)
         const reminderDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-        const { data: soonExpiring } = await supabase
+        const { data: soonExpiring } = await getSupabase()
           .from("prayers")
           .select("id")
           .eq("is_premium", false)
@@ -29,7 +29,7 @@ export default function ReminderBanner({ userId }: { userId: string }) {
 
         if (soonExpiring && soonExpiring.length > 0) {
           // 3️⃣ Update reminder_sent flag
-          await supabase
+          await getSupabase()
             .from("prayers")
             .update({ reminder_sent: true })
             .eq("is_premium", false)

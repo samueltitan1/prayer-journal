@@ -1,5 +1,5 @@
 // contexts/AuthProvider.tsx
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabase } from "@/lib/supabaseClient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { User } from "@supabase/supabase-js";
 import { createContext, ReactNode, useContext, useEffect, useState } from "react";
@@ -23,13 +23,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   useEffect(() => {
     const initSession = async () => {
-      const { data } = await supabase.auth.getSession();
+      const { data } = await getSupabase().auth.getSession();
       setUser(data?.session?.user ?? null);
       setLoading(false);
     };
     initSession();
 
-    const { data: listener } = supabase.auth.onAuthStateChange(
+    const { data: listener } = getSupabase().auth.onAuthStateChange(
       async (_event, session) => {
         if (session) {
           await AsyncStorage.setItem("supabase_session", JSON.stringify(session));

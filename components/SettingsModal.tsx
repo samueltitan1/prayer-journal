@@ -26,7 +26,7 @@ import {
 } from "../lib/notifications";
 
 import { useTheme } from "../contexts/ThemeContext";
-import { supabase } from "../lib/supabaseClient";
+import { getSupabase } from "../lib/supabaseClient";
 import { fonts, spacing } from "../theme/theme";
 
 interface SettingsModalProps {
@@ -166,7 +166,7 @@ export default function SettingsModal({
     openSheet();
 
     const loadSettings = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from("user_settings")
         .select("*")
         .eq("user_id", userId)
@@ -198,7 +198,7 @@ export default function SettingsModal({
   // ==========================
   const updateSetting = async (key: string, value: any) => {
     if (!userId) return;
-    await supabase.from("user_settings").upsert({
+    await getSupabase().from("user_settings").upsert({
       user_id: userId,
       [key]: value,
     });
@@ -276,7 +276,7 @@ export default function SettingsModal({
   };
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    await getSupabase().auth.signOut();
     closeEverything();
   };
 
@@ -287,12 +287,12 @@ export default function SettingsModal({
         text: "Delete",
         style: "destructive",
         onPress: async () => {
-          const { error } = await supabase.rpc("delete_user_and_settings");
+          const { error } = await getSupabase().rpc("delete_user_and_settings");
           if (error) {
             Alert.alert("Error", error.message);
             return;
           }
-          await supabase.auth.signOut();
+          await getSupabase().auth.signOut();
           closeEverything();
         },
       },

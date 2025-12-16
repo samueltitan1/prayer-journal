@@ -1,7 +1,7 @@
 // components/BookmarksOverlay.tsx
 
 import { useTheme } from "@/contexts/ThemeContext";
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabase } from "@/lib/supabaseClient";
 import { fonts, spacing } from "@/theme/theme";
 import { Prayer } from "@/types/Prayer";
 import { Ionicons } from "@expo/vector-icons";
@@ -159,7 +159,7 @@ export default function BookmarksModal({ visible, onClose, userId, onSelectPraye
         setLoading(true);
 
         // 1) Bookmarked prayers
-        const { data, error } = await supabase
+        const { data, error } = await getSupabase()
           .from("bookmarked_prayers")
           .select(`
             id,
@@ -192,7 +192,7 @@ export default function BookmarksModal({ visible, onClose, userId, onSelectPraye
               continue;
             }
 
-            const { data: signed } = await supabase.storage
+            const { data: signed } = await getSupabase().storage
               .from("prayer-audio")
               .createSignedUrl(p.audio_path, 60 * 60 * 24 * 365); // 1 year
 
@@ -210,7 +210,7 @@ export default function BookmarksModal({ visible, onClose, userId, onSelectPraye
         }
 
         // 2) All prayers (for global search), cached once per open
-        const { data: allData, error: allError } = await supabase
+        const { data: allData, error: allError } = await getSupabase()
           .from("prayers")
           .select("*")
           .eq("user_id", userId)
@@ -228,7 +228,7 @@ export default function BookmarksModal({ visible, onClose, userId, onSelectPraye
               continue;
             }
 
-            const { data: signed } = await supabase.storage
+            const { data: signed } = await getSupabase().storage
               .from("prayer-audio")
               .createSignedUrl(p.audio_path, 60 * 60 * 24 * 365);
 
@@ -365,7 +365,7 @@ export default function BookmarksModal({ visible, onClose, userId, onSelectPraye
       setLocallyUnbookmarkedIds((prev) => [...prev, prayerId]);
 
       try {
-        const { error } = await supabase
+        const { error } = await getSupabase()
           .from("bookmarked_prayers")
           .delete()
           .eq("user_id", userId)

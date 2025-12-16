@@ -40,7 +40,7 @@ import { Prayer } from "@/types/Prayer";
 import { Portal, PortalProvider } from "@gorhom/portal";
 import SettingsModal from "../../../components/SettingsModal";
 import { useTheme } from "../../../contexts/ThemeContext";
-import { supabase } from "../../../lib/supabaseClient";
+import { getSupabase } from "../../../lib/supabaseClient";
 import { fonts, spacing } from "../../../theme/theme";
 // ---- Types -----------------------------------------------------------
 
@@ -90,7 +90,7 @@ const triggerReflection = async (
   try {
     const {
       data: { session },
-    } = await supabase.auth.getSession();
+    } = await getSupabase().auth.getSession();
     const accessToken = session?.access_token;
     const res = await fetch(
       `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generate_reflection`,
@@ -198,7 +198,7 @@ const bookmarkedPrayers = useMemo(() => {
     const fetchAllPrayers = async () => {
       setLoadingAllPrayers(true);
 
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from("prayers")
         .select("*")
         .eq("user_id", userId)
@@ -212,7 +212,7 @@ const bookmarkedPrayers = useMemo(() => {
         
         for (const p of data || []) {
         // Determine bookmark status
-        const { data: bm } = await supabase
+        const { data: bm } = await getSupabase()
         .from("bookmarked_prayers")
         .select("id")
         .eq("user_id", userId)
@@ -227,7 +227,7 @@ const bookmarkedPrayers = useMemo(() => {
             continue;
           }
           // Add signed URL
-          const { data: signed } = await supabase.storage
+          const { data: signed } = await getSupabase().storage
             .from("prayer-audio")
             .createSignedUrl(p.audio_path, 60 * 60 * 24 * 365);
 
@@ -281,7 +281,7 @@ const bookmarkedPrayers = useMemo(() => {
         const monthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).toISOString();
         const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0, 23, 59, 59).toISOString();
 
-        const { data: rows, error } = await supabase
+        const { data: rows, error } = await getSupabase()
           .from("prayers")
           .select("*")
           .eq("user_id", userId)
@@ -303,7 +303,7 @@ const bookmarkedPrayers = useMemo(() => {
             continue;
           }
 
-          const { data: signed } = await supabase.storage
+          const { data: signed } = await getSupabase().storage
             .from("prayer-audio")
             .createSignedUrl(p.audio_path, 60 * 60 * 24 * 365);
 
@@ -346,7 +346,7 @@ const bookmarkedPrayers = useMemo(() => {
   useEffect(() => {
     if (!userId) return;
 
-    const channel = supabase
+    const channel = getSupabase()
       .channel("prayers-journal-sync")
       .on(
         "postgres_changes",
@@ -420,7 +420,7 @@ const bookmarkedPrayers = useMemo(() => {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      getSupabase().removeChannel(channel);
     };
   }, [userId]);
 
@@ -428,7 +428,7 @@ const bookmarkedPrayers = useMemo(() => {
   useEffect(() => {
     if (!userId) return;
 
-    const channel = supabase
+    const channel = getSupabase()
       .channel("bookmarks-sync")
       .on(
         "postgres_changes",
@@ -470,7 +470,7 @@ const bookmarkedPrayers = useMemo(() => {
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { getSupabase().removeChannel(channel); };
   }, [userId]);
 
   // ---- Reflections ----------------------------------------------------
@@ -530,7 +530,7 @@ const bookmarkedPrayers = useMemo(() => {
       
       try {
         // fetch weekly reflections
-        const { data: weekly } = await supabase
+        const { data: weekly } = await getSupabase()
           .from("reflections")
           .select("*")
           .eq("user_id", userId)
@@ -552,7 +552,7 @@ const bookmarkedPrayers = useMemo(() => {
         }    
 
         // fetch monthly reflection
-        const { data: monthly } = await supabase
+        const { data: monthly } = await getSupabase()
           .from("reflections")
           .select("*")
           .eq("user_id", userId)
@@ -671,7 +671,7 @@ const bookmarkedPrayers = useMemo(() => {
       if (lastCheck === today) return;
       try {
         // 1. Fetch user's unlocked milestones from supabase
-        const { data: unlockedRows, error } = await supabase
+        const { data: unlockedRows, error } = await getSupabase()
           .from("milestones_unlocked")
           .select("milestone_key")
           .eq("user_id", userId);
@@ -694,7 +694,7 @@ const bookmarkedPrayers = useMemo(() => {
         }
 
         // 3. Insert into milestones_unlocked table
-        const { error: insertErr } = await supabase
+        const { error: insertErr } = await getSupabase()
           .from("milestones_unlocked")
           .insert({
             user_id: userId,
@@ -875,7 +875,7 @@ const bookmarkedPrayers = useMemo(() => {
           style: "destructive",
           onPress: async () => {
             try {
-              const { error } = await supabase
+              const { error } = await getSupabase()
                 .from("prayers")
                 .delete()
                 .eq("id", p.id);
@@ -886,7 +886,7 @@ const bookmarkedPrayers = useMemo(() => {
               }
 
               if (p.audio_path) {
-                const { error: storageErr } = await supabase.storage
+                const { error: storageErr } = await getSupabase().storage
                   .from("prayer-audio")
                   .remove([p.audio_path]);
 
@@ -926,7 +926,7 @@ const bookmarkedPrayers = useMemo(() => {
 
     try {
       // Check if bookmark exists
-      const { data: existing } = await supabase
+      const { data: existing } = await getSupabase()
         .from("bookmarked_prayers")
         .select("id")
         .eq("user_id", userId)
@@ -935,7 +935,7 @@ const bookmarkedPrayers = useMemo(() => {
 
       if (existing) {
         // Remove bookmark
-        await supabase
+        await getSupabase()
           .from("bookmarked_prayers")
           .delete()
           .eq("id", existing.id);
@@ -955,7 +955,7 @@ const bookmarkedPrayers = useMemo(() => {
         // (preview is derived from allPrayers, so no extra state update needed)
       } else {
         // Add bookmark
-        await supabase
+        await getSupabase()
           .from("bookmarked_prayers")
           .insert({
             user_id: userId,
@@ -1012,7 +1012,7 @@ const closeReflection = () => {
 
     try {
       // Fetch lifetime unlocked milestones
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from("milestones_unlocked")
         .select("milestone_key, streak_at_unlock")
         .eq("user_id", userId)

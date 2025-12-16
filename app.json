@@ -17,7 +17,8 @@
     "ios": {
       "infoPlist": {
         "UIKeyboardDismissModeOnDrag": "YES",
-        "UIKeyboardWillShowNotification": true
+        "UIKeyboardWillShowNotification": true,
+        "ITSAppUsesNonExemptEncryption": false
       },
       "supportsTablet": true,
       "bundleIdentifier": "com.sinaiglobal.prayerjournal",

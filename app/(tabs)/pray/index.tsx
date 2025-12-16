@@ -19,11 +19,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import SettingsModal from "../../../components/SettingsModal";
 import TranscriptEditor from "../../../components/TranscriptEditor";
 import { useTheme } from "../../../contexts/ThemeContext";
-import { supabase } from "../../../lib/supabaseClient";
+import { getSupabase } from "../../../lib/supabaseClient";
 import { fonts, spacing } from "../../../theme/theme";
 
 type PrayState = "idle" | "recording" | "saved";
-const MAX_SECONDS_DEFAULT = 5 * 60;
+const MAX_SECONDS_DEFAULT = 10 * 60;
 
 export default function PrayScreen() {
   const router = useRouter();
@@ -57,7 +57,7 @@ export default function PrayScreen() {
   // Load user ID
   useEffect(() => {
     const getUserId = async () => {
-      const { data } = await supabase.auth.getUser();
+      const { data } = await getSupabase().auth.getUser();
       setUserId(data?.user?.id ?? null);
     };
     getUserId();
@@ -69,7 +69,7 @@ useEffect(() => {
   if (!userId) return;
 
   const loadStreak = async () => {
-    const { data: rows, error } = await supabase
+    const { data: rows, error } = await getSupabase()
       .from("prayers")
       .select("prayed_at")
       .eq("user_id", userId)
@@ -116,7 +116,7 @@ useEffect(() => {
     if (!userId) return;
 
     const fetchSettings = async () => {
-      const { data } = await supabase
+      const { data } = await getSupabase()
         .from("user_settings")
         .select("daily_reminder_enabled")
         .eq("user_id", userId)
@@ -328,7 +328,7 @@ useEffect(() => {
         fileBytes[i] = binary.charCodeAt(i);
       }
 
-      const { data, error } = await supabase.storage
+      const { data, error } = await getSupabase().storage
         .from("prayer-audio")
         .upload(filePath, fileBytes, {
           contentType: `audio/${fileExt}`,
@@ -357,7 +357,7 @@ useEffect(() => {
 
       const bookmarkToSave = opts?.isBookmarked ?? isBookmarked;
 
-      const { data: insertedPrayer, error: insertError } = await supabase.from("prayers").insert([
+      const { data: insertedPrayer, error: insertError } = await getSupabase().from("prayers").insert([
         {
           user_id: userId,
           prayed_at: new Date().toISOString(),
@@ -369,7 +369,7 @@ useEffect(() => {
       .select()
       .single();
       if (bookmarkToSave && insertedPrayer?.id) {
-        const { error: bookmarkError } = await supabase
+        const { error: bookmarkError } = await getSupabase()
           .from("bookmarked_prayers")
           .insert({
             user_id: userId,

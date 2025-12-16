@@ -4,7 +4,7 @@ import {
   requestNotificationPermissions,
   scheduleDailyPrayerNotification,
 } from "@/lib/notifications";
-import { supabase } from "@/lib/supabaseClient";
+import { getSupabase } from "@/lib/supabaseClient";
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { Alert } from "react-native";
 
@@ -43,7 +43,7 @@ export function SettingsProvider({
   /** Load settings from Supabase */
   const refreshSettings = async () => {
     if (!userId) return;
-    const { data, error } = await supabase
+    const { data, error } = await getSupabase()
       .from("user_settings")
       .select("*")
       .eq("user_id", userId)
@@ -65,7 +65,7 @@ export function SettingsProvider({
   const updateSetting = async (key: keyof Settings, value: any) => {
     if (!userId) return;
     setSettings((prev) => ({ ...prev, [key]: value }));
-    await supabase.from("user_settings").upsert({ user_id: userId, [key]: value });
+    await getSupabase().from("user_settings").upsert({ user_id: userId, [key]: value });
   };
 
   /** Load settings on login */
