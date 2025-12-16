@@ -20,7 +20,8 @@
         "UIKeyboardWillShowNotification": true
       },
       "supportsTablet": true,
-      "bundleIdentifier": "com.prayerjournal.app"
+      "bundleIdentifier": "com.sinaiglobal.prayerjournal",
+      "buildNumber": "1.0.0"
     },
     "android": {
       "adaptiveIcon": {

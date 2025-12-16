@@ -46,7 +46,7 @@ export default function SplashScreen() {
             </View>
             <View style={styles.subtitleFrame} data-name="Paragraph" data-node-id="2:812">
               <Text style={styles.subtitle} data-node-id="2:813">
-                Speak. Reflect. Grow.
+                Pray. Reflect. Grow.
               </Text>
             </View>
           </View>

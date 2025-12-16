@@ -24,14 +24,14 @@ export default function Onboarding1() {
         {/* Heading */}
         <View style={styles.headingFrame} data-name="Heading 1" data-node-id="1:11">
           <Text style={styles.heading} data-node-id="1:12">
-            Speak Your Prayers
+            Finally, A Prayer Life That Sticks
           </Text>
         </View>
 
         {/* Description */}
         <View style={styles.paragraphFrame} data-name="Paragraph" data-node-id="1:13">
           <Text style={styles.description} data-node-id="1:14">
-            Let your voice guide your devotion. Record prayers naturally, without typing.
+            Journal without typing or distractions. Building a rhythm of prayer that lasts.
           </Text>
         </View>
       </View>

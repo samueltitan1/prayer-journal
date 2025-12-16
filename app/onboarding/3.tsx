@@ -2,38 +2,40 @@ import { useRouter } from 'expo-router';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../contexts/ThemeContext';
-import { buttons } from '../../theme/theme';
-
 export default function Onboarding3() {
   const router = useRouter();
   const { colors } = useTheme();
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.contentContainer}>
+    <SafeAreaView style={styles.container} data-name="Onboarding/3" data-node-id="1:27">
+      <View style={styles.contentContainer} data-name="Container" data-node-id="1:30">
         {/* Icon Container */}
-        <View style={styles.iconContainerWrapper}>
+        <View style={styles.iconContainerWrapper} data-name="Container" data-node-id="1:31">
           <View style={styles.iconContainer}>
             <Image
-              source={require('../../assets/padlock.png')}
+              source={require('../../assets/plant.png')}
               style={styles.icon}
+              data-name="Icon"
+              data-node-id="1:32"
             />
           </View>
         </View>
 
         {/* Heading */}
-        <View style={styles.headingFrame}>
-          <Text style={styles.heading}>Keep Them Safe</Text>
+        <View style={styles.headingFrame} data-name="Heading 1" data-node-id="1:36">
+          <Text style={styles.heading} data-node-id="1:37">
+            Your Prayers Tell A Story
+          </Text>
         </View>
 
         {/* Description */}
-        <View style={styles.paragraphFrame}>
-          <Text style={styles.description}>
-            Your prayers are private and sacred. Encrypted, secure, and yours alone.
+        <View style={styles.paragraphFrame} data-name="Paragraph" data-node-id="1:38">
+          <Text style={styles.description} data-node-id="1:39">
+            Weekly and Monthly reflections help reveal themes, growth, and God's faithfulness in your journey.
           </Text>
         </View>
       </View>
 
-      {/* Footer Container */}
+        {/* Footer Container */}
       <View style={styles.footerContainer}>
         {/* Pagination Dots */}
         <View style={styles.paginationContainer}>
@@ -42,13 +44,24 @@ export default function Onboarding3() {
           <View style={[styles.dot, styles.dotActive, { marginLeft: 8 }]} />
         </View>
 
-        {/* Begin Journey Button */}
+        {/* Continue Button */}
         <TouchableOpacity
-          style={[buttons.primary, styles.buttonFullWidth]}
-          onPress={() => router.push('/onboarding/reminder')}
+          style={styles.continueButton}
+          onPress={() => router.push('/auth/login')}
+          data-name="Button"
+          data-node-id="1:45"
         >
-          <Text style={styles.continueButton}>Begin My Journey</Text>
+          <Text style={styles.continueButtonText} data-node-id="1:46">
+            Begin My Journey
+          </Text>
+          <Image
+            source={require('../../assets/placeholder.png')}
+            style={styles.continueIcon}
+            data-name="Icon"
+            data-node-id="1:47"
+          />
         </TouchableOpacity>
+
       </View>
     </SafeAreaView>
   );
@@ -118,7 +131,6 @@ const styles = StyleSheet.create({
     paddingBottom: 48,
     width: '100%',
     alignItems: 'center',
-    marginBottom: 48,
   },
   paginationContainer: {
     flexDirection: 'row',
@@ -136,8 +148,29 @@ const styles = StyleSheet.create({
     width: 32,
     backgroundColor: '#E3C67B',
   },
-  buttonFullWidth: {
+  continueButton: {
     width: '100%',
+    height: 48,
+    borderRadius: 9999,
+    backgroundColor: '#E3C67B',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  continueButtonText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#2F2F2F',
+    fontWeight: '500',
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center',
+  },
+  continueIcon: {
+    width: 16,
+    height: 16,
+    resizeMode: 'contain',
+    marginLeft: 8,
   },
 });
 

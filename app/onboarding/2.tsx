@@ -1,42 +1,42 @@
 import { useRouter } from 'expo-router';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useTheme } from '../../contexts/ThemeContext';
+
 export default function Onboarding2() {
   const router = useRouter();
-  const { colors } = useTheme();
+  
   return (
-    <SafeAreaView style={styles.container} data-name="Onboarding/2" data-node-id="1:27">
-      <View style={styles.contentContainer} data-name="Container" data-node-id="1:30">
+    <SafeAreaView style={styles.container} data-name="Onboarding/2" data-node-id="1:2">
+      <View style={styles.contentContainer} data-name="Container" data-node-id="1:5">
         {/* Icon Container */}
-        <View style={styles.iconContainerWrapper} data-name="Container" data-node-id="1:31">
+        <View style={styles.iconContainerWrapper} data-name="Container" data-node-id="1:6">
           <View style={styles.iconContainer}>
             <Image
-              source={require('../../assets/plant.png')}
+              source={require('../../assets/padlock.png')}
               style={styles.icon}
               data-name="Icon"
-              data-node-id="1:32"
+              data-node-id="1:7"
             />
           </View>
         </View>
 
         {/* Heading */}
-        <View style={styles.headingFrame} data-name="Heading 1" data-node-id="1:36">
-          <Text style={styles.heading} data-node-id="1:37">
-            See How You Grow
+        <View style={styles.headingFrame} data-name="Heading 1" data-node-id="1:11">
+        <Text style={styles.heading} data-node-id="1:12">
+          A Sacred Space, Just for You
           </Text>
         </View>
 
         {/* Description */}
-        <View style={styles.paragraphFrame} data-name="Paragraph" data-node-id="1:38">
-          <Text style={styles.description} data-node-id="1:39">
-            Playback and read through your prayer journey with weekly and monthly reflections and summaries.
+        <View style={styles.paragraphFrame} data-name="Paragraph" data-node-id="1:13">
+        <Text style={styles.description} data-node-id="1:14">
+            Your prayers are between you and God. Fully encrypted, completely private, never shared - just a safe place to pray.
           </Text>
         </View>
       </View>
 
       {/* Footer Container */}
-      <View style={styles.footerContainer} data-name="Container" data-node-id="1:40">
+      <View style={styles.footerContainer} data-name="Container" data-node-id="1:15">
         {/* Pagination Dots */}
         <View style={styles.paginationContainer} data-name="Container" data-node-id="1:41">
           <View style={styles.dot} data-name="Button" data-node-id="1:42" />
@@ -49,27 +49,28 @@ export default function Onboarding2() {
           style={styles.continueButton}
           onPress={() => router.push('/onboarding/3')}
           data-name="Button"
-          data-node-id="1:45"
+          data-node-id="1:20"
         >
-          <Text style={styles.continueButtonText} data-node-id="1:46">
+          <Text style={styles.continueButtonText} data-node-id="1:21">
             Continue
           </Text>
           <Image
             source={require('../../assets/placeholder.png')}
             style={styles.continueIcon}
             data-name="Icon"
-            data-node-id="1:47"
+            data-node-id="1:22"
           />
         </TouchableOpacity>
 
-        {/* Skip Button */}
-        <TouchableOpacity
+
+         {/* Skip Button */}
+         <TouchableOpacity
           style={styles.skipButton}
           onPress={() => router.push('/auth/login')}
           data-name="Button"
-          data-node-id="1:49"
+          data-node-id="1:24"
         >
-          <Text style={styles.skipText} data-node-id="1:50">
+          <Text style={styles.skipText} data-node-id="1:25">
             Skip
           </Text>
         </TouchableOpacity>
@@ -158,6 +159,9 @@ const styles = StyleSheet.create({
   dotActive: {
     width: 32,
     backgroundColor: '#E3C67B',
+  },
+  buttonFullWidth: {
+    width: '100%',
   },
   continueButton: {
     width: '100%',
