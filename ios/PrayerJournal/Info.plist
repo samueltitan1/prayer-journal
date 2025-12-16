@@ -28,12 +28,14 @@
         <key>CFBundleURLSchemes</key>
         <array>
           <string>prayer-journal</string>
-          <string>com.prayerjournal.app</string>
+          <string>com.sinaiglobal.prayerjournal</string>
         </array>
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>1.0.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.1</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSAppTransportSecurity</key>
@@ -50,7 +52,7 @@
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>
     </array>
     <key>RCTNewArchEnabled</key>
-    <true/>
+    <false/>
     <key>UIKeyboardDismissModeOnDrag</key>
     <string>YES</string>
     <key>UIKeyboardWillShowNotification</key>
