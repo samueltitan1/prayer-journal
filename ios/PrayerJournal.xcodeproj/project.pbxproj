@@ -8,28 +8,28 @@
 
 /* Begin PBXBuildFile section */
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
-		1F9FFC74FFD7976CC5304E3C /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 2EE5DD9BBB5DC126F10BB6AF /* PrivacyInfo.xcprivacy */; };
-		335ECB9B88657345AA43DEC6 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDD5CD17749C80707CB12542 /* ExpoModulesProvider.swift */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
-		4227D90975488D5626F6F63A /* libPods-PrayerJournal.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 53774A307A6B3D2A0AF26957 /* libPods-PrayerJournal.a */; };
+		B33A5449110E8ADE341CFCE5 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 1FA10C609D9EE1B21ACA7818 /* PrivacyInfo.xcprivacy */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
+		DA1EF54A95935BA261632C48 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 984227107C2C9C1389F1CF9C /* ExpoModulesProvider.swift */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
+		F88B562E674F83B7F301C7BF /* libPods-PrayerJournal.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E3E7CDA40B7E215FEFC3E7D6 /* libPods-PrayerJournal.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		0A1BB73D1A0F6814384B1DBF /* Pods-PrayerJournal.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PrayerJournal.debug.xcconfig"; path = "Target Support Files/Pods-PrayerJournal/Pods-PrayerJournal.debug.xcconfig"; sourceTree = "<group>"; };
+		0ABFE8451836FD5F53D3AED2 /* Pods-PrayerJournal.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PrayerJournal.release.xcconfig"; path = "Target Support Files/Pods-PrayerJournal/Pods-PrayerJournal.release.xcconfig"; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* PrayerJournal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrayerJournal.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = PrayerJournal/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = PrayerJournal/Info.plist; sourceTree = "<group>"; };
-		2EE5DD9BBB5DC126F10BB6AF /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = PrayerJournal/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		53774A307A6B3D2A0AF26957 /* libPods-PrayerJournal.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-PrayerJournal.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		9DDB0A6AD070407A8F08284F /* Pods-PrayerJournal.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PrayerJournal.release.xcconfig"; path = "Target Support Files/Pods-PrayerJournal/Pods-PrayerJournal.release.xcconfig"; sourceTree = "<group>"; };
+		1FA10C609D9EE1B21ACA7818 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = PrayerJournal/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		984227107C2C9C1389F1CF9C /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-PrayerJournal/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = PrayerJournal/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
+		BEC3AA95A4A92D2CB0426032 /* Pods-PrayerJournal.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PrayerJournal.debug.xcconfig"; path = "Target Support Files/Pods-PrayerJournal/Pods-PrayerJournal.debug.xcconfig"; sourceTree = "<group>"; };
+		E3E7CDA40B7E215FEFC3E7D6 /* libPods-PrayerJournal.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-PrayerJournal.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = PrayerJournal/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* PrayerJournal-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "PrayerJournal-Bridging-Header.h"; path = "PrayerJournal/PrayerJournal-Bridging-Header.h"; sourceTree = "<group>"; };
-		FDD5CD17749C80707CB12542 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-PrayerJournal/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -37,7 +37,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4227D90975488D5626F6F63A /* libPods-PrayerJournal.a in Frameworks */,
+				F88B562E674F83B7F301C7BF /* libPods-PrayerJournal.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -53,7 +53,7 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				2EE5DD9BBB5DC126F10BB6AF /* PrivacyInfo.xcprivacy */,
+				1FA10C609D9EE1B21ACA7818 /* PrivacyInfo.xcprivacy */,
 			);
 			name = PrayerJournal;
 			sourceTree = "<group>";
@@ -62,7 +62,7 @@
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				53774A307A6B3D2A0AF26957 /* libPods-PrayerJournal.a */,
+				E3E7CDA40B7E215FEFC3E7D6 /* libPods-PrayerJournal.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -81,8 +81,8 @@
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
-				AC0CEDF2BB218A3AAB2163A5 /* Pods */,
-				FAB1A9FD436513FEE9BA9EB0 /* ExpoModulesProviders */,
+				88DE32AD27C32E5A4EE4E5C3 /* Pods */,
+				AC84ADF6C5EE172879E1B81B /* ExpoModulesProviders */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -97,14 +97,22 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		AC0CEDF2BB218A3AAB2163A5 /* Pods */ = {
+		88DE32AD27C32E5A4EE4E5C3 /* Pods */ = {
 			isa = PBXGroup;
 			children = (
-				0A1BB73D1A0F6814384B1DBF /* Pods-PrayerJournal.debug.xcconfig */,
-				9DDB0A6AD070407A8F08284F /* Pods-PrayerJournal.release.xcconfig */,
+				BEC3AA95A4A92D2CB0426032 /* Pods-PrayerJournal.debug.xcconfig */,
+				0ABFE8451836FD5F53D3AED2 /* Pods-PrayerJournal.release.xcconfig */,
 			);
 			name = Pods;
 			path = Pods;
+			sourceTree = "<group>";
+		};
+		AC84ADF6C5EE172879E1B81B /* ExpoModulesProviders */ = {
+			isa = PBXGroup;
+			children = (
+				C174C339E3660606A76E1E4C /* PrayerJournal */,
+			);
+			name = ExpoModulesProviders;
 			sourceTree = "<group>";
 		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
@@ -116,20 +124,12 @@
 			path = PrayerJournal/Supporting;
 			sourceTree = "<group>";
 		};
-		D8A1068E379AA8C5347AE85D /* PrayerJournal */ = {
+		C174C339E3660606A76E1E4C /* PrayerJournal */ = {
 			isa = PBXGroup;
 			children = (
-				FDD5CD17749C80707CB12542 /* ExpoModulesProvider.swift */,
+				984227107C2C9C1389F1CF9C /* ExpoModulesProvider.swift */,
 			);
 			name = PrayerJournal;
-			sourceTree = "<group>";
-		};
-		FAB1A9FD436513FEE9BA9EB0 /* ExpoModulesProviders */ = {
-			isa = PBXGroup;
-			children = (
-				D8A1068E379AA8C5347AE85D /* PrayerJournal */,
-			);
-			name = ExpoModulesProviders;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -140,13 +140,13 @@
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "PrayerJournal" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
-				D30F97A0187EBE3B9423CD21 /* [Expo] Configure project */,
+				5A58DDD4159D4CEF64C6FC86 /* [Expo] Configure project */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				4B8EBB0561A9194984173759 /* [CP] Embed Pods Frameworks */,
+				69038F1C520134D38CA6E2FA /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
@@ -196,7 +196,7 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				1F9FFC74FFD7976CC5304E3C /* PrivacyInfo.xcprivacy in Resources */,
+				B33A5449110E8ADE341CFCE5 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -242,7 +242,31 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		4B8EBB0561A9194984173759 /* [CP] Embed Pods Frameworks */ = {
+		5A58DDD4159D4CEF64C6FC86 /* [Expo] Configure project */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/.xcode.env",
+				"$(SRCROOT)/.xcode.env.local",
+				"$(SRCROOT)/PrayerJournal/PrayerJournal.entitlements",
+				"$(SRCROOT)/Pods/Target Support Files/Pods-PrayerJournal/expo-configure-project.sh",
+			);
+			name = "[Expo] Configure project";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/Pods/Target Support Files/Pods-PrayerJournal/ExpoModulesProvider.swift",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-PrayerJournal/expo-configure-project.sh\"\n";
+		};
+		69038F1C520134D38CA6E2FA /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -296,30 +320,6 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-PrayerJournal/Pods-PrayerJournal-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		D30F97A0187EBE3B9423CD21 /* [Expo] Configure project */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"$(SRCROOT)/.xcode.env",
-				"$(SRCROOT)/.xcode.env.local",
-				"$(SRCROOT)/PrayerJournal/PrayerJournal.entitlements",
-				"$(SRCROOT)/Pods/Target Support Files/Pods-PrayerJournal/expo-configure-project.sh",
-			);
-			name = "[Expo] Configure project";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(SRCROOT)/Pods/Target Support Files/Pods-PrayerJournal/ExpoModulesProvider.swift",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-PrayerJournal/expo-configure-project.sh\"\n";
-		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -328,7 +328,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
-				335ECB9B88657345AA43DEC6 /* ExpoModulesProvider.swift in Sources */,
+				DA1EF54A95935BA261632C48 /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -337,7 +337,7 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 0A1BB73D1A0F6814384B1DBF /* Pods-PrayerJournal.debug.xcconfig */;
+			baseConfigurationReference = BEC3AA95A4A92D2CB0426032 /* Pods-PrayerJournal.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -373,7 +373,7 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 9DDB0A6AD070407A8F08284F /* Pods-PrayerJournal.release.xcconfig */;
+			baseConfigurationReference = 0ABFE8451836FD5F53D3AED2 /* Pods-PrayerJournal.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;

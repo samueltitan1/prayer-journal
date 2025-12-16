@@ -21,7 +21,8 @@
       },
       "supportsTablet": true,
       "bundleIdentifier": "com.sinaiglobal.prayerjournal",
-      "buildNumber": "1.0.0"
+      "buildNumber": "1.0.0",
+      "deploymentTarget": "15.1"
     },
     "android": {
       "adaptiveIcon": {
