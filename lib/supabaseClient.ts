@@ -2,25 +2,21 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import "react-native-url-polyfill/auto";
 
-let supabaseClient: SupabaseClient | null = null;
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
-export function getSupabase() {
-  if (!supabaseClient) {
-    const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (!url || !anonKey) {
-      throw new Error("Supabase environment variables are missing");
-    }
-
-    supabaseClient = createClient(url, anonKey, {
-      auth: {
-        storage: AsyncStorage,
-        persistSession: true,
-        autoRefreshToken: true,
-      },
-    });
+// ✅ True singleton Supabase client (created once at module load)
+export const supabase: SupabaseClient = createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
+  {
+    auth: {
+      storage: AsyncStorage,
+      persistSession: true,
+      autoRefreshToken: true,
+    },
   }
+);
 
-  return supabaseClient;
-}
+// Backwards compatibility for existing imports
+export const getSupabase = () => supabase;

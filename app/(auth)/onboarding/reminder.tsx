@@ -1,11 +1,11 @@
 import ReminderConfirmationModal from '@/components/ReminderConfirmationModal';
+import { useTheme } from '@/contexts/ThemeContext';
+import { buttons } from '@/theme/theme';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useTheme } from '../../contexts/ThemeContext';
-import { buttons } from '../../theme/theme';
 
 export default function OnboardingReminder() {
   const router = useRouter();
@@ -42,7 +42,7 @@ export default function OnboardingReminder() {
         <View style={styles.iconContainerWrapper}>
           <View style={styles.iconContainer}>
            <Image
-              source={require('../../assets/clock.png')}
+              source={require('@/assets/clock.png')}
               style={styles.icon}
             />
           </View>
@@ -100,13 +100,13 @@ export default function OnboardingReminder() {
         <ReminderConfirmationModal
           visible={modalVisible}
           time={formatTime(selectedTime)}
-          onClose={() => { setModalVisible(false); router.replace('/auth/login') }}
+          onClose={() => { setModalVisible(false); router.replace('/(auth)/login') }}
         />
 
         {/* Skip Link */}
         <TouchableOpacity
           style={styles.skipButton}
-          onPress={() => router.replace('/auth/login')}
+          onPress={() => router.replace('/(auth)/login')}
         >
           <Text style={styles.skipText}>Skip for now</Text>
         </TouchableOpacity>
@@ -218,4 +218,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     textAlign: 'center',
   },
+  continueButton: {},
+  icon: {}
 });

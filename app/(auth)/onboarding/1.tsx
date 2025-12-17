@@ -2,17 +2,18 @@ import { useRouter } from 'expo-router';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-export default function Onboarding2() {
+
+export default function Onboarding1() {
   const router = useRouter();
-  
+
   return (
-    <SafeAreaView style={styles.container} data-name="Onboarding/2" data-node-id="1:2">
+    <SafeAreaView style={styles.container} data-name="Onboarding/1" data-node-id="1:2">
       <View style={styles.contentContainer} data-name="Container" data-node-id="1:5">
         {/* Icon Container */}
         <View style={styles.iconContainerWrapper} data-name="Container" data-node-id="1:6">
           <View style={styles.iconContainer}>
             <Image
-              source={require('../../assets/padlock.png')}
+              source={require('@/assets/microphone.png')}
               style={styles.icon}
               data-name="Icon"
               data-node-id="1:7"
@@ -22,15 +23,15 @@ export default function Onboarding2() {
 
         {/* Heading */}
         <View style={styles.headingFrame} data-name="Heading 1" data-node-id="1:11">
-        <Text style={styles.heading} data-node-id="1:12">
-          A Sacred Space, Just for You
+          <Text style={styles.heading} data-node-id="1:12">
+            Finally, A Prayer Life That Sticks
           </Text>
         </View>
 
         {/* Description */}
         <View style={styles.paragraphFrame} data-name="Paragraph" data-node-id="1:13">
-        <Text style={styles.description} data-node-id="1:14">
-            Your prayers are between you and God. Fully encrypted, completely private, never shared - just a safe place to pray.
+          <Text style={styles.description} data-node-id="1:14">
+            Build a rhythm of prayer that lasts.              No typing. No distractions.
           </Text>
         </View>
       </View>
@@ -38,16 +39,16 @@ export default function Onboarding2() {
       {/* Footer Container */}
       <View style={styles.footerContainer} data-name="Container" data-node-id="1:15">
         {/* Pagination Dots */}
-        <View style={styles.paginationContainer} data-name="Container" data-node-id="1:41">
-          <View style={styles.dot} data-name="Button" data-node-id="1:42" />
-          <View style={[styles.dot, styles.dotActive, { marginLeft: 8 }]} data-name="Button" data-node-id="1:43" />
-          <View style={[styles.dot, { marginLeft: 8 }]} data-name="Button" data-node-id="1:44" />
+        <View style={styles.paginationContainer} data-name="Container" data-node-id="1:16">
+          <View style={[styles.dot, styles.dotActive]} data-name="Button" data-node-id="1:17" />
+          <View style={[styles.dot, { marginLeft: 8 }]} data-name="Button" data-node-id="1:18" />
+          <View style={[styles.dot, { marginLeft: 8 }]} data-name="Button" data-node-id="1:19" />
         </View>
 
         {/* Continue Button */}
         <TouchableOpacity
           style={styles.continueButton}
-          onPress={() => router.push('/onboarding/3')}
+          onPress={() => router.push('/(auth)/onboarding/2')}
           data-name="Button"
           data-node-id="1:20"
         >
@@ -55,18 +56,17 @@ export default function Onboarding2() {
             Continue
           </Text>
           <Image
-            source={require('../../assets/placeholder.png')}
+            source={require('@/assets/placeholder.png')}
             style={styles.continueIcon}
             data-name="Icon"
             data-node-id="1:22"
           />
         </TouchableOpacity>
 
-
-         {/* Skip Button */}
-         <TouchableOpacity
+        {/* Skip Button */}
+        <TouchableOpacity
           style={styles.skipButton}
-          onPress={() => router.push('/auth/login')}
+          onPress={() => router.push('/(auth)/login')}
           data-name="Button"
           data-node-id="1:24"
         >
@@ -159,9 +159,6 @@ const styles = StyleSheet.create({
   dotActive: {
     width: 32,
     backgroundColor: '#E3C67B',
-  },
-  buttonFullWidth: {
-    width: '100%',
   },
   continueButton: {
     width: '100%',

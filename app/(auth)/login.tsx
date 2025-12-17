@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
+  Animated,
   Image,
   SafeAreaView,
   StyleSheet,
@@ -13,7 +14,7 @@ import {
 } from "react-native";
 import AuthCard from "../../components/AuthCard";
 import { useTheme } from "../../contexts/ThemeContext";
-import { supabase } from "../../lib/supabaseClient";
+import { getSupabase } from "../../lib/supabaseClient";
 import { buttons, fonts, spacing } from "../../theme/theme";
 
 export default function Login() {
@@ -22,11 +23,30 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (errorMessage) {
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      fadeAnim.setValue(0);
+    }
+  }, [errorMessage]);
 
   const handleLogin = async () => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) Alert.alert("Login failed", error.message);
-    else router.replace("/pray");
+    const { error } = await getSupabase().auth.signInWithPassword({ email, password });
+    if (error) {
+      setErrorMessage("Incorrect email or password. Please try again.");
+      return;
+    }
+    setErrorMessage(null);
+    router.replace("/pray");
   };
 
   const handleForgotPassword = async () => {
@@ -34,7 +54,7 @@ export default function Login() {
       Alert.alert("Enter your email", "Please type your email first.");
       return;
     }
-    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    const { error } = await getSupabase().auth.resetPasswordForEmail(email);
     if (error) Alert.alert("Error", error.message);
     else Alert.alert("Check your inbox", "We’ve sent you a reset link.");
   };
@@ -52,7 +72,10 @@ export default function Login() {
           <Text style={[styles.label, { color: colors.textPrimary }]}>Email</Text>
           <TextInput
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(text) => {
+              setEmail(text);
+              setErrorMessage(null);
+            }}
             autoCapitalize="none"
             keyboardType="email-address"
             style={[
@@ -70,7 +93,10 @@ export default function Login() {
           <View style={styles.inputWrapper}>
             <TextInput
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(text) => {
+                setPassword(text);
+                setErrorMessage(null);
+              }}
               secureTextEntry={!showPassword}
               style={[
                 styles.input,
@@ -96,6 +122,14 @@ export default function Login() {
           </View>
         </View>
 
+        {errorMessage && (
+          <Animated.Text
+            style={[styles.errorText, { color: "#D64545", opacity: fadeAnim }]}
+          >
+            {errorMessage}
+          </Animated.Text>
+        )}
+
         {/* Forgot password */}
         <Text style={[styles.forgot, { color: colors.textSecondary }]} onPress={handleForgotPassword}>
           Forgot password?
@@ -113,7 +147,7 @@ export default function Login() {
           Don’t have an account?{" "}
           <Text
             style={[styles.link, { color: colors.accent }]}
-            onPress={() => router.replace("/auth/signup")}
+            onPress={() => router.replace("/(auth)/signup")}
           >
             Sign up
           </Text>
@@ -172,5 +206,12 @@ const styles = StyleSheet.create({
   },
   link: {
     fontFamily: fonts.body,
+  },
+  continueButton: {},
+  errorText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    marginBottom: spacing.sm,
+    textAlign: "center",
   },
 });

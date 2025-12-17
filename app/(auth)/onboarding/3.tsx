@@ -1,79 +1,67 @@
+import { useTheme } from '@/contexts/ThemeContext';
 import { useRouter } from 'expo-router';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-
-export default function Onboarding1() {
+export default function Onboarding3() {
   const router = useRouter();
-
+  const { colors } = useTheme();
   return (
-    <SafeAreaView style={styles.container} data-name="Onboarding/1" data-node-id="1:2">
-      <View style={styles.contentContainer} data-name="Container" data-node-id="1:5">
+    <SafeAreaView style={styles.container} data-name="Onboarding/3" data-node-id="1:27">
+      <View style={styles.contentContainer} data-name="Container" data-node-id="1:30">
         {/* Icon Container */}
-        <View style={styles.iconContainerWrapper} data-name="Container" data-node-id="1:6">
+        <View style={styles.iconContainerWrapper} data-name="Container" data-node-id="1:31">
           <View style={styles.iconContainer}>
             <Image
-              source={require('../../assets/microphone.png')}
+              source={require('@/assets/plant.png')}
               style={styles.icon}
               data-name="Icon"
-              data-node-id="1:7"
+              data-node-id="1:32"
             />
           </View>
         </View>
 
         {/* Heading */}
-        <View style={styles.headingFrame} data-name="Heading 1" data-node-id="1:11">
-          <Text style={styles.heading} data-node-id="1:12">
-            Finally, A Prayer Life That Sticks
+        <View style={styles.headingFrame} data-name="Heading 1" data-node-id="1:36">
+          <Text style={styles.heading} data-node-id="1:37">
+            Your Prayers Tell A Story
           </Text>
         </View>
 
         {/* Description */}
-        <View style={styles.paragraphFrame} data-name="Paragraph" data-node-id="1:13">
-          <Text style={styles.description} data-node-id="1:14">
-            Journal without typing or distractions. Building a rhythm of prayer that lasts.
+        <View style={styles.paragraphFrame} data-name="Paragraph" data-node-id="1:38">
+          <Text style={styles.description} data-node-id="1:39">
+            Weekly and Monthly reflections help reveal themes, growth, and God's faithfulness in your journey.
           </Text>
         </View>
       </View>
 
-      {/* Footer Container */}
-      <View style={styles.footerContainer} data-name="Container" data-node-id="1:15">
+        {/* Footer Container */}
+      <View style={styles.footerContainer}>
         {/* Pagination Dots */}
-        <View style={styles.paginationContainer} data-name="Container" data-node-id="1:16">
-          <View style={[styles.dot, styles.dotActive]} data-name="Button" data-node-id="1:17" />
-          <View style={[styles.dot, { marginLeft: 8 }]} data-name="Button" data-node-id="1:18" />
-          <View style={[styles.dot, { marginLeft: 8 }]} data-name="Button" data-node-id="1:19" />
+        <View style={styles.paginationContainer}>
+          <View style={styles.dot} />
+          <View style={[styles.dot, { marginLeft: 8 }]} />
+          <View style={[styles.dot, styles.dotActive, { marginLeft: 8 }]} />
         </View>
 
         {/* Continue Button */}
         <TouchableOpacity
           style={styles.continueButton}
-          onPress={() => router.push('/onboarding/2')}
+          onPress={() => router.push('/(auth)/login')}
           data-name="Button"
-          data-node-id="1:20"
+          data-node-id="1:45"
         >
-          <Text style={styles.continueButtonText} data-node-id="1:21">
-            Continue
+          <Text style={styles.continueButtonText} data-node-id="1:46">
+            Begin My Journey
           </Text>
           <Image
-            source={require('../../assets/placeholder.png')}
+            source={require('@/assets/placeholder.png')}
             style={styles.continueIcon}
             data-name="Icon"
-            data-node-id="1:22"
+            data-node-id="1:47"
           />
         </TouchableOpacity>
 
-        {/* Skip Button */}
-        <TouchableOpacity
-          style={styles.skipButton}
-          onPress={() => router.push('/auth/login')}
-          data-name="Button"
-          data-node-id="1:24"
-        >
-          <Text style={styles.skipText} data-node-id="1:25">
-            Skip
-          </Text>
-        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -183,19 +171,6 @@ const styles = StyleSheet.create({
     height: 16,
     resizeMode: 'contain',
     marginLeft: 8,
-  },
-  skipButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-  },
-  skipText: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: '#717182',
-    fontWeight: '400',
-    fontFamily: 'Inter_400Regular',
-    textAlign: 'center',
   },
 });
 

@@ -5,30 +5,40 @@ import {
   useFonts,
 } from "@expo-google-fonts/playfair-display";
 import { Stack } from "expo-router";
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AuthProvider, useAuth } from "@/contexts/AuthProvider";
-import { SettingsProvider } from "@/contexts/SettingsContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { requestNotificationPermissions } from "@/lib/notifications";
 
 function RootNavigator() {
   const auth = useAuth();
-  const user = auth?.user ?? null;
+  if (!auth) return null;
+
+  const { user, loading } = auth;
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
 
   return (
-    <SettingsProvider userId={user?.id ?? null}>
-      <SafeAreaProvider>
-        <Stack screenOptions={{ headerShown: false }}>
-          {/* 👇 Explicitly registered route groups */}
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-        </Stack>
-      </SafeAreaProvider>
-    </SettingsProvider>
+    <Stack
+    key={user ? "authenticated" : "unauthenticated"}
+    screenOptions={{ headerShown: false }}
+  >
+    {user ? (
+      <Stack.Screen name="(tabs)" />
+    ) : (
+      <Stack.Screen name="(auth)" />
+    )}
+  </Stack>
   );
 }
 
@@ -54,7 +64,9 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider>
         <AuthProvider>
-          <RootNavigator />
+          <SafeAreaProvider>
+            <RootNavigator />
+          </SafeAreaProvider>
         </AuthProvider>
       </ThemeProvider>
     </GestureHandlerRootView>

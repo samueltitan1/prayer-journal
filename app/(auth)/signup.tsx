@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import AuthCard from "../../components/AuthCard";
 import { useTheme } from "../../contexts/ThemeContext";
-import { supabase } from "../../lib/supabaseClient";
+import { getSupabase } from "../../lib/supabaseClient";
 import { buttons, fonts, spacing } from "../../theme/theme";
 
 export default function SignUp() {
@@ -32,7 +32,7 @@ export default function SignUp() {
       Alert.alert("Agreement required", "Please agree to the terms first.");
       return;
     }
-    const { error } = await supabase.auth.signUp({
+    const { error } = await getSupabase().auth.signUp({
       email,
       password,
       options: { data: { full_name: name } },
@@ -156,7 +156,7 @@ export default function SignUp() {
           Already have an account?{" "}
           <Text
             style={[styles.link, { color: colors.accent }]}
-            onPress={() => router.replace("/auth/login")}
+            onPress={() => router.replace("/(auth)/login")}
           >
             Sign in
           </Text>
@@ -230,4 +230,5 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     fontFamily: fonts.body,
   },
+  continueButton: {}
 });

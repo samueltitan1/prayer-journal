@@ -25,6 +25,9 @@ import {
   scheduleDailyPrayerNotification,
 } from "../lib/notifications";
 
+import { router } from "expo-router";
+
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useTheme } from "../contexts/ThemeContext";
 import { getSupabase } from "../lib/supabaseClient";
 import { fonts, spacing } from "../theme/theme";
@@ -276,8 +279,18 @@ export default function SettingsModal({
   };
 
   const handleSignOut = async () => {
-    await getSupabase().auth.signOut();
-    closeEverything();
+    try {
+      // Fully sign out from Supabase
+      await getSupabase().auth.signOut();
+
+      // Clear any persisted session data
+      await AsyncStorage.removeItem("supabase_session");
+
+      // Force navigation reset to login
+      router.replace("/(auth)/login");
+    } catch (err: any) {
+      Alert.alert("Sign out failed", err?.message ?? "Please try again.");
+    }
   };
 
   const handleDeleteAccount = () => {
@@ -680,7 +693,10 @@ export default function SettingsModal({
           </TouchableOpacity>
 
           {/* ACCOUNT */}
-          <TouchableOpacity style={styles.signOut} onPress={handleSignOut}>
+          <TouchableOpacity
+            style={[styles.signOut, { marginTop: spacing.xl }]}
+            onPress={handleSignOut}
+          >
             <Text
               style={[styles.signOutText, { color: colors.textPrimary }]}
             >
@@ -689,7 +705,7 @@ export default function SettingsModal({
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.deleteBtn}
+            style={[styles.deleteBtn, { marginTop: spacing.lg, paddingVertical: spacing.sm }]}
             onPress={handleDeleteAccount}
           >
             <Text style={styles.deleteText}>Delete Account</Text>

@@ -1,67 +1,79 @@
 import { useRouter } from 'expo-router';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useTheme } from '../../contexts/ThemeContext';
-export default function Onboarding3() {
+
+export default function Onboarding2() {
   const router = useRouter();
-  const { colors } = useTheme();
+  
   return (
-    <SafeAreaView style={styles.container} data-name="Onboarding/3" data-node-id="1:27">
-      <View style={styles.contentContainer} data-name="Container" data-node-id="1:30">
+    <SafeAreaView style={styles.container} data-name="Onboarding/2" data-node-id="1:2">
+      <View style={styles.contentContainer} data-name="Container" data-node-id="1:5">
         {/* Icon Container */}
-        <View style={styles.iconContainerWrapper} data-name="Container" data-node-id="1:31">
+        <View style={styles.iconContainerWrapper} data-name="Container" data-node-id="1:6">
           <View style={styles.iconContainer}>
             <Image
-              source={require('../../assets/plant.png')}
+              source={require('@/assets/padlock.png')}
               style={styles.icon}
               data-name="Icon"
-              data-node-id="1:32"
+              data-node-id="1:7"
             />
           </View>
         </View>
 
         {/* Heading */}
-        <View style={styles.headingFrame} data-name="Heading 1" data-node-id="1:36">
-          <Text style={styles.heading} data-node-id="1:37">
-            Your Prayers Tell A Story
+        <View style={styles.headingFrame} data-name="Heading 1" data-node-id="1:11">
+        <Text style={styles.heading} data-node-id="1:12">
+          A Sacred Space, Just for You
           </Text>
         </View>
 
         {/* Description */}
-        <View style={styles.paragraphFrame} data-name="Paragraph" data-node-id="1:38">
-          <Text style={styles.description} data-node-id="1:39">
-            Weekly and Monthly reflections help reveal themes, growth, and God's faithfulness in your journey.
+        <View style={styles.paragraphFrame} data-name="Paragraph" data-node-id="1:13">
+        <Text style={styles.description} data-node-id="1:14">
+            Your prayers are between you and God. Fully encrypted, completely private, never shared - just a safe place to pray.
           </Text>
         </View>
       </View>
 
-        {/* Footer Container */}
-      <View style={styles.footerContainer}>
+      {/* Footer Container */}
+      <View style={styles.footerContainer} data-name="Container" data-node-id="1:15">
         {/* Pagination Dots */}
-        <View style={styles.paginationContainer}>
-          <View style={styles.dot} />
-          <View style={[styles.dot, { marginLeft: 8 }]} />
-          <View style={[styles.dot, styles.dotActive, { marginLeft: 8 }]} />
+        <View style={styles.paginationContainer} data-name="Container" data-node-id="1:41">
+          <View style={styles.dot} data-name="Button" data-node-id="1:42" />
+          <View style={[styles.dot, styles.dotActive, { marginLeft: 8 }]} data-name="Button" data-node-id="1:43" />
+          <View style={[styles.dot, { marginLeft: 8 }]} data-name="Button" data-node-id="1:44" />
         </View>
 
         {/* Continue Button */}
         <TouchableOpacity
           style={styles.continueButton}
-          onPress={() => router.push('/auth/login')}
+          onPress={() => router.push('/(auth)/onboarding/3')}
           data-name="Button"
-          data-node-id="1:45"
+          data-node-id="1:20"
         >
-          <Text style={styles.continueButtonText} data-node-id="1:46">
-            Begin My Journey
+          <Text style={styles.continueButtonText} data-node-id="1:21">
+            Continue
           </Text>
           <Image
-            source={require('../../assets/placeholder.png')}
+            source={require('@/assets/placeholder.png')}
             style={styles.continueIcon}
             data-name="Icon"
-            data-node-id="1:47"
+            data-node-id="1:22"
           />
         </TouchableOpacity>
 
+
+         {/* Skip Button */}
+         <TouchableOpacity
+          style={styles.skipButton}
+          onPress={() => router.push('/(auth)/login')}
+          data-name="Button"
+          data-node-id="1:24"
+        >
+          <Text style={styles.skipText} data-node-id="1:25">
+            Skip
+          </Text>
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -148,6 +160,9 @@ const styles = StyleSheet.create({
     width: 32,
     backgroundColor: '#E3C67B',
   },
+  buttonFullWidth: {
+    width: '100%',
+  },
   continueButton: {
     width: '100%',
     height: 48,
@@ -171,6 +186,19 @@ const styles = StyleSheet.create({
     height: 16,
     resizeMode: 'contain',
     marginLeft: 8,
+  },
+  skipButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  skipText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#717182',
+    fontWeight: '400',
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center',
   },
 });
 
