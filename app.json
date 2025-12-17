@@ -18,7 +18,8 @@
       "infoPlist": {
         "UIKeyboardDismissModeOnDrag": "YES",
         "UIKeyboardWillShowNotification": true,
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "Prayer Journal needs access to your microphone to record prayers."
       },
       "supportsTablet": true,
       "bundleIdentifier": "com.sinaiglobal.prayerjournal",

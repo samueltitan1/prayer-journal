@@ -208,9 +208,18 @@ useEffect(() => {
   const requestMicPermission = async () => {
     const { status } = await Audio.requestPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Microphone access needed", "Please enable microphone access.");
+      Alert.alert(
+        "Microphone access needed",
+        "Please enable microphone access in Settings to record your prayers."
+      );
       return false;
     }
+
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+    });
+
     return true;
   };
 
@@ -219,11 +228,6 @@ useEffect(() => {
     try {
       const ok = await requestMicPermission();
       if (!ok) return;
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
 
       const { recording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
