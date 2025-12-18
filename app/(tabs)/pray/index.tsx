@@ -1,5 +1,9 @@
+import type { MilestoneConfig } from "@/app/constants/milestonesConfig";
+import { MILESTONES } from "@/app/constants/milestonesConfig";
+import MilestoneModal from "../../../components/MilestoneModal";
 // app/(tabs)/pray/index.tsx
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
 import { useRouter } from "expo-router";
@@ -33,6 +37,22 @@ export default function PrayScreen() {
   const [secondsLeft, setSecondsLeft] = useState(MAX_SECONDS_DEFAULT);
 
   const [showToast, setShowToast] = useState(false);
+  // --- Prayer Saved card auto-dismiss timer ---
+  const prayerSavedTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // --- Milestone detection state ---
+  const [milestoneModalVisible, setMilestoneModalVisible] = useState(false);
+  const [unlockedMilestone, setUnlockedMilestone] = useState<MilestoneConfig | null>(null);
+  const milestoneCheckRef = useRef(false);
+
+  // Clear timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (prayerSavedTimeoutRef.current) {
+        clearTimeout(prayerSavedTimeoutRef.current);
+      }
+    };
+  }, []);
   const [dayCount, setDayCount] = useState<number>(0);
 
   const [showSettings, setShowSettings] = useState(false);
@@ -229,14 +249,30 @@ useEffect(() => {
       const ok = await requestMicPermission();
       if (!ok) return;
 
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      // HARD reset audio session for iOS TestFlight reliability
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const recording = new Audio.Recording();
+
+      await recording.prepareToRecordAsync({
+        ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        ios: {
+          ...Audio.RecordingOptionsPresets.HIGH_QUALITY.ios,
+          audioQuality: Audio.IOSAudioQuality.MAX,
+          sampleRate: 44100,
+          numberOfChannels: 1,
+        },
+      });
+
+      await recording.startAsync();
 
       setRecording(recording);
       setSecondsLeft(MAX_SECONDS_DEFAULT);
       setPrayState("recording");
-    } catch {
+    } catch (e) {
       Alert.alert("Error", "Could not start recording.");
     }
   };
@@ -272,6 +308,11 @@ useEffect(() => {
         console.log("Failed to compute duration:", e);
       }
 
+      if (!durationSeconds || durationSeconds < 1) {
+        Alert.alert("Recording failed", "No audio was captured. Please try again.");
+        return;
+      }
+
       const transcript = await transcribeAudioWithWhisper(uri);
 
       setDraftAudioUri(uri);
@@ -300,15 +341,18 @@ useEffect(() => {
         type: "audio/m4a",
       } as any);
 
-      const res = await fetch(
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/transcribe`,
-        { method: "POST", body: formData }
-      );
+      const { data, error } = await getSupabase().functions.invoke("transcribe", {
+        body: formData,
+      });
 
-      if (!res.ok) return "";
-      const json = await res.json();
-      return json.text || "";
-    } catch {
+      if (error || !data) {
+        console.error("Transcription failed", error);
+        return "";
+      }
+
+      return data.text || "";
+    } catch (e) {
+      console.error("Transcription exception", e);
       return "";
     }
   };
@@ -393,8 +437,115 @@ useEffect(() => {
       setIsBookmarked(false);
 
       setPrayState("saved");
-      setShowToast(true);
-      setTimeout(() => setShowToast(false), 3000);
+      // Auto-dismiss Prayer Saved card after 3s
+      if (prayerSavedTimeoutRef.current) clearTimeout(prayerSavedTimeoutRef.current);
+      prayerSavedTimeoutRef.current = setTimeout(() => {
+        setPrayState("idle");
+      }, 3000);
+
+      // Show Day X complete toast only once per calendar day, if not showing milestone modal
+      try {
+        const todayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+        const lastToastDate = await AsyncStorage.getItem("last_prayer_toast_date");
+        if (lastToastDate !== todayKey && !milestoneModalVisible) {
+          setShowToast(true);
+          setTimeout(() => setShowToast(false), 3000);
+          await AsyncStorage.setItem("last_prayer_toast_date", todayKey);
+        }
+      } catch (e) {
+        // fallback: show toast as before if AsyncStorage fails
+        if (!milestoneModalVisible) {
+          setShowToast(true);
+          setTimeout(() => setShowToast(false), 3000);
+        }
+      }
+  // ---- Milestone detection ----
+  useEffect(() => {
+    if (!userId) return;
+    if (milestoneCheckRef.current) return;
+    if (prayState !== "saved") return;
+    milestoneCheckRef.current = true;
+
+    const checkMilestones = async () => {
+      // Only check once per day
+      const today = new Date().toISOString().slice(0, 10);
+      const lastCheck = await AsyncStorage.getItem("milestone_check_date");
+      if (lastCheck === today) return;
+      try {
+        // 1. Fetch user's unlocked milestones from supabase
+        const { data: unlockedRows, error } = await getSupabase()
+          .from("milestones_unlocked")
+          .select("milestone_key")
+          .eq("user_id", userId);
+
+        if (error) {
+          console.warn("Milestones fetch error:", error.message);
+          return;
+        }
+
+        // Compute current streak
+        // Use dayCount for streak, as loaded above
+        const unlockedIds = new Set(unlockedRows?.map((r) => r.milestone_key));
+
+        // 2. Find next milestone the user is eligible for
+        const newlyUnlocked = MILESTONES.find(
+          (m) => dayCount >= m.requiredStreak && !unlockedIds.has(m.key)
+        );
+
+        if (!newlyUnlocked) {
+          await AsyncStorage.setItem("milestone_check_date", today);
+          return;
+        }
+
+        // 3. Insert into milestones_unlocked table
+        const { error: insertErr } = await getSupabase()
+          .from("milestones_unlocked")
+          .insert({
+            user_id: userId,
+            milestone_key: newlyUnlocked.key,
+            streak_at_unlock: dayCount,
+          });
+
+        if (insertErr) {
+          console.warn("Failed to unlock milestone:", insertErr.message);
+          await AsyncStorage.setItem("milestone_check_date", today);
+          return;
+        }
+
+        // 4. Trigger modal
+        setUnlockedMilestone(newlyUnlocked);
+        setMilestoneModalVisible(true);
+
+        await AsyncStorage.setItem("milestone_check_date", today);
+      } catch (err) {
+        console.warn("Unexpected milestone error:", err);
+      }
+    };
+
+    checkMilestones();
+  }, [userId, prayState, dayCount]);
+
+  // Reset milestoneCheckRef after modal closes or after prayState resets
+  useEffect(() => {
+    if (prayState === "idle") {
+      milestoneCheckRef.current = false;
+    }
+  }, [prayState]);
+      {/* Milestone Modal */}
+      <MilestoneModal
+        visible={milestoneModalVisible}
+        milestone={unlockedMilestone}
+        onClose={() => {
+          setMilestoneModalVisible(false);
+          setUnlockedMilestone(null);
+        }}
+        onViewTimeline={async () => {
+          setMilestoneModalVisible(false);
+          setUnlockedMilestone(null);
+          router.replace("/(tabs)/journal");
+          await AsyncStorage.setItem("open_milestone_timeline", "true");
+        }}
+      />
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to save prayer.");
     } finally {

@@ -1,20 +1,32 @@
+import { getSupabase } from '@/lib/supabaseClient';
 import { useRouter } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function SplashScreen() {
   const router = useRouter();
+  const [authResolved, setAuthResolved] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
   useEffect(() => {
-    // Navigate to onboarding after splash
-    const timer = setTimeout(() => {
-      router.replace('/onboarding/1');
-    }, 2000);
+    async function resolveAuthAndNavigate() {
+      const { data } = await getSupabase().auth.getSession();
+      const auth = Boolean(data.session);
+      setIsAuthenticated(auth);
+      setAuthResolved(true);
 
-    return () => clearTimeout(timer);
+      if (auth) {
+        router.replace('/(tabs)/journal');
+      } else {
+        router.replace('/(auth)/login');
+      }
+    }
+
+    resolveAuthAndNavigate();
   }, []);
 
+  // Show splash UI while loading auth state
   return (
     <SafeAreaView style={styles.container} data-name="Splash" data-node-id="2:778">
       <View style={styles.contentContainer} data-name="Container" data-node-id="2:780">
@@ -139,4 +151,3 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
   },
 });
-

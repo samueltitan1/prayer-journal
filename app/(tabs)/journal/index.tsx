@@ -1,7 +1,6 @@
 // app/(tabs)/journal/index.tsx
 
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
 import { useRouter } from "expo-router";
 import React, {
@@ -24,11 +23,8 @@ import {
   View
 } from "react-native";
 
-import type { MilestoneConfig } from "@/app/constants/milestonesConfig";
-import { MILESTONES } from "@/app/constants/milestonesConfig";
 import BookmarksModal from "@/components/journal/BookmarksOverlay";
 import Calendar from "@/components/journal/Calendar";
-import MilestoneModal from "@/components/journal/MilestoneModal";
 import MilestoneTimelineModal from "@/components/journal/MilestoneTimelineModal";
 import PrayerDayModal from "@/components/journal/PrayerDayOverlay";
 import PrayerEntryModal from "@/components/journal/PrayerEntryModal";
@@ -155,7 +151,6 @@ export default function JournalScreen() {
   const [useSpeaker, setUseSpeaker] = useState(true);
   const onToggleSpeaker = () => setUseSpeaker((prev) => !prev);
   const soundRef = useRef<Audio.Sound | null>(null);
-  const milestoneCheckRef = useRef(false);
   const ignorePlaybackUntil = useRef(0); // prevent snapback glitch after dragging
 
   const todayKey = () => new Date().toISOString().slice(0, 10);
@@ -169,8 +164,6 @@ export default function JournalScreen() {
   const [loadingReflections, setLoadingReflections] = useState(true);
 
 // Milestone state
-const [milestoneModalVisible, setMilestoneModalVisible] = useState(false);
-const [unlockedMilestone, setUnlockedMilestone] = useState<MilestoneConfig | null>(null);
 const [milestoneTimelineVisible, setMilestoneTimelineVisible] = useState(false);
 // ---- Full reflection modal (weekly/monthly) ----
 const [reflectionModalVisible, setReflectionModalVisible] = useState(false);
@@ -658,68 +651,6 @@ const bookmarkedPrayers = useMemo(() => {
     return 0;
   }, [allPrayers, userId]);
   
-  // ---- Milestone detection ----
-  useEffect(() => {
-    if (!userId) return;
-    if (milestoneCheckRef.current) return;
-    milestoneCheckRef.current = true;
-
-    const checkMilestones = async () => {
-      // Only check once per day
-      const lastCheck = await AsyncStorage.getItem("milestone_check_date");
-      const today = todayKey();
-      if (lastCheck === today) return;
-      try {
-        // 1. Fetch user's unlocked milestones from supabase
-        const { data: unlockedRows, error } = await getSupabase()
-          .from("milestones_unlocked")
-          .select("milestone_key")
-          .eq("user_id", userId);
-
-        if (error) {
-          console.warn("Milestones fetch error:", error.message);
-          return;
-        }
-
-        const unlockedIds = new Set(unlockedRows?.map((r) => r.milestone_key));
-
-        // 2. Find next milestone the user is eligible for
-        const newlyUnlocked = MILESTONES.find(
-          (m) => currentStreak >= m.requiredStreak && !unlockedIds.has(m.key)
-        );
-
-        if (!newlyUnlocked) {
-          await AsyncStorage.setItem("milestone_check_date", today);
-          return;
-        }
-
-        // 3. Insert into milestones_unlocked table
-        const { error: insertErr } = await getSupabase()
-          .from("milestones_unlocked")
-          .insert({
-            user_id: userId,
-            milestone_key: newlyUnlocked.key,
-            streak_at_unlock: currentStreak,
-          });
-
-        if (insertErr) {
-          console.warn("Failed to unlock milestone:", insertErr.message);
-          await AsyncStorage.setItem("milestone_check_date", today);
-          return;
-        }
-
-        // 4. Trigger modal
-        setUnlockedMilestone(newlyUnlocked);
-        setMilestoneModalVisible(true);
-
-        await AsyncStorage.setItem("milestone_check_date", today);
-      } catch (err) {
-        console.warn("Unexpected milestone error:", err);
-      }
-    };
-
-    checkMilestones();
-  }, [userId]);
 
   const prayersForSelectedDate = useMemo(() => {
     if (!selectedDateKey) return [];
@@ -1006,40 +937,6 @@ const closeReflection = () => {
   setActiveReflection(null);
 };
 
-  // ---- Open milestones modal (lifetime-based) ----
-  const openMilestones = async () => {
-    if (!userId) return;
-
-    try {
-      // Fetch lifetime unlocked milestones
-      const { data, error } = await getSupabase()
-        .from("milestones_unlocked")
-        .select("milestone_key, streak_at_unlock")
-        .eq("user_id", userId)
-        .order("streak_at_unlock", { ascending: false });
-
-      if (error) {
-        console.warn("Failed to fetch unlocked milestones:", error.message);
-      }
-
-      let highest: MilestoneConfig | null = null;
-
-      if (data && data.length > 0) {
-        const key = data[0].milestone_key;
-        highest = MILESTONES.find((m) => m.key === key) || null;
-      }
-
-      // Fallback: if no milestones have been unlocked yet, still show the first milestone
-      if (!highest && MILESTONES.length > 0) {
-        highest = MILESTONES[0];
-      }
-
-      setUnlockedMilestone(highest);
-      setMilestoneModalVisible(true);
-    } catch (err) {
-      console.warn("Unexpected milestone fetch error:", err);
-    }
-  };
 
   // ---- Handlers for calendar & modal ---------------------------------
 
@@ -1579,17 +1476,6 @@ const closeReflection = () => {
           visible={showSettings}
           onClose={() => setShowSettings(false)}
           userId={userId}
-        />
-      </Portal>
-      <Portal>
-        <MilestoneModal
-          visible={milestoneModalVisible}
-          milestone={unlockedMilestone}
-          onClose={() => {
-            setMilestoneModalVisible(false);
-            setUnlockedMilestone(null);
-          }}
-          onViewTimeline={() => setMilestoneTimelineVisible(true)}
         />
       </Portal>
       <Portal>

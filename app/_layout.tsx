@@ -4,7 +4,7 @@ import {
   PlayfairDisplay_500Medium,
   useFonts,
 } from "@expo-google-fonts/playfair-display";
-import { Redirect, Stack, usePathname } from "expo-router";
+import { Stack } from "expo-router";
 import { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -19,12 +19,6 @@ function RootNavigator() {
   if (!auth) return null;
 
   const { user, loading } = auth;
-
-  const pathname = usePathname();
-
-  if (!pathname || pathname === "/") {
-    return <Redirect href={user ? "/(tabs)" : "/(auth)"} />;
-  }
 
   if (loading) {
     return (

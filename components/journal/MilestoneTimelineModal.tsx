@@ -5,13 +5,13 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React from "react";
 import {
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 
 interface Props {
@@ -79,7 +79,7 @@ export default function MilestoneTimelineModal({
                       style={[
                         styles.card,
                         {
-                          backgroundColor: colors.card,
+                          backgroundColor: colors.accent + "20",
                           opacity: 1,
                         },
                       ]}
