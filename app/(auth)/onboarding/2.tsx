@@ -30,7 +30,7 @@ export default function Onboarding2() {
         {/* Description */}
         <View style={styles.paragraphFrame} data-name="Paragraph" data-node-id="1:13">
         <Text style={styles.description} data-node-id="1:14">
-            Your prayers are between you and God. Fully encrypted, completely private, never shared - just a safe place to pray.
+            Your prayers are between you and God. Fully secured, completely private, never shared - just a safe place to pray.
           </Text>
         </View>
       </View>
