@@ -18,7 +18,7 @@ function RootNavigator() {
   const auth = useAuth();
   if (!auth) return null;
 
-  const { user, loading } = auth;
+  const { user, loading, emailConfirmed } = auth;
 
   if (loading) {
     return (
@@ -30,15 +30,17 @@ function RootNavigator() {
 
   return (
     <Stack
-    key={user ? "authenticated" : "unauthenticated"}
-    screenOptions={{ headerShown: false }}
-  >
-    {user ? (
-      <Stack.Screen name="(tabs)" />
-    ) : (
-      <Stack.Screen name="(auth)" />
-    )}
-  </Stack>
+      key={user ? "authenticated" : "unauthenticated"}
+      screenOptions={{ headerShown: false }}
+    >
+      {!user ? (
+        <Stack.Screen name="(auth)" />
+      ) : !emailConfirmed ? (
+        <Stack.Screen name="(auth)/confirm-email" />
+      ) : (
+        <Stack.Screen name="(tabs)" />
+      )}
+    </Stack>
   );
 }
 

@@ -14,6 +14,7 @@ import {
 type AuthContextType = {
   user: User | null;
   loading: boolean;
+  emailConfirmed: boolean;
 };
 
 type AuthProviderProps = {
@@ -33,6 +34,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [emailConfirmed, setEmailConfirmed] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -41,6 +43,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     supabase.auth.getSession().then(({ data }) => {
       if (!isMounted) return;
       setUser(data.session?.user ?? null);
+      setEmailConfirmed(!!data.session?.user?.email_confirmed_at);
       setLoading(false);
     });
 
@@ -52,11 +55,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
       if (event === "SIGNED_OUT") {
         setUser(null);
+        setEmailConfirmed(false);
         setLoading(false);
         return;
       }
 
       setUser(session?.user ?? null);
+      setEmailConfirmed(!!session?.user?.email_confirmed_at);
       setLoading(false);
     });
 
@@ -67,7 +72,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   }, [supabase]);
 
   return (
-    <AuthContext.Provider value={{ user, loading }}>
+    <AuthContext.Provider value={{ user, loading, emailConfirmed }}>
       {children}
     </AuthContext.Provider>
   );

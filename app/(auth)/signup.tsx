@@ -38,7 +38,7 @@ export default function SignUp() {
       options: { data: { full_name: name } },
     });
     if (error) Alert.alert("Sign up failed", error.message);
-    else router.replace("/pray");
+    else router.replace("/(auth)/confirm-email");
   };
 
   return (

@@ -459,78 +459,57 @@ useEffect(() => {
           setTimeout(() => setShowToast(false), 3000);
         }
       }
-  // ---- Milestone detection ----
-  useEffect(() => {
-    if (!userId) return;
-    if (milestoneCheckRef.current) return;
-    if (prayState !== "saved") return;
-    milestoneCheckRef.current = true;
+ // ---- Milestone detection (refactored to component level) ----
+ useEffect(() => {
+  if (!userId) return;
+  if (milestoneCheckRef.current) return;
+  if (prayState !== "saved") return;
 
-    const checkMilestones = async () => {
-      // Only check once per day
-      const today = new Date().toISOString().slice(0, 10);
-      const lastCheck = await AsyncStorage.getItem("milestone_check_date");
-      if (lastCheck === today) return;
-      try {
-        // 1. Fetch user's unlocked milestones from supabase
-        const { data: unlockedRows, error } = await getSupabase()
-          .from("milestones_unlocked")
-          .select("milestone_key")
-          .eq("user_id", userId);
+  milestoneCheckRef.current = true;
 
-        if (error) {
-          console.warn("Milestones fetch error:", error.message);
-          return;
-        }
+  const checkMilestones = async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const lastCheck = await AsyncStorage.getItem("milestone_check_date");
+    if (lastCheck === today) return;
 
-        // Compute current streak
-        // Use dayCount for streak, as loaded above
-        const unlockedIds = new Set(unlockedRows?.map((r) => r.milestone_key));
+    const { data: unlockedRows } = await getSupabase()
+      .from("milestones_unlocked")
+      .select("milestone_key")
+      .eq("user_id", userId);
 
-        // 2. Find next milestone the user is eligible for
-        const newlyUnlocked = MILESTONES.find(
-          (m) => dayCount >= m.requiredStreak && !unlockedIds.has(m.key)
-        );
+    const unlockedIds = new Set(unlockedRows?.map((r) => r.milestone_key));
 
-        if (!newlyUnlocked) {
-          await AsyncStorage.setItem("milestone_check_date", today);
-          return;
-        }
+    const newlyUnlocked = MILESTONES.find(
+      (m) => dayCount >= m.requiredStreak && !unlockedIds.has(m.key)
+    );
 
-        // 3. Insert into milestones_unlocked table
-        const { error: insertErr } = await getSupabase()
-          .from("milestones_unlocked")
-          .insert({
-            user_id: userId,
-            milestone_key: newlyUnlocked.key,
-            streak_at_unlock: dayCount,
-          });
-
-        if (insertErr) {
-          console.warn("Failed to unlock milestone:", insertErr.message);
-          await AsyncStorage.setItem("milestone_check_date", today);
-          return;
-        }
-
-        // 4. Trigger modal
-        setUnlockedMilestone(newlyUnlocked);
-        setMilestoneModalVisible(true);
-
-        await AsyncStorage.setItem("milestone_check_date", today);
-      } catch (err) {
-        console.warn("Unexpected milestone error:", err);
-      }
-    };
-
-    checkMilestones();
-  }, [userId, prayState, dayCount]);
-
-  // Reset milestoneCheckRef after modal closes or after prayState resets
-  useEffect(() => {
-    if (prayState === "idle") {
-      milestoneCheckRef.current = false;
+    if (!newlyUnlocked) {
+      await AsyncStorage.setItem("milestone_check_date", today);
+      return;
     }
-  }, [prayState]);
+
+    await getSupabase()
+      .from("milestones_unlocked")
+      .insert({
+        user_id: userId,
+        milestone_key: newlyUnlocked.key,
+        streak_at_unlock: dayCount,
+      });
+
+    setUnlockedMilestone(newlyUnlocked);
+    setMilestoneModalVisible(true);
+
+    await AsyncStorage.setItem("milestone_check_date", today);
+  };
+
+  checkMilestones();
+}, [userId, prayState, dayCount]);
+
+useEffect(() => {
+  if (prayState === "idle") {
+    milestoneCheckRef.current = false;
+  }
+}, [prayState]);
       {/* Milestone Modal */}
       <MilestoneModal
         visible={milestoneModalVisible}
