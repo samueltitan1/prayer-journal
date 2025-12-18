@@ -1113,8 +1113,8 @@ const closeReflection = () => {
                 <Text
                   style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
                 >
-                  No reflections yet — your weekly summary will appear here once
-                  you generate one.
+                  Weekly relfections are created on Sundays. 
+                  Add journal entries thoughout the week and your reflection will appear here automatically.
                 </Text>
               </View>
             )}
@@ -1385,8 +1385,9 @@ const closeReflection = () => {
                 <Text
                   style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
                 >
-                  No monthly reflection yet — keep showing up in prayer and
-                  you’ll unlock a monthly summary here.
+                  Monthly reflections are created on the first day of each month.
+                  Keep praying - your reflection will appear here.
+                
                 </Text>
               </View>
             )}
