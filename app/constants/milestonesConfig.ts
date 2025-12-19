@@ -35,7 +35,7 @@ export const MILESTONES: MilestoneConfig[] = [
     requiredStreak: 7,
     verseReference: "Mark 4:26-27",
     verseText:
-      "This is what the kingdom of God is like. A man scatters seed on the ground. Night and day, whether he sleeps or gets up, the seed sprouts and grows,though he does not know how.",
+      "This is what the kingdom of God is like. A man scatters seed on the ground. Night and day, whether he sleeps or gets up, the seed sprouts and grows, though he does not know how.",
     description:
       "One week of meeting with God. Night and day, God is at work in ways you can’t yet see.",
   },
