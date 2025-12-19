@@ -177,7 +177,7 @@ export default function MilestoneTimelineModal({
                           ]}
                         >
                           <Ionicons
-                            name={unlocked ? "checkmark" : "lock-closed-outline"}
+                            name={unlocked ? "checkmark" : "time-outline"}
                             size={20}
                             color={unlocked ? colors.accent : colors.textSecondary}
                           />
@@ -218,7 +218,7 @@ export default function MilestoneTimelineModal({
                       {isNext ? (
                         <View style={styles.unlockRow}>
                           <Ionicons
-                            name="time-outline"
+                            name="lock-closed"
                             size={14}
                             color={colors.accent}
                             style={{ marginRight: 6 }}
@@ -335,7 +335,8 @@ const styles = StyleSheet.create({
   },
   description: {
     fontFamily: fonts.body,
-    fontSize: 14,
+    fontSize: 12,
+    width: "115%",
     lineHeight: 18,
   },
   days: {
