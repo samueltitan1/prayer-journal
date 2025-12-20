@@ -405,17 +405,20 @@ useEffect(() => {
 
       const bookmarkToSave = opts?.isBookmarked ?? isBookmarked;
 
-      const { data: insertedPrayer, error: insertError } = await getSupabase().from("prayers").insert([
-        {
-          user_id: userId,
-          prayed_at: new Date().toISOString(),
-          transcript_text: draftTranscript || null,
-          duration_seconds: draftDuration ?? null,
-          audio_path: storagePath,
-        },
-      ])
-      .select()
-      .single();
+      const { data: insertedPrayer, error: insertError } = await getSupabase()
+        .from("prayers")
+        .insert([
+          {
+            user_id: userId,
+            prayed_at: new Date().toISOString(),
+            transcript_text: draftTranscript || null,
+            duration_seconds: draftDuration ?? null,
+            audio_path: storagePath,
+          },
+        ])
+        .select()
+        .single();
+
       if (bookmarkToSave && insertedPrayer?.id) {
         const { error: bookmarkError } = await getSupabase()
           .from("bookmarked_prayers")
@@ -459,78 +462,66 @@ useEffect(() => {
           setTimeout(() => setShowToast(false), 3000);
         }
       }
- // ---- Milestone detection (refactored to component level) ----
- useEffect(() => {
-  if (!userId) return;
-  if (milestoneCheckRef.current) return;
-  if (prayState !== "saved") return;
-
-  milestoneCheckRef.current = true;
-
-  const checkMilestones = async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const lastCheck = await AsyncStorage.getItem("milestone_check_date");
-    if (lastCheck === today) return;
-
-    const { data: unlockedRows } = await getSupabase()
-      .from("milestones_unlocked")
-      .select("milestone_key")
-      .eq("user_id", userId);
-
-    const unlockedIds = new Set(unlockedRows?.map((r) => r.milestone_key));
-
-    const newlyUnlocked = MILESTONES.find(
-      (m) => dayCount >= m.requiredStreak && !unlockedIds.has(m.key)
-    );
-
-    if (!newlyUnlocked) {
-      await AsyncStorage.setItem("milestone_check_date", today);
-      return;
-    }
-
-    await getSupabase()
-      .from("milestones_unlocked")
-      .insert({
-        user_id: userId,
-        milestone_key: newlyUnlocked.key,
-        streak_at_unlock: dayCount,
-      });
-
-    setUnlockedMilestone(newlyUnlocked);
-    setMilestoneModalVisible(true);
-
-    await AsyncStorage.setItem("milestone_check_date", today);
-  };
-
-  checkMilestones();
-}, [userId, prayState, dayCount]);
-
-useEffect(() => {
-  if (prayState === "idle") {
-    milestoneCheckRef.current = false;
-  }
-}, [prayState]);
-      {/* Milestone Modal */}
-      <MilestoneModal
-        visible={milestoneModalVisible}
-        milestone={unlockedMilestone}
-        onClose={() => {
-          setMilestoneModalVisible(false);
-          setUnlockedMilestone(null);
-        }}
-        onViewTimeline={async () => {
-          setMilestoneModalVisible(false);
-          setUnlockedMilestone(null);
-          router.replace("/(tabs)/journal");
-          await AsyncStorage.setItem("open_milestone_timeline", "true");
-        }}
-      />
+      // NOTE: If you open a PrayerEntryModal or otherwise use the saved prayer,
+      // use savedPrayerForUI (which always has signed_audio_url)
+      // e.g. router.push({ pathname: ..., params: { ...savedPrayerForUI } });
     } catch (e: any) {
       Alert.alert("Error", e.message || "Failed to save prayer.");
     } finally {
       setIsProcessing(false);
     }
   };
+  // ---- Milestone detection (component-level, valid hook usage) ----
+  useEffect(() => {
+    if (!userId) return;
+    if (milestoneCheckRef.current) return;
+    if (prayState !== "saved") return;
+
+    milestoneCheckRef.current = true;
+
+    const checkMilestones = async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const lastCheck = await AsyncStorage.getItem("milestone_check_date");
+      if (lastCheck === today) return;
+
+      const { data: unlockedRows } = await getSupabase()
+        .from("milestones_unlocked")
+        .select("milestone_key")
+        .eq("user_id", userId);
+
+      const unlockedIds = new Set(unlockedRows?.map((r) => r.milestone_key));
+
+      const newlyUnlocked = MILESTONES.find(
+        (m) => dayCount >= m.requiredStreak && !unlockedIds.has(m.key)
+      );
+
+      if (!newlyUnlocked) {
+        await AsyncStorage.setItem("milestone_check_date", today);
+        return;
+      }
+
+      await getSupabase()
+        .from("milestones_unlocked")
+        .insert({
+          user_id: userId,
+          milestone_key: newlyUnlocked.key,
+          streak_at_unlock: dayCount,
+        });
+
+      setUnlockedMilestone(newlyUnlocked);
+      setMilestoneModalVisible(true);
+
+      await AsyncStorage.setItem("milestone_check_date", today);
+    };
+
+    checkMilestones();
+  }, [userId, prayState, dayCount]);
+
+  useEffect(() => {
+    if (prayState === "idle") {
+      milestoneCheckRef.current = false;
+    }
+  }, [prayState]);
 
   const handleDiscardDraft = () => {
     setShowEditModal(false);
@@ -737,6 +728,22 @@ useEffect(() => {
         loading={isProcessing}
         isBookmarked={isBookmarked}
         onToggleBookmark={() => setIsBookmarked((v) => !v)}
+      />
+
+      {/* Milestone Modal */}
+      <MilestoneModal
+        visible={milestoneModalVisible}
+        milestone={unlockedMilestone}
+        onClose={() => {
+          setMilestoneModalVisible(false);
+          setUnlockedMilestone(null);
+        }}
+        onViewTimeline={async () => {
+          setMilestoneModalVisible(false);
+          setUnlockedMilestone(null);
+          router.replace("/(tabs)/journal");
+          await AsyncStorage.setItem("open_milestone_timeline", "true");
+        }}
       />
     </SafeAreaView>
   );

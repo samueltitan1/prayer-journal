@@ -1,6 +1,7 @@
 // app/(tabs)/journal/index.tsx
 
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
 import { useRouter } from "expo-router";
 import React, {
@@ -165,6 +166,33 @@ export default function JournalScreen() {
 
 // Milestone state
 const [milestoneTimelineVisible, setMilestoneTimelineVisible] = useState(false);
+
+// Milestone unlock state and helpers
+const [unlockedMilestones, setUnlockedMilestones] = useState<number[]>([]);
+
+const UNLOCKED_MILESTONES_KEY = "unlocked_milestones_v1";
+
+const loadUnlockedMilestones = async () => {
+  try {
+    const raw = await AsyncStorage.getItem(UNLOCKED_MILESTONES_KEY);
+    if (raw) setUnlockedMilestones(JSON.parse(raw));
+  } catch {}
+};
+
+const persistUnlockedMilestones = async (next: number[]) => {
+  setUnlockedMilestones(next);
+  try {
+    await AsyncStorage.setItem(
+      UNLOCKED_MILESTONES_KEY,
+      JSON.stringify(next)
+    );
+  } catch {}
+};
+// Load unlocked milestones when userId changes
+useEffect(() => {
+  if (!userId) return;
+  loadUnlockedMilestones();
+}, [userId]);
 // ---- Full reflection modal (weekly/monthly) ----
 const [reflectionModalVisible, setReflectionModalVisible] = useState(false);
 const [activeReflection, setActiveReflection] = useState<Reflection | null>(null);
@@ -650,7 +678,53 @@ const bookmarkedPrayers = useMemo(() => {
     // Else — no streak
     return 0;
   }, [allPrayers, userId]);
+
+  const longestStreak = useMemo(() => {
+    if (!userId) return 0;
+    if (allPrayers.length === 0) return 0;
+
+    const uniqueDates = Array.from(
+      new Set(allPrayers.map((p) => p.prayed_at.slice(0, 10)))
+    ).sort(); // oldest → newest
+
+    let longest = 0;
+    let current = 0;
+
+    for (let i = 0; i < uniqueDates.length; i++) {
+      if (i === 0) {
+        current = 1;
+      } else {
+        const prev = new Date(uniqueDates[i - 1]);
+        const curr = new Date(uniqueDates[i]);
+        const diff =
+          (curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24);
+
+        if (diff === 1) {
+          current++;
+        } else {
+          current = 1;
+        }
+      }
+      longest = Math.max(longest, current);
+    }
+
+    return longest;
+  }, [allPrayers, userId]);
   
+  // Milestone unlock logic (only adds, never removes)
+  useEffect(() => {
+    if (!longestStreak) return;
+
+    const milestoneDays = [1, 7, 21, 40, 90, 180, 365];
+
+    const newlyUnlocked = milestoneDays.filter(
+      (d) => longestStreak >= d && !unlockedMilestones.includes(d)
+    );
+
+    if (newlyUnlocked.length === 0) return;
+
+    persistUnlockedMilestones([...unlockedMilestones, ...newlyUnlocked]);
+  }, [longestStreak, unlockedMilestones]);
 
   const prayersForSelectedDate = useMemo(() => {
     if (!selectedDateKey) return [];
@@ -1483,7 +1557,7 @@ const closeReflection = () => {
         <MilestoneTimelineModal
           visible={milestoneTimelineVisible}
           currentStreak={currentStreak}
-          unlockedMilestones={[]}
+          unlockedMilestones={unlockedMilestones}
           onClose={() => setMilestoneTimelineVisible(false)}
         />
       </Portal>

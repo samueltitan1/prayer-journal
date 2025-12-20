@@ -1,4 +1,5 @@
 import { useTheme } from "@/contexts/ThemeContext";
+import { getSupabase } from "@/lib/supabaseClient";
 import { fonts, spacing } from "@/theme/theme";
 import { Prayer } from "@/types/Prayer";
 import { Ionicons } from "@expo/vector-icons";
@@ -89,6 +90,7 @@ const PrayerEntryModal: React.FC<Props> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragPosition, setDragPosition] = useState<number | null>(null);
   const dragPositionRef = useRef<number | null>(null);
+  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   console.log(
     "PrayerEntryModal render",
     "visible:", visible,
@@ -97,29 +99,58 @@ const PrayerEntryModal: React.FC<Props> = ({
   );
   
   useEffect(() => {
-    let sound: any;
+    let sound: Audio.Sound | null = null;
+    let cancelled = false;
 
-    (async () => {
+    const loadAudio = async () => {
       if (!prayer?.audio_path) return;
+
       try {
-        const { sound: snd, status } = await Audio.Sound.createAsync(
-          { uri: prayer.signed_audio_url || prayer.audio_path },
+        let url = prayer.signed_audio_url;
+
+        if (!url) {
+          const { data, error } = await getSupabase()
+            .storage
+            .from("prayer-audio")
+            .createSignedUrl(prayer.audio_path, 60 * 60);
+
+          if (error || !data?.signedUrl) {
+            console.warn("No signed_audio_url for prayer", prayer.id);
+            return;
+          }
+
+          url = data.signedUrl;
+        }
+
+        if (cancelled) return;
+
+        setPlaybackUrl(url);
+
+        const result = await Audio.Sound.createAsync(
+          { uri: url },
           { shouldPlay: false }
         );
-        sound = snd;
-        soundRef.current = snd;
-        if (status.isLoaded && status.durationMillis) {
-          setLoadedDurationMs(status.durationMillis);
+
+        sound = result.sound;
+        soundRef.current = sound;
+
+        if (result.status.isLoaded && result.status.durationMillis) {
+          setLoadedDurationMs(result.status.durationMillis);
         }
       } catch (e) {
         console.log("audio preload error", e);
       }
-    })();
+    };
+
+    loadAudio();
 
     return () => {
-      if (sound) sound.unloadAsync();
+      cancelled = true;
+      if (sound) {
+        sound.unloadAsync();
+      }
     };
-  }, [prayer?.audio_path]);
+  }, [prayer?.id, prayer?.audio_path]);
 
   const totalMs =
     loadedDurationMs ??
@@ -256,7 +287,12 @@ const PrayerEntryModal: React.FC<Props> = ({
                     styles.bigPlayButton,
                     { backgroundColor: colors.accent + "30" },
                   ]}
-                  onPress={() => onPlayPause(prayer)}
+                  onPress={() =>
+                    onPlayPause({
+                      ...prayer,
+                      signed_audio_url: playbackUrl ?? prayer.signed_audio_url,
+                    })
+                  }
                   disabled={isLoadingAudio}
                 >
                   {isLoadingAudio ? (
