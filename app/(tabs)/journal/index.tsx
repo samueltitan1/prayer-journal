@@ -83,31 +83,32 @@ const formatMsToClock = (ms?: number | null) => {
 const triggerReflection = async (
   userId: string,
   type: "weekly" | "monthly"
-) => {
+): Promise<boolean> => {
   try {
-    const {
-      data: { session },
-    } = await getSupabase().auth.getSession();
-    const accessToken = session?.access_token;
-    const res = await fetch(
-      `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/generate_reflection`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ user_id: userId, type }),
-      }
+    // 🔍 DEBUG — confirms exactly what we send to the Edge Function
+    console.log("Invoking generate_reflection with:", { userId, type });
+    // Use the configured Supabase client so this works consistently in Expo Go + TestFlight.
+    const { data, error } = await getSupabase().functions.invoke(
+      "generate_reflection",
+      { body: { user_id: userId, type } }
     );
 
-    const json = await res.json();
-    console.log(`Reflection result (${type}):`, json);
+    if (error) {
+      const anyErr: any = error;
+      console.warn(`Reflection invoke error (${type}) message:`, anyErr?.message);
+      console.warn(`Reflection invoke error (${type}) name:`, anyErr?.name);
+      console.warn(`Reflection invoke error (${type}) context:`, anyErr?.context);
+      console.warn(`Reflection invoke error (${type}) details:`, anyErr?.details);
+      return false;
+    }
+
+    console.log(`Reflection result (${type}):`, data);
+    return true;
   } catch (err) {
     console.warn(`Error calling ${type} reflection:`, err);
+    return false;
   }
 };
-
 // ---- Screen ----------------------------------------------------------
 
 export default function JournalScreen() {
@@ -163,6 +164,13 @@ export default function JournalScreen() {
   const [showReflectionToast, setShowReflectionToast] = useState(false);
   const [reflectionToastMessage, setReflectionToastMessage] = useState("");
   const [loadingReflections, setLoadingReflections] = useState(true);
+  const [reflectionsRefreshNonce, setReflectionsRefreshNonce] = useState(0);
+
+  const runTriggerReflection = async (t: "weekly" | "monthly") => {
+    if (!userId) return;
+    const ok = await triggerReflection(userId, t);
+    if (ok) setReflectionsRefreshNonce((n) => n + 1); // forces refetch
+  };
 
 // Milestone state
 const [milestoneTimelineVisible, setMilestoneTimelineVisible] = useState(false);
@@ -171,6 +179,8 @@ const [milestoneTimelineVisible, setMilestoneTimelineVisible] = useState(false);
 const [unlockedMilestones, setUnlockedMilestones] = useState<number[]>([]);
 
 const UNLOCKED_MILESTONES_KEY = "unlocked_milestones_v1";
+const LAST_WEEKLY_REFLECTION_RUN_KEY = "last_weekly_reflection_run_v1";
+const LAST_MONTHLY_REFLECTION_RUN_KEY = "last_monthly_reflection_run_v1";
 
 const loadUnlockedMilestones = async () => {
   try {
@@ -499,6 +509,13 @@ const bookmarkedPrayers = useMemo(() => {
   useEffect(() => {
     if (!userId) return;
     checkReflectionGeneration(); // run generation logic separately
+    console.log("checkReflectionGeneration fired", {
+      userId,
+      allPrayersCount: allPrayers.length,
+      now: new Date().toISOString(),
+      dayOfWeek: new Date().getDay(),
+      day: new Date().getDate(),
+    });
   }, [userId, allPrayers]);
 
   // ---- Check if weekly + monthly reflections should be generated ----
@@ -515,29 +532,54 @@ const bookmarkedPrayers = useMemo(() => {
 
     // ------- WEEKLY LOGIC -------
     if (dayOfWeek === 0) {
-      const prayersThisWeek = allPrayers.filter((p) => {
+      // Guard: only run once per Sunday (prevents repeated invokes when allPrayers changes)
+      const lastRun = await AsyncStorage.getItem(LAST_WEEKLY_REFLECTION_RUN_KEY);
+      if (lastRun === todayKey) return;
+
+      // Count prayers in the previous full week (Sun–Sat) that just ended (matches the Edge Function)
+      const end = new Date(today);
+      end.setHours(0, 0, 0, 0);
+      end.setMilliseconds(end.getMilliseconds() - 1); // Sat 23:59:59.999
+
+      const start = new Date(end);
+      start.setDate(start.getDate() - 6); // Sun 00:00
+      start.setHours(0, 0, 0, 0);
+
+      const prayersInPeriod = allPrayers.filter((p) => {
         const d = new Date(p.prayed_at);
-        return d >= new Date(today.getFullYear(), today.getMonth(), today.getDate() - 7);
+        return d >= start && d <= end;
       });
 
-      if (prayersThisWeek.length >= 2) {
-        await triggerReflection(userId, "weekly");
+      if (prayersInPeriod.length >= 2) {
+        await runTriggerReflection("weekly");
+        await AsyncStorage.setItem(LAST_WEEKLY_REFLECTION_RUN_KEY, todayKey);
       }
     }
 
     // ------- MONTHLY LOGIC -------
     if (day === 1) {
-      // Calculate previous month and year (handle year rollover for January)
-      const previousMonth = today.getMonth() === 0 ? 11 : today.getMonth() - 1;
-      const previousYear = today.getMonth() === 0 ? today.getFullYear() - 1 : today.getFullYear();
+      // Guard: only run once per day-1 (prevents repeated invokes when allPrayers changes / loads)
+      const lastRun = await AsyncStorage.getItem(LAST_MONTHLY_REFLECTION_RUN_KEY);
+      if (lastRun === todayKey) return;
 
-      const prayersThisMonth = allPrayers.filter((p) => {
+      // Count prayers in the previous calendar month (matches the Edge Function)
+      // Example: if today is Jan 1, summarize Dec 1–Dec 31.
+      const prevMonthAnchor = new Date(today.getFullYear(), today.getMonth() - 1, 15);
+
+      const start = new Date(prevMonthAnchor.getFullYear(), prevMonthAnchor.getMonth(), 1);
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(prevMonthAnchor.getFullYear(), prevMonthAnchor.getMonth() + 1, 0);
+      end.setHours(23, 59, 59, 999);
+
+      const prayersInPeriod = allPrayers.filter((p) => {
         const d = new Date(p.prayed_at);
-        return d.getMonth() === previousMonth && d.getFullYear() === previousYear;
+        return d >= start && d <= end;
       });
 
-      if (prayersThisMonth.length >= 4) {
-        await triggerReflection(userId, "monthly");
+      if (prayersInPeriod.length >= 4) {
+        await runTriggerReflection("monthly"); // ✅ ensures refetch nonce increments
+        await AsyncStorage.setItem(LAST_MONTHLY_REFLECTION_RUN_KEY, todayKey);
       }
     }
   };
@@ -602,7 +644,7 @@ const bookmarkedPrayers = useMemo(() => {
     };
   
     fetchReflections();
-  }, [userId, allPrayers]); // 🔥 listen for new prayers
+  }, [userId, allPrayers, reflectionsRefreshNonce]); // refetch on new prayers OR after reflection generation
 
 
   // ---- Derived data ---------------------------------------------------
@@ -1123,6 +1165,38 @@ const closeReflection = () => {
               daysWithPrayer={daysWithPrayer}
             />
           </View>
+          
+          {/* DEV ONLY: force reflection generation */}
+          {/* {__DEV__ && userId && (
+            <View style={{ marginBottom: 16 }}>
+              <TouchableOpacity
+                onPress={() => triggerReflection(userId, "weekly")}
+                style={{
+                  padding: 12,
+                  borderRadius: 12,
+                  backgroundColor: colors.card,
+                  marginBottom: 8,
+                }}
+              >
+                <Text style={{ color: colors.textPrimary }}>
+                  DEV: Generate weekly reflection now
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => triggerReflection(userId, "monthly")}
+                style={{
+                  padding: 12,
+                  borderRadius: 12,
+                  backgroundColor: colors.card,
+                }}
+              >
+                <Text style={{ color: colors.textPrimary }}>
+                  DEV: Generate monthly reflection now
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )} */}
 
           {/* Weekly reflection card (short) */}
           <View style={styles.section}>

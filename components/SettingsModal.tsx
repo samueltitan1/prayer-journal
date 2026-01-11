@@ -2,6 +2,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { BlurView } from "expo-blur";
+import * as LocalAuthentication from "expo-local-authentication";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -61,7 +62,8 @@ export default function SettingsModal({
   const [version, setVersion] = useState("v1.0.0");
   const [hasReflectiveSummary, setHasReflectiveSummary] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
-
+  const [biometricLockEnabled, setBiometricLockEnabled] = useState(false);
+  const [biometricSupported, setBiometricSupported] = useState(false);
   // ==========================
   // Toast
   // ==========================
@@ -167,7 +169,15 @@ export default function SettingsModal({
     setLoadingSettings(true);
     fadeInBackdrop();
     openSheet();
-
+    (async () => {
+      try {
+        const hasHardware = await LocalAuthentication.hasHardwareAsync();
+        const enrolled = await LocalAuthentication.isEnrolledAsync();
+        setBiometricSupported(Boolean(hasHardware && enrolled));
+      } catch {
+        setBiometricSupported(false);
+      }
+    })();
     const loadSettings = async () => {
       const { data, error } = await getSupabase()
         .from("user_settings")
@@ -181,6 +191,7 @@ export default function SettingsModal({
         setDeleteAudioAfterTranscription(
           data.delete_audio_after_transcription ?? false
         );
+        setBiometricLockEnabled(data.biometric_lock_enabled ?? false);
         setSubscriptionPlan(data.subscription_plan ?? "Core Plan");
         setVersion(data.version ?? "1.0.0");
         setHasReflectiveSummary(data.has_reflective_summary ?? false);
@@ -276,6 +287,48 @@ export default function SettingsModal({
     showToast(
       value ? "Reflective summaries enabled" : "Reflective summaries disabled"
     );
+  };
+  const handleBiometricToggle = async (value: boolean) => {
+    if (value) {
+      try {
+        const hasHardware = await LocalAuthentication.hasHardwareAsync();
+        const enrolled = await LocalAuthentication.isEnrolledAsync();
+  
+        if (!hasHardware || !enrolled) {
+          Alert.alert(
+            "Biometric Lock Unavailable",
+            "Face ID / Touch ID isn’t set up on this device yet. Please enable it in your device settings and try again."
+          );
+          setBiometricLockEnabled(false);
+          await updateSetting("biometric_lock_enabled", false);
+          return;
+        }
+  
+        // Verify now so user knows it works
+        const auth = await LocalAuthentication.authenticateAsync({
+          promptMessage: "Enable Face ID / Touch ID",
+          fallbackLabel: "Use Passcode",
+        });
+  
+        if (!auth.success) {
+          setBiometricLockEnabled(false);
+          await updateSetting("biometric_lock_enabled", false);
+          return;
+        }
+      } catch {
+        Alert.alert(
+          "Biometric Lock Error",
+          "We couldn’t enable Face ID / Touch ID lock right now. Please try again."
+        );
+        setBiometricLockEnabled(false);
+        await updateSetting("biometric_lock_enabled", false);
+        return;
+      }
+    }
+  
+    setBiometricLockEnabled(value);
+    await updateSetting("biometric_lock_enabled", value);
+    showToast(value ? "Face ID / Touch ID lock enabled" : "Face ID / Touch ID lock disabled");
   };
 
   const handleSignOut = async () => {
@@ -524,32 +577,18 @@ export default function SettingsModal({
           )}
 
           {/* PRIVACY */}
-          <Text
-            style={[styles.category, { color: colors.textSecondary }]}
-          >
+          <Text style={[styles.category, { color: colors.textSecondary }]}>
             PRIVACY
           </Text>
 
-          <View
-            style={[
-              styles.settingRow,
-              { backgroundColor: colors.card },
-            ]}
-          >
-            <Ionicons
-              name="trash-outline"
-              size={20}
-              color={colors.textPrimary}
-            />
+          {/* Delete audio */}
+          <View style={[styles.settingRow, { backgroundColor: colors.card }]}>
+            <Ionicons name="trash-outline" size={20} color={colors.textPrimary} />
             <View style={styles.settingText}>
-              <Text
-                style={[styles.settingLabel, { color: colors.textPrimary }]}
-              >
+              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>
                 Delete Audio Files
               </Text>
-              <Text
-                style={[styles.settingSub, { color: colors.textSecondary }]}
-              >
+              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
                 Remove after transcription
               </Text>
             </View>
@@ -559,8 +598,33 @@ export default function SettingsModal({
             />
           </View>
 
-          {/* REFLECTIVE SUMMARY */}
+          {/* Face ID / Touch ID lock */}
           <View
+            style={[
+              styles.settingRow,
+              { backgroundColor: colors.card, opacity: biometricSupported ? 1 : 0.5 },
+            ]}
+          >
+            <Ionicons name="lock-closed-outline" size={20} color={colors.textPrimary} />
+            <View style={styles.settingText}>
+              <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>
+                Face ID / Touch ID Lock
+              </Text>
+              <Text style={[styles.settingSub, { color: colors.textSecondary }]}>
+                Require biometric unlock to open the app
+              </Text>
+            </View>
+            <Switch
+              value={biometricLockEnabled}
+              onValueChange={handleBiometricToggle}
+              disabled={!biometricSupported || loadingSettings}
+              trackColor={{ false: "#777", true: colors.accent }}
+              thumbColor={biometricLockEnabled ? "#fff" : "#ccc"}
+            />
+          </View>
+
+          {/* REFLECTIVE SUMMARY */}
+          {/* <View
             style={[
               styles.settingRow,
               { backgroundColor: colors.card },
@@ -601,7 +665,7 @@ export default function SettingsModal({
           >
             When enabled, Sinai creates short reflective summaries of your own
             prayers to help you notice themes. This is private and optional.
-          </Text>
+          </Text> */}
 
           {/* SUBSCRIPTION */}
           <Text
@@ -625,7 +689,7 @@ export default function SettingsModal({
               <Text
                 style={[styles.settingSub, { color: colors.textSecondary }]}
               >
-                £2.99/month
+                £4.99/month
               </Text>
             </View>
 

@@ -47,7 +47,7 @@ export default function Onboarding3() {
         {/* Continue Button */}
         <TouchableOpacity
           style={styles.continueButton}
-          onPress={() => router.push('/(auth)/login')}
+          onPress={() => router.push('/(auth)/onboarding/reminder')}
           data-name="Button"
           data-node-id="1:45"
         >

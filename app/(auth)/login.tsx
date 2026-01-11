@@ -40,13 +40,34 @@ export default function Login() {
   }, [errorMessage]);
 
   const handleLogin = async () => {
-    const { error } = await getSupabase().auth.signInWithPassword({ email, password });
+    // Basic guard to avoid confusing Supabase errors
+    if (!email || !password) {
+      setErrorMessage("Please enter your email and password.");
+      return;
+    }
+  
+    const { error } = await getSupabase().auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+  
     if (error) {
+      const msg = (error.message || "").toLowerCase();
+  
+      // Common for new accounts if email isn't confirmed yet
+      if (msg.includes("email") && (msg.includes("confirm") || msg.includes("confirmed"))) {
+        setErrorMessage("Please confirm your email, then sign in again.");
+        return;
+      }
+  
       setErrorMessage("Incorrect email or password. Please try again.");
       return;
     }
+  
     setErrorMessage(null);
-    router.replace("/pray");
+  
+    // ✅ Correct route into the tabs group
+    router.replace("/(tabs)/pray");
   };
 
   const handleForgotPassword = async () => {

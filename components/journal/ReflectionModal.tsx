@@ -2,12 +2,13 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { fonts, spacing } from "@/theme/theme";
 import React from "react";
 import {
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableWithoutFeedback,
-    View
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableWithoutFeedback,
+  View
 } from "react-native";
 
 type Reflection = {
@@ -43,73 +44,58 @@ const ReflectionModal: React.FC<Props> = ({ visible, reflection, onClose }) => {
       <TouchableWithoutFeedback onPress={onClose}>
         <View style={styles.backdrop}>
           <TouchableWithoutFeedback onPress={() => {}}>
+          <SafeAreaView
+            style={[styles.card, { backgroundColor: colors.surface || colors.card }]}
+          >
+            {/* Header */}
             <View
-              style={[styles.card, { backgroundColor: colors.surface || colors.card }]}
+              style={[
+                styles.header,
+                { borderBottomColor: colors.textSecondary + "20" },
+              ]}
             >
-              {/* Header */}
-              <View
-                style={[
-                  styles.header,
-                  { borderBottomColor: colors.textSecondary + "20" },
-                ]}
-              >
-                <View>
-                  <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
-                    {reflection.title}
-                  </Text>
-                  <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>
-                    {new Date(reflection.created_at).toLocaleDateString("en-GB", {
-                      weekday: "short",
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </Text>
-                </View>
-              </View>
-
-              <ScrollView
-                style={{ flex: 1 }}
-                contentContainerStyle={{
-                  paddingHorizontal: spacing.lg,
-                  paddingTop: spacing.md,
-                  paddingBottom: spacing.xl,
-                  flexGrow: 1,
-                }}
-                showsVerticalScrollIndicator={false}
-              >
-                {/* Subtitle */}
-                {!!reflection.subtitle && (
-                  <Text
-                    style={[
-                      styles.subtitle,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {reflection.subtitle}
-                  </Text>
-                )}
-
-                {/* Body */}
-                <Text
-                  style={[styles.body, { color: colors.textPrimary }]}
-                >
-                  {reflection.body}
+              <View>
+                <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
+                  {reflection.title}
                 </Text>
-
-                {/* Verse */}
-                {!!reflection.verse_reference && (
-                  <Text
-                    style={[
-                      styles.verse,
-                      { color: colors.textSecondary },
-                    ]}
-                  >
-                    {reflection.verse_reference} — {reflection.verse_text}
-                  </Text>
-                )}
-              </ScrollView>
+                <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>
+                  {new Date(reflection.created_at).toLocaleDateString("en-GB", {
+                    weekday: "short",
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </Text>
+              </View>
             </View>
+
+            {/* ✅ Scrollable content area */}
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={{
+                paddingHorizontal: spacing.lg,
+                paddingTop: spacing.md,
+                paddingBottom: spacing.xl,
+              }}
+              showsVerticalScrollIndicator={false}
+            >
+              {!!reflection.subtitle && (
+                <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+                  {reflection.subtitle}
+                </Text>
+              )}
+
+              <Text style={[styles.body, { color: colors.textPrimary }]}>
+                {reflection.body}
+              </Text>
+
+              {!!reflection.verse_reference && (
+                <Text style={[styles.verse, { color: colors.textSecondary }]}>
+                  {reflection.verse_reference} — {reflection.verse_text}
+                </Text>
+              )}
+            </ScrollView>
+          </SafeAreaView>
           </TouchableWithoutFeedback>
         </View>
       </TouchableWithoutFeedback>
@@ -122,17 +108,16 @@ backdrop: {
 flex: 1,
 backgroundColor: "rgba(0,0,0,0.45)",
 justifyContent: "center",
-paddingHorizontal: spacing.md,
+paddingHorizontal: spacing.lg,
 },
   card: {
-  width: "92%",
+  width: "95%",
   maxHeight: "85%",
-  minHeight: "45%",
+  minHeight: "60%",
   alignSelf: "center",
-  borderRadius: 22,
-  paddingBottom: spacing.lg,
+  borderRadius: 24,
   overflow: "hidden",
-
+  flex: 0,
 },
   header: {
     paddingHorizontal: spacing.lg,
@@ -140,6 +125,7 @@ paddingHorizontal: spacing.md,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   headerTitle: {
     fontFamily: fonts.heading,

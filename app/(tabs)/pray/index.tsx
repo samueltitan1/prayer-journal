@@ -1,17 +1,21 @@
 import type { MilestoneConfig } from "@/app/constants/milestonesConfig";
 import { MILESTONES } from "@/app/constants/milestonesConfig";
+import NetInfo from "@react-native-community/netinfo";
 import MilestoneModal from "../../../components/MilestoneModal";
+import { enqueuePrayer, getQueuedCount, syncQueuedPrayers } from "../../../lib/offlineQueue";
 // app/(tabs)/pray/index.tsx
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
+import * as LocalAuthentication from "expo-local-authentication";
 import { useRouter } from "expo-router";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
+  AppState,
   Image,
   StyleSheet,
   Text,
@@ -51,27 +55,43 @@ export default function PrayScreen() {
       if (prayerSavedTimeoutRef.current) {
         clearTimeout(prayerSavedTimeoutRef.current);
       }
+      if (syncBannerTimeoutRef.current) clearTimeout(syncBannerTimeoutRef.current);
     };
   }, []);
   const [dayCount, setDayCount] = useState<number>(0);
 
   const [showSettings, setShowSettings] = useState(false);
   const [dailyReminderEnabled, setDailyReminderEnabled] = useState(false);
+  const [biometricLockEnabled, setBiometricLockEnabled] = useState(false);
+  const [biometricSupported, setBiometricSupported] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
+  const isUnlockingRef = useRef(false);
 
   const [userId, setUserId] = useState<string | null>(null);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [offlineQueuedCount, setOfflineQueuedCount] = useState(0);
+  const [isSyncingOffline, setIsSyncingOffline] = useState(false);
+  const [syncBanner, setSyncBanner] = useState<string | null>(null);
+  const syncBannerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const showSyncBanner = (msg: string, ms = 3500) => {
+    setSyncBanner(msg);
+    if (syncBannerTimeoutRef.current) clearTimeout(syncBannerTimeoutRef.current);
+    syncBannerTimeoutRef.current = setTimeout(() => setSyncBanner(null), ms);
+  };
+
+  const isSyncingOfflineRef = useRef(false);
+
+
 
   const [draftAudioUri, setDraftAudioUri] = useState<string | null>(null);
   const [draftTranscript, setDraftTranscript] = useState("");
   const [draftDuration, setDraftDuration] = useState<number | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [isBookmarked, setIsBookmarked] = useState(false);
-
-  // last reflection Seen
-  const [lastReflectionSeen, setLastReflectionSeen] = useState<string | null>(null);
-  const [showReflectionToast, setShowReflectionToast] = useState(false);
-  const [reflectionToastMessage, setReflectionToastMessage] = useState("");
+  const [keepAudio, setKeepAudio] = useState(true);
+  const [editorMode, setEditorMode] = useState<"audio" | "text">("audio");
 
 
   // Load user ID
@@ -82,6 +102,37 @@ export default function PrayScreen() {
     };
     getUserId();
   }, []);
+  
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      try {
+        const hasHardware = await LocalAuthentication.hasHardwareAsync();
+        const enrolled = await LocalAuthentication.isEnrolledAsync();
+        setBiometricSupported(Boolean(hasHardware && enrolled));
+      } catch {
+        setBiometricSupported(false);
+      }
+    })();
+  }, [userId]);
+  
+  const refreshOfflineCount = async (uid?: string | null) => {
+    if (!uid) {
+      setOfflineQueuedCount(0);
+      return;
+    }
+
+    try {
+      const c = await getQueuedCount(uid);
+      setOfflineQueuedCount(c);
+    } catch {
+      setOfflineQueuedCount(0);
+    }
+  };
+
+  useEffect(() => {
+    refreshOfflineCount(userId);
+  }, [userId, prayState]);
 
   // Load streak count
 // Load streak (local calculation, instant + matches Journal)
@@ -104,6 +155,7 @@ useEffect(() => {
     const allDates = Array.from(
       new Set(rows.map((p) => p.prayed_at.slice(0, 10)))
     );
+
 
     // Same logic as Journal
     const formatDateKey = (d: Date) =>
@@ -138,11 +190,12 @@ useEffect(() => {
     const fetchSettings = async () => {
       const { data } = await getSupabase()
         .from("user_settings")
-        .select("daily_reminder_enabled")
+        .select("daily_reminder_enabled, biometric_lock_enabled")
         .eq("user_id", userId)
         .maybeSingle();
 
       setDailyReminderEnabled(data?.daily_reminder_enabled ?? false);
+      setBiometricLockEnabled(data?.biometric_lock_enabled ?? false);
     };
 
     fetchSettings();
@@ -319,6 +372,8 @@ useEffect(() => {
       setDraftDuration(durationSeconds);
       setDraftTranscript(transcript || "");
       setIsBookmarked(false);
+      setKeepAudio(true);
+      setEditorMode("audio");
       setShowEditModal(true);
     } catch {
       Alert.alert("Error", "Failed to process prayer.");
@@ -390,47 +445,235 @@ useEffect(() => {
     }
   };
 
-  const handleSavePrayer = async (
-    opts?: { isBookmarked?: boolean }
-  ) => {
-    if (!userId || !draftAudioUri) {
+  const trySyncOfflineQueue = useCallback(async () => {
+    if (!userId) return;
+    if (isSyncingOfflineRef.current) return;
+  
+    isSyncingOfflineRef.current = true;
+    setIsSyncingOffline(true);
+  
+    try {
+      const count = await getQueuedCount(userId);
+      if (!count) {
+        setOfflineQueuedCount(0);
+        return;
+      }
+  
+      const res = await syncQueuedPrayers({
+        userId,
+        supabase: getSupabase(),
+        uploadAudio: uploadAudioToSupabase,
+        onProgress: ({ remaining }) => setOfflineQueuedCount(Math.max(0, remaining)),
+      });
+      
+      await refreshOfflineCount(userId);
+      
+      if (res.synced > 0) {
+        showSyncBanner(`Uploaded ${res.synced} queued prayer${res.synced === 1 ? "" : "s"}.`);
+      }
+      if (res.failed > 0) {
+        showSyncBanner(`Some prayers couldn’t upload yet — we’ll keep retrying.`, 4500);
+      }
+    } catch {
+      // Keep queued items for later
+    } finally {
+      isSyncingOfflineRef.current = false;
+      setIsSyncingOffline(false);
+    }
+  }, [userId]);
+  
+  const unlockWithBiometrics = useCallback(async () => {
+    if (!biometricLockEnabled) {
+      setIsLocked(false);
+      return true;
+    }
+    if (!biometricSupported) {
+      // fail-open so you don’t brick users if biometrics gets disabled on device
+      setIsLocked(false);
+      return true;
+    }
+    if (isUnlockingRef.current) return false;
+  
+    isUnlockingRef.current = true;
+    try {
+      const res = await LocalAuthentication.authenticateAsync({
+        promptMessage: "Unlock Prayer Journal",
+        fallbackLabel: "Use Passcode",
+      });
+  
+      if (res.success) {
+        setIsLocked(false);
+        return true;
+      }
+  
+      setIsLocked(true);
+      return false;
+    } catch {
+      setIsLocked(true);
+      return false;
+    } finally {
+      isUnlockingRef.current = false;
+    }
+  }, [biometricLockEnabled, biometricSupported]);
+
+  // Sync any queued prayers as soon as the userId is available (screen mount/app open)
+  useEffect(() => {
+    if (!userId) return;
+  
+    if (biometricLockEnabled) {
+      setIsLocked(true);
+      unlockWithBiometrics();
+    }
+  
+    trySyncOfflineQueue();
+  }, [userId, trySyncOfflineQueue, biometricLockEnabled, unlockWithBiometrics]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        if (biometricLockEnabled) {
+          setIsLocked(true);
+          unlockWithBiometrics();
+        }
+        trySyncOfflineQueue();
+      }
+    });
+  
+    return () => {
+      sub.remove();
+    };
+  }, [userId, trySyncOfflineQueue, biometricLockEnabled, unlockWithBiometrics]);
+
+  useEffect(() => {
+    if (!userId) return;
+  
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      // isInternetReachable can be null; treat "not false" as acceptable.
+      if (state.isConnected && state.isInternetReachable !== false) {
+        trySyncOfflineQueue();
+      }
+    });
+  
+    return () => unsubscribe();
+  }, [userId, trySyncOfflineQueue]);
+
+  
+  
+  const handleSavePrayer = async (opts?: { isBookmarked?: boolean; keepAudio?: boolean }) => {
+    if (!userId) {
+      return Alert.alert("Error", "Missing user.");
+    }
+    
+    const keepAudioToSave = opts?.keepAudio ?? keepAudio;
+    
+    // Audio mode: must have a recording
+    if (editorMode === "audio" && !draftAudioUri) {
       return Alert.alert("Error", "Missing recording.");
     }
+    
+    // Text mode: must have some text
+    if (editorMode === "text" && !draftTranscript.trim()) {
+      return Alert.alert("Nothing to save", "Write something before saving.");
+    }
+
+    const bookmarkToSave = opts?.isBookmarked ?? isBookmarked;
+    const prayedAtISO = new Date().toISOString();
 
     try {
       setIsProcessing(true);
 
-      const storagePath = await uploadAudioToSupabase(userId, draftAudioUri);
-      if (!storagePath) throw new Error("Upload failed");
+      // Try online-first
+      try {
+        const storagePath =
+          editorMode === "audio" && keepAudioToSave && draftAudioUri
+            ? await uploadAudioToSupabase(userId, draftAudioUri)
+            : null;
 
-      const bookmarkToSave = opts?.isBookmarked ?? isBookmarked;
+        if (editorMode === "audio" && keepAudioToSave && !storagePath) {
+          throw new Error("Upload failed");
+        }
+        const { data: insertedPrayer, error: insertError } = await getSupabase()
+          .from("prayers")
+          .insert([
+            {
+              user_id: userId,
+              prayed_at: prayedAtISO,
+              transcript_text: draftTranscript || null,
+              duration_seconds: draftDuration ?? null,
+              audio_path: storagePath,
+            },
+          ])
+          .select()
+          .single();
 
-      const { data: insertedPrayer, error: insertError } = await getSupabase()
-        .from("prayers")
-        .insert([
-          {
-            user_id: userId,
-            prayed_at: new Date().toISOString(),
-            transcript_text: draftTranscript || null,
-            duration_seconds: draftDuration ?? null,
-            audio_path: storagePath,
-          },
-        ])
-        .select()
-        .single();
+        if (insertError) throw insertError;
 
-      if (bookmarkToSave && insertedPrayer?.id) {
-        const { error: bookmarkError } = await getSupabase()
-          .from("bookmarked_prayers")
-          .insert({
-            user_id: userId,
-            prayer_id: insertedPrayer.id,
-          });
+        if (bookmarkToSave && insertedPrayer?.id) {
+          const { error: bookmarkError } = await getSupabase()
+            .from("bookmarked_prayers")
+            .insert({
+              user_id: userId,
+              prayer_id: insertedPrayer.id,
+            });
 
-        if (bookmarkError) throw bookmarkError;
+          if (bookmarkError) throw bookmarkError;
+        }
+
+        // If we saved online, opportunistically flush any offline queue
+        trySyncOfflineQueue();
+      } catch (e: any) {
+        // Offline fallback: queue locally, keep same success UX
+        await enqueuePrayer({
+          userId,
+          prayedAtISO,
+          transcriptText: draftTranscript || null,
+          durationSeconds: draftDuration ?? null,
+          isBookmarked: bookmarkToSave,
+          audioUri: editorMode === "audio" && keepAudioToSave ? draftAudioUri : null,
+        });
+        await refreshOfflineCount(userId);
+        showSyncBanner("We’ll retry uploading your prayer when you’re online.");
+        console.log("Saved offline (queued):", e?.message || e);
       }
-
-      if (insertError) throw insertError;
+      try {
+        if (biometricSupported && !biometricLockEnabled) {
+          const prompted = await AsyncStorage.getItem("biometric_lock_prompted");
+          if (!prompted) {
+            await AsyncStorage.setItem("biometric_lock_prompted", "true");
+      
+            Alert.alert(
+              "Lock Prayer Journal?",
+              "Want to protect your prayers with Face ID / Touch ID?",
+              [
+                { text: "Not now", style: "cancel" },
+                {
+                  text: "Enable",
+                  onPress: async () => {
+                    try {
+                      const auth = await LocalAuthentication.authenticateAsync({
+                        promptMessage: "Enable Face ID / Touch ID",
+                        fallbackLabel: "Use Passcode",
+                      });
+                      if (!auth.success) return;
+      
+                      setBiometricLockEnabled(true);
+                      await getSupabase().from("user_settings").upsert({
+                        user_id: userId,
+                        biometric_lock_enabled: true,
+                      });
+                    } catch {
+                      // ignore
+                    }
+                  },
+                },
+              ]
+            );
+          }
+        }
+      } catch {
+        // ignore
+      }
 
       // Reset draft state for the next prayer
       setShowEditModal(false);
@@ -438,8 +681,10 @@ useEffect(() => {
       setDraftTranscript("");
       setDraftDuration(null);
       setIsBookmarked(false);
+      setKeepAudio(true);
 
       setPrayState("saved");
+
       // Auto-dismiss Prayer Saved card after 3s
       if (prayerSavedTimeoutRef.current) clearTimeout(prayerSavedTimeoutRef.current);
       prayerSavedTimeoutRef.current = setTimeout(() => {
@@ -455,18 +700,14 @@ useEffect(() => {
           setTimeout(() => setShowToast(false), 3000);
           await AsyncStorage.setItem("last_prayer_toast_date", todayKey);
         }
-      } catch (e) {
-        // fallback: show toast as before if AsyncStorage fails
+      } catch {
         if (!milestoneModalVisible) {
           setShowToast(true);
           setTimeout(() => setShowToast(false), 3000);
         }
       }
-      // NOTE: If you open a PrayerEntryModal or otherwise use the saved prayer,
-      // use savedPrayerForUI (which always has signed_audio_url)
-      // e.g. router.push({ pathname: ..., params: { ...savedPrayerForUI } });
     } catch (e: any) {
-      Alert.alert("Error", e.message || "Failed to save prayer.");
+      Alert.alert("Error", e?.message || "Failed to save prayer.");
     } finally {
       setIsProcessing(false);
     }
@@ -530,6 +771,18 @@ useEffect(() => {
     setDraftDuration(null);
     setPrayState("idle");
     setIsBookmarked(false);
+    setKeepAudio(true);
+  };
+  
+  const handleOpenTextEntry = () => {
+    setEditorMode("text");
+    setShowEditModal(true);
+    setDraftAudioUri(null);
+    setDraftDuration(null);
+    setDraftTranscript("");
+    setIsBookmarked(false);
+    setKeepAudio(true);
+    setPrayState("idle");
   };
 
   // Greeting + date
@@ -549,7 +802,58 @@ useEffect(() => {
   }, []);
 
   // UI ------------------------------------------------------------------
-
+  if (isLocked) {
+    return (
+      <SafeAreaView
+        style={[
+          styles.container,
+          {
+            backgroundColor: colors.background,
+            justifyContent: "center",
+            alignItems: "center",
+          },
+        ]}
+      >
+        <Ionicons name="lock-closed-outline" size={28} color={colors.textPrimary} />
+        <Text
+          style={{
+            marginTop: spacing.md,
+            fontFamily: fonts.heading,
+            fontSize: 18,
+            color: colors.textPrimary,
+          }}
+        >
+          Locked
+        </Text>
+        <Text
+          style={{
+            marginTop: spacing.xs,
+            marginHorizontal: spacing.xl,
+            textAlign: "center",
+            fontFamily: fonts.body,
+            fontSize: 14,
+            color: colors.textSecondary,
+          }}
+        >
+          Unlock with Face ID / Touch ID to continue.
+        </Text>
+  
+        <TouchableOpacity
+          style={{
+            marginTop: spacing.lg,
+            paddingHorizontal: spacing.lg,
+            paddingVertical: spacing.sm,
+            borderRadius: 999,
+            backgroundColor: colors.accent,
+          }}
+          onPress={unlockWithBiometrics}
+          activeOpacity={0.85}
+        >
+          <Text style={{ fontFamily: fonts.heading, color: "#000" }}>Unlock</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: colors.background }]}
@@ -695,6 +999,26 @@ useEffect(() => {
             </Text>
           </TouchableOpacity>
         )}
+        {syncBanner && (
+          <View style={[styles.syncBanner, { backgroundColor: colors.card, borderColor: colors.textSecondary + "22" }]}>
+            <Ionicons name="cloud-upload-outline" size={16} color={colors.textPrimary} />
+            <Text style={[styles.syncBannerText, { color: colors.textPrimary }]}>{syncBanner}</Text>
+          </View>
+        )}
+        {offlineQueuedCount > 0 && (
+          <Text style={[styles.offlineHint, { color: colors.textSecondary }]}>
+            {offlineQueuedCount} prayer{offlineQueuedCount === 1 ? "" : "s"} queued — will sync when online
+          </Text>
+        )}
+        <TouchableOpacity
+          style={[styles.writeFab, { backgroundColor: colors.card }]}
+          onPress={handleOpenTextEntry}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="create-outline" size={22} color={colors.accent} 
+          style={{ marginBottom: 3, marginLeft: 3 }} // tiny visual nudge
+          />
+        </TouchableOpacity>
       </View>
 
       {/* Toast */}
@@ -721,6 +1045,7 @@ useEffect(() => {
       {/* Transcript Edit Modal */}
       <TranscriptEditor
         visible={showEditModal}
+        mode={editorMode}
         transcript={draftTranscript}
         onChangeText={setDraftTranscript}
         onSave={handleSavePrayer}
@@ -728,6 +1053,8 @@ useEffect(() => {
         loading={isProcessing}
         isBookmarked={isBookmarked}
         onToggleBookmark={() => setIsBookmarked((v) => !v)}
+        keepAudio={keepAudio}
+        onToggleKeepAudio={() => setKeepAudio((v) => !v)}
       />
 
       {/* Milestone Modal */}
@@ -906,5 +1233,41 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontFamily: fonts.body,
     fontSize: 14,
+  },
+  offlineHint: {
+    marginTop: spacing.md,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    textAlign: "center",
+    opacity: 0.8,
+  },
+  writeFab: {
+    position: "absolute",
+    right: spacing.lg,
+    bottom: spacing.lg * 1,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  syncBanner: {
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  syncBannerText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
   },
 });

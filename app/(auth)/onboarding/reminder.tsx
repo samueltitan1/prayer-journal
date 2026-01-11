@@ -1,10 +1,12 @@
 import ReminderConfirmationModal from '@/components/ReminderConfirmationModal';
 import { useTheme } from '@/contexts/ThemeContext';
+import { requestNotificationPermissions } from "@/lib/notifications";
 import { buttons } from '@/theme/theme';
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function OnboardingReminder() {
@@ -30,11 +32,32 @@ export default function OnboardingReminder() {
       hour12: true,
     });
   };
-
-  const handleSetReminder = () => {
-    setModalVisible(true);
+  const formatHHmm = (date: Date) => {
+    const hrs = `${date.getHours()}`.padStart(2, "0");
+    const mins = `${date.getMinutes()}`.padStart(2, "0");
+    return `${hrs}:${mins}`;
   };
 
+  const handleSetReminder = async () => {
+    const ok = await requestNotificationPermissions();
+    if (!ok) {
+      Alert.alert(
+        "Notifications Disabled",
+        "Enable notifications to receive daily prayer reminders. You can change this anytime in Settings."
+      );
+      return;
+    }
+
+    // Save pending reminder locally; we'll apply it after login once we have userId.
+    const timeHHmm = formatHHmm(selectedTime);
+    await AsyncStorage.setItem(
+      "pending_prayer_reminder",
+      JSON.stringify({ enabled: true, time: timeHHmm })
+    );
+
+    setModalVisible(true);
+  };
+  
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.contentContainer}>

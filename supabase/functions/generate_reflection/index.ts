@@ -1,4 +1,4 @@
-// supabase/functions/generate_reflections/index.ts
+// supabase/functions/generate_reflection/index.ts
 // @ts-nocheck  // 👈 Removes Deno/TS import noise inside Cursor
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -60,59 +60,108 @@ serve(async (req: Request): Promise<Response> => {
     // DETERMINE RANGE + VALIDATION
     // -----------------------------------------------------
     if (type === "weekly") {
-      rangeStart = startOfWeek();
-      rangeEnd = endOfWeek();
-
       // Only generate on Sundays
       if (today.getDay() !== 0) {
-        return new Response(
-          JSON.stringify({ skipped: "Not Sunday" }),
-          { status: 200 }
-        );
+        return new Response(JSON.stringify({ skipped: "Not Sunday" }), {
+          status: 200,
+        });
       }
+
+      // ✅ Summarize the *previous* full week (Sun–Sat) that just ended.
+      // If today is Sunday, the week we want ends at Saturday 23:59:59.999.
+      const end = new Date(today);
+      end.setHours(0, 0, 0, 0); // today 00:00
+      end.setMilliseconds(end.getMilliseconds() - 1); // yesterday 23:59:59.999
+
+      const start = new Date(end);
+      start.setDate(start.getDate() - 6); // back to Sunday 00:00
+      start.setHours(0, 0, 0, 0);
+
+      rangeStart = start;
+      rangeEnd = end;
     } else {
-      rangeStart = startOfMonth();
-      rangeEnd = endOfMonth();
-
-     // ✅ Only run on the 1st of the month
+      // ✅ Only run on the 1st of the month
       const isFirstDay = today.getDate() === 1;
-
       if (!isFirstDay) {
-        return new Response(
-          JSON.stringify({ skipped: "Not first day of month" }),
-          { status: 200 }
-        );
+        return new Response(JSON.stringify({ skipped: "Not first day of month" }), {
+          status: 200,
+        });
       }
+
+      // ✅ Summarize the *previous* calendar month.
+      const prevMonthAnchor = new Date(today.getFullYear(), today.getMonth() - 1, 15);
+
+      const start = new Date(prevMonthAnchor.getFullYear(), prevMonthAnchor.getMonth(), 1);
+      start.setHours(0, 0, 0, 0);
+
+      const end = new Date(prevMonthAnchor.getFullYear(), prevMonthAnchor.getMonth() + 1, 0);
+      end.setHours(23, 59, 59, 999);
+
+      rangeStart = start;
+      rangeEnd = end;
     }
 
     // -----------------------------------------------------
     // PREVENT DUPLICATE REFLECTIONS
     // -----------------------------------------------------
+    // Block only if we already generated a reflection *today (UTC)*.
+    // Do NOT use the summarized period for dedupe, because a reflection created
+    // on the boundary (e.g., last Sunday) can fall inside the next week's range.
+
+    const startOfTodayUTC = new Date(
+      Date.UTC(
+        today.getUTCFullYear(),
+        today.getUTCMonth(),
+        today.getUTCDate(),
+        0,
+        0,
+        0,
+        0
+      )
+    );
+
+    const endOfTodayUTC = new Date(
+      Date.UTC(
+        today.getUTCFullYear(),
+        today.getUTCMonth(),
+        today.getUTCDate(),
+        23,
+        59,
+        59,
+        999
+      )
+    );
+
     const { data: existing, error } = await supabase
       .from("reflections")
       .select("id, created_at")
       .eq("user_id", user_id)
       .eq("type", type)
+      .gte("created_at", startOfTodayUTC.toISOString())
+      .lte("created_at", endOfTodayUTC.toISOString())
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    
-      if (error) {
-        console.error("Error checking existing reflections:", error);
-      }
-      
-      if (existing) {
-        const lastCreated = new Date(existing.created_at);
-    
-      // If the latest reflection already falls inside this week's/month's range, skip
-      if (lastCreated >= rangeStart && lastCreated <= rangeEnd) {
-        return new Response(
-          JSON.stringify({
-            skipped: "Reflection already exists for this period",
-          }),
-          { status: 200 }
-        );
-      }
+
+    if (error) {
+      console.error("Error checking existing reflections:", error);
+    }
+
+    if (existing) {
+      return new Response(
+        JSON.stringify({
+          skipped: "Reflection already exists for today",
+          debug: {
+            user_id,
+            type,
+            now: new Date().toISOString(),
+            startOfTodayUTC: startOfTodayUTC.toISOString(),
+            endOfTodayUTC: endOfTodayUTC.toISOString(),
+            existing,
+          },
+        }),
+        { status: 200 }
+      );
     }
 
     // -----------------------------------------------------
@@ -193,10 +242,18 @@ WHAT TO AVOID:
 - No theological interpretation
 - No platitudes or forced positivity
 
-STRUCTURE (80–100 words):
+STRUCTURE (MANDATORY):
 1. Primary themes
 2. How they appeared
 3. The week's spiritual texture
+4. Gentle closing reflection
+
+OUTPUT REQUIREMENT (MANDATORY):
+- Write BETWEEN 80 AND 120 WORDS.
+- If you are below 80 words, you MUST continue writing until you reach at least 80 words.
+- Do NOT stop early.
+- Do NOT add new themes. You may ONLY expand by describing how the SAME themes/emotions/postures showed up across the period.
+- Output ONLY the reflection text.
 
 PRAYERS FROM THIS WEEK
 -------------------------
@@ -230,11 +287,18 @@ WHAT TO AVOID:
 - No growth assessments
 - No forced resolution
 
-STRUCTURE (150–200 words):
+STRUCTURE (MANDATORY):
 1. Overall atmosphere
 2. Primary theme
 3. Secondary movement or tension
 4. Gentle closing reflection
+
+OUTPUT REQUIREMENT (MANDATORY):
+- Write BETWEEN 150 AND 200 WORDS.
+- If you are below 150 words, you MUST continue writing until you reach at least 150 words.
+- Do NOT stop early.
+- Do NOT add new themes. You may ONLY expand by describing how the SAME themes/emotions/postures showed up across the period.
+- Output ONLY the reflection text.
 
 PRAYERS FROM THIS MONTH
 -------------------------
@@ -244,42 +308,94 @@ ${transcripts}
 
 const prompt = type === "weekly" ? weeklyPrompt : monthlyPrompt;
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.4,
-      max_tokens: 200,
-    });
+const completion = await openai.chat.completions.create({
+  model: "gpt-4o-mini",
+  messages: [
+    {
+      role: "system",
+      content:
+        "You are writing a reflection. You MUST obey the requested word-count range exactly. Output ONLY the reflection text.",
+    },
+    { role: "user", content: prompt },
+  ],
+  temperature: 0.35,
+  max_tokens: 1200,
+});
 
     const summary = completion.choices[0].message?.content?.trim() ?? null;
 
-    if (!summary) {
-      return new Response(
-        JSON.stringify({ error: "AI returned no content" }),
-        { status: 500 }
-      );
-    }
+if (!summary) {
+  return new Response(JSON.stringify({ error: "AI returned no content" }), {
+    status: 500,
+  });
+}
 
-    // -----------------------------------------------------
-    // INSERT REFLECTION
-    // -----------------------------------------------------
-    await supabase.from("reflections").insert({
-      user_id,
-      type,
-      title: type === "weekly" ? "This Week’s Reflection" : "This Month’s Reflection",
-      body: summary,
-      created_at: new Date().toISOString(),
-    });
+const countWords = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
 
-    return new Response(JSON.stringify({ summary }), {
-      headers: { "Content-Type": "application/json" },
-      status: 200,
-    });
+const bounds =
+  type === "weekly" ? { min: 80, max: 120 } : { min: 150, max: 200 };
 
-  } catch (err: any) {
-    console.error("Reflection generation error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-    });
-  }
+const enforceWordBounds = async (text: string) => {
+  const targetWords = Math.round((bounds.min + bounds.max) / 2);
+
+  const rewritePrompt = `
+Rewrite the reflection below so it is WITHIN ${bounds.min}–${bounds.max} words.
+
+Rules (do not break these):
+- Keep the same tone and constraints (no advice, no interpretation of God's intent, no platitudes).
+- Do NOT add new themes. You may ONLY expand by describing how the SAME themes/emotions/postures showed up across the period.
+- Output ONLY the reflection text.
+
+If you struggle to hit the range, aim for EXACTLY ${targetWords} words.
+
+REFLECTION TO REWRITE:
+${text}
+`;
+
+  const retry = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content:
+          "You MUST obey the requested word-count range. Output ONLY the reflection text.",
+      },
+      { role: "user", content: rewritePrompt },
+    ],
+    temperature: 0.2,
+    max_tokens: 1200,
+  });
+
+  return retry.choices[0].message?.content?.trim() ?? text;
+};
+
+// Enforce bounds (one retry)
+let finalSummary = summary;
+let finalWc = countWords(finalSummary);
+
+if (finalWc < bounds.min || finalWc > bounds.max) {
+  finalSummary = await enforceWordBounds(finalSummary);
+  finalWc = countWords(finalSummary);
+}
+
+// INSERT REFLECTION
+await supabase.from("reflections").insert({
+  user_id,
+  type,
+  title: type === "weekly" ? "This Week’s Reflection" : "This Month’s Reflection",
+  body: finalSummary,
+  created_at: new Date().toISOString(),
+});
+
+return new Response(
+  JSON.stringify({ summary: finalSummary, word_count: finalWc, bounds, type }),
+  { headers: { "Content-Type": "application/json" }, status: 200 }
+);
+} catch (err: any) {
+  console.error("Reflection generation error:", err);
+  return new Response(JSON.stringify({ error: err?.message ?? String(err) }), {
+    status: 500,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 });

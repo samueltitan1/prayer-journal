@@ -48,7 +48,7 @@ export async function scheduleDailyPrayerNotification(time: string) {
       sound: Platform.OS === "ios" ? "default" : undefined,
     },
     trigger: {
-      type: "calendar",
+      type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
       hour,
       minute,
       repeats: true,

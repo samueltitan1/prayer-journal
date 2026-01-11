@@ -9,6 +9,7 @@ import {
   Modal,
   Platform,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -20,17 +21,21 @@ import { fonts, spacing } from "../theme/theme";
 
 interface TranscriptEditorProps {
   visible: boolean;
+  mode: "audio" | "text";
   transcript: string;
   onChangeText: (text: string) => void;
-  onSave: (opts?: { isBookmarked?: boolean }) => void;
+  onSave: (opts?: { isBookmarked?: boolean; keepAudio?: boolean }) => void;
   onDiscard: () => void;
   loading?: boolean;
   isBookmarked: boolean;
   onToggleBookmark: () => void;
+  keepAudio: boolean;
+  onToggleKeepAudio: () => void;
 }
 
 export default function TranscriptEditor({
   visible,
+  mode,
   transcript,
   onChangeText,
   onSave,
@@ -38,6 +43,8 @@ export default function TranscriptEditor({
   loading,
   isBookmarked,
   onToggleBookmark,
+  keepAudio,
+  onToggleKeepAudio,
 }: TranscriptEditorProps) {
   const { colors } = useTheme();
 
@@ -50,9 +57,9 @@ export default function TranscriptEditor({
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={[styles.modal, { backgroundColor: colors.card }]}>
           <View style={styles.headerRow}>
-              <Text style={[styles.title, { color: colors.textPrimary }]}>
-                Review your prayer
-              </Text>
+          <Text style={[styles.title, { color: colors.textPrimary }]}>
+            {mode === "text" ? "Write your prayer" : "Review your prayer"}
+          </Text>
 
               <TouchableOpacity
                 onPress={() => {
@@ -69,8 +76,40 @@ export default function TranscriptEditor({
               </TouchableOpacity>
             </View>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              You can correct any words before saving.
+              {mode === "text"
+                ? "Write freely before saving."
+                : "You can correct any words before saving."}
             </Text>
+
+            {mode === "audio" && (
+              <View
+                style={[
+                  styles.keepAudioRow,
+                  {
+                    borderColor: colors.textSecondary + "33",
+                    backgroundColor: colors.background,
+                  },
+                ]}
+              >
+                <View style={styles.keepAudioLeft}>
+                  <Text style={[styles.keepAudioText, { color: colors.textPrimary }]}>
+                    Save audio file
+                  </Text>
+                  <Text style={[styles.keepAudioHint, { color: colors.textSecondary }]}>
+                    (optional)
+                  </Text>
+                </View>
+
+                <Switch
+                  value={keepAudio}
+                  onValueChange={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    onToggleKeepAudio();
+                  }}
+                  disabled={loading}
+                />
+              </View>
+            )}
 
             <TextInput
               multiline
@@ -103,7 +142,7 @@ export default function TranscriptEditor({
 
               <TouchableOpacity
                 style={[styles.btn, { backgroundColor: colors.accent }]}
-                onPress={() => onSave({ isBookmarked })}
+                onPress={() => onSave({ isBookmarked, keepAudio })}
                 disabled={loading}
               >
                 {loading ? (
@@ -180,5 +219,29 @@ const styles = StyleSheet.create({
   btnText: {
     fontFamily: fonts.heading,
     fontSize: 14,
+  },
+  keepAudioRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    marginBottom: spacing.md,
+  },
+  keepAudioLeft: {
+    flexDirection: "column",
+    flex: 1,
+    paddingRight: spacing.md,
+  },
+  keepAudioText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+  },
+  keepAudioHint: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    marginTop: 2,
   },
 });
