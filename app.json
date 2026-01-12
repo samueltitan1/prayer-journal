@@ -15,6 +15,7 @@
       "**/*"
     ],
     "ios": {
+      "usesAppleSignIn": true,
       "infoPlist": {
         "UIKeyboardDismissModeOnDrag": "YES",
         "UIKeyboardWillShowNotification": true,
@@ -23,7 +24,7 @@
       },
       "supportsTablet": true,
       "bundleIdentifier": "com.sinaiglobal.prayerjournal",
-      "buildNumber": "1.0.0"
+      "buildNumber": "1.0.2"
     },
     "android": {
       "adaptiveIcon": {
@@ -43,6 +44,7 @@
     "plugins": [
       "expo-router",
       "expo-font",
+      "expo-apple-authentication",
       [
         "expo-av",
         {

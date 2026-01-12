@@ -58,7 +58,7 @@ export default function TranscriptEditor({
           <View style={[styles.modal, { backgroundColor: colors.card }]}>
           <View style={styles.headerRow}>
           <Text style={[styles.title, { color: colors.textPrimary }]}>
-            {mode === "text" ? "Write your prayer" : "Review your prayer"}
+            {mode === "text" ? "Journal Entry" : "Review your prayer"}
           </Text>
 
               <TouchableOpacity
@@ -77,7 +77,7 @@ export default function TranscriptEditor({
             </View>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
               {mode === "text"
-                ? "Write freely before saving."
+                ? "Write your prayer and save it to your journal."
                 : "You can correct any words before saving."}
             </Text>
 
@@ -122,7 +122,7 @@ export default function TranscriptEditor({
                   borderColor: colors.textSecondary + "33",
                 },
               ]}
-              placeholder="Your prayer transcription will appear here..."
+              placeholder="Your words to the Father..."
               placeholderTextColor={colors.textSecondary + "77"}
               textAlignVertical="top"
             />

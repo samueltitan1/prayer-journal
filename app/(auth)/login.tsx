@@ -1,10 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as AppleAuthentication from "expo-apple-authentication";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
   Image,
+  Platform,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -24,6 +26,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [appleLoading, setAppleLoading] = useState(false);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -78,6 +81,51 @@ export default function Login() {
     const { error } = await getSupabase().auth.resetPasswordForEmail(email);
     if (error) Alert.alert("Error", error.message);
     else Alert.alert("Check your inbox", "We’ve sent you a reset link.");
+  };
+
+  const handleAppleSignIn = async () => {
+    try {
+      setErrorMessage(null);
+      setAppleLoading(true);
+  
+      if (Platform.OS !== "ios") {
+        Alert.alert("Unavailable", "Apple Sign In is only available on iOS.");
+        return;
+      }
+  
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+  
+      if (!credential.identityToken) {
+        Alert.alert(
+          "Sign in failed",
+          "Apple did not return an identity token. Please try again."
+        );
+        return;
+      }
+  
+      const { error } = await getSupabase().auth.signInWithIdToken({
+        provider: "apple",
+        token: credential.identityToken,
+      });
+  
+      if (error) {
+        setErrorMessage(error.message || "Apple sign-in failed. Please try again.");
+        return;
+      }
+  
+      router.replace("/(tabs)/pray");
+    } catch (e: any) {
+      // user cancels Apple sheet
+      if (e?.code === "ERR_REQUEST_CANCELED") return;
+      setErrorMessage(e?.message ?? "Apple sign-in failed. Please try again.");
+    } finally {
+      setAppleLoading(false);
+    }
   };
 
   return (
@@ -164,6 +212,23 @@ export default function Login() {
           <Text style={styles.continueButton}>SIGN IN</Text>
         </TouchableOpacity>
 
+        {Platform.OS === "ios" && (
+          <View style={{ marginTop: spacing.sm }}>
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+              cornerRadius={24}
+              style={{ height: 48, width: "100%" }}
+              onPress={handleAppleSignIn}
+            />
+            {appleLoading && (
+              <Text style={[styles.appleLoadingText, { color: colors.textSecondary }]}>
+                Signing in with Apple…
+              </Text>
+            )}
+          </View>
+        )}
+
         <Text style={[styles.footerText, { color: colors.textSecondary }]}>
           Don’t have an account?{" "}
           <Text
@@ -234,5 +299,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: spacing.sm,
     textAlign: "center",
+  },
+  appleLoadingText: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    textAlign: "center",
+    marginTop: 8,
   },
 });

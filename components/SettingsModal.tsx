@@ -183,6 +183,8 @@ export default function SettingsModal({
         .from("user_settings")
         .select("*")
         .eq("user_id", userId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (!error && data) {
@@ -212,10 +214,22 @@ export default function SettingsModal({
   // ==========================
   const updateSetting = async (key: string, value: any) => {
     if (!userId) return;
-    await getSupabase().from("user_settings").upsert({
-      user_id: userId,
-      [key]: value,
-    });
+  
+    const { error } = await getSupabase()
+      .from("user_settings")
+      .upsert(
+        {
+          user_id: userId,
+          [key]: value,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      );
+  
+    if (error) {
+      console.log("updateSetting error:", key, value, error);
+      throw error;
+    }
   };
 
   // ==========================
@@ -231,9 +245,8 @@ export default function SettingsModal({
   const handleReminderToggle = async () => {
     const next = !dailyReminderEnabled;
     setDailyReminderEnabled(next);
-    setShowTimePicker(next); // open picker when turning ON, hide when OFF
-    await updateSetting("daily_reminder_enabled", next);
-
+    setShowTimePicker(next);
+  
     if (next) {
       const ok = await requestNotificationPermissions();
       if (!ok) {
@@ -243,12 +256,17 @@ export default function SettingsModal({
         );
         setDailyReminderEnabled(false);
         setShowTimePicker(false);
-        await updateSetting("daily_reminder_enabled", false);
         return;
       }
+  
+      // ✅ PERSIST BOTH VALUES TOGETHER
+      await updateSetting("daily_reminder_enabled", true);
+      await updateSetting("reminder_time", reminderTime);
+  
       await scheduleDailyPrayerNotification(reminderTime);
       showToast(`Reminder set for ${reminderTime}`);
     } else {
+      await updateSetting("daily_reminder_enabled", false);
       await cancelDailyPrayerNotification();
       showToast("Daily reminder turned off");
     }
@@ -262,9 +280,16 @@ export default function SettingsModal({
     const t = `${hrs}:${mins}`;
 
     setReminderTime(t);
-    await updateSetting("reminder_time", t);
+
+    try {
+      await updateSetting("reminder_time", t);
+    } catch {
+      Alert.alert("Couldn’t save reminder time", "Please try again.");
+      return;
+    }
 
     if (dailyReminderEnabled) {
+      await cancelDailyPrayerNotification();
       await scheduleDailyPrayerNotification(t);
       showToast(`Reminder updated to ${t}`);
     }

@@ -46,6 +46,7 @@ export async function scheduleDailyPrayerNotification(time: string) {
       title: "Time to pray 🙏",
       body: "Take a moment to pause and pray.",
       sound: Platform.OS === "ios" ? "default" : undefined,
+      data: { kind: "daily_prayer_reminder" },
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
@@ -62,4 +63,42 @@ export async function cancelDailyPrayerNotification() {
     return;
   }
   await Notifications.cancelAllScheduledNotificationsAsync();
+}
+
+export async function getDailyPrayerReminderStatus(): Promise<{
+  enabled: boolean;
+  time: string | null;
+}> {
+  if (Platform.OS === "web") {
+    return { enabled: false, time: null };
+  }
+
+  try {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+
+    const match = scheduled.find((n: any) => {
+      const kind = n?.content?.data?.kind;
+      if (kind === "daily_prayer_reminder") return true;
+
+      // Back-compat: older scheduled notifications may not have `data`
+      const title = (n?.content?.title ?? "").toString();
+      return title.includes("Time to pray");
+    });
+
+    if (!match) return { enabled: false, time: null };
+
+    const trig: any = match.trigger;
+    const hour = typeof trig?.hour === "number" ? trig.hour : null;
+    const minute = typeof trig?.minute === "number" ? trig.minute : null;
+
+    if (hour === null || minute === null) {
+      return { enabled: true, time: null };
+    }
+
+    const hh = String(hour).padStart(2, "0");
+    const mm = String(minute).padStart(2, "0");
+    return { enabled: true, time: `${hh}:${mm}` };
+  } catch {
+    return { enabled: false, time: null };
+  }
 }

@@ -27,6 +27,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import SettingsModal from "../../../components/SettingsModal";
 import TranscriptEditor from "../../../components/TranscriptEditor";
 import { useTheme } from "../../../contexts/ThemeContext";
+import { getDailyPrayerReminderStatus } from "../../../lib/notifications";
 import { getSupabase } from "../../../lib/supabaseClient";
 import { fonts, spacing } from "../../../theme/theme";
 
@@ -66,6 +67,8 @@ export default function PrayScreen() {
   const [biometricSupported, setBiometricSupported] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const isUnlockingRef = useRef(false);
+  const isLockedRef = useRef(false);
+  const didInitialBiometricCheckForUserRef = useRef<string | null>(null);
 
   const [userId, setUserId] = useState<string | null>(null);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
@@ -190,16 +193,57 @@ useEffect(() => {
     const fetchSettings = async () => {
       const { data } = await getSupabase()
         .from("user_settings")
-        .select("daily_reminder_enabled, biometric_lock_enabled")
+        .select("daily_reminder_enabled, reminder_time, biometric_lock_enabled")
         .eq("user_id", userId)
         .maybeSingle();
-
-      setDailyReminderEnabled(data?.daily_reminder_enabled ?? false);
+    
+      const dbDailyEnabled = data?.daily_reminder_enabled ?? false;
+      const dbReminderTime = (data as any)?.reminder_time ?? null;
+    
       setBiometricLockEnabled(data?.biometric_lock_enabled ?? false);
+    
+      // If DB says OFF but a reminder is actually scheduled on-device,
+      // treat it as enabled and backfill the DB so the CTA doesn't show.
+      if (!dbDailyEnabled) {
+        const status = await getDailyPrayerReminderStatus();
+        if (status.enabled) {
+          setDailyReminderEnabled(true);
+    
+          // Best-effort backfill so future loads/devices are consistent
+          try {
+            const payload: any = {
+              user_id: userId,
+              daily_reminder_enabled: true,
+            };
+            
+            // Only write reminder_time if we actually know it.
+            // Never overwrite an existing DB value with null.
+            if (status.time) {
+              payload.reminder_time = status.time;
+            }
+            
+            try {
+              await getSupabase().from("user_settings").upsert(payload, { onConflict: "user_id" });
+            } catch {
+              // ignore
+            }
+          } catch {
+            // ignore
+          }
+    
+          return;
+        }
+      }
+    
+      setDailyReminderEnabled(dbDailyEnabled);
     };
 
     fetchSettings();
   }, [userId, showSettings]);
+
+  useEffect(() => {
+    isLockedRef.current = isLocked;
+  }, [isLocked]);
 
   // Transcript preview
   const transcriptPreview =
@@ -481,7 +525,7 @@ useEffect(() => {
       setIsSyncingOffline(false);
     }
   }, [userId]);
-  
+
   const unlockWithBiometrics = useCallback(async () => {
     if (!biometricLockEnabled) {
       setIsLocked(false);
@@ -501,13 +545,20 @@ useEffect(() => {
         fallbackLabel: "Use Passcode",
       });
   
-      if (res.success) {
-        setIsLocked(false);
-        return true;
+      if (!res.success) {
+        // If user cancelled, don't immediately re-prompt via app-state bounces.
+        // Keep locked, but avoid auto re-trigger loops feeling aggressive.
+        if (res.error === "user_cancel" || res.error === "system_cancel") {
+          setIsLocked(true);
+          return false;
+        }
+      
+        setIsLocked(true);
+        return false;
       }
   
-      setIsLocked(true);
-      return false;
+      setIsLocked(false);
+      return true;
     } catch {
       setIsLocked(true);
       return false;
@@ -520,7 +571,10 @@ useEffect(() => {
   useEffect(() => {
     if (!userId) return;
   
-    if (biometricLockEnabled) {
+    // Run the biometric gate once per signed-in user per app run.
+    // Prevents repeated prompts caused by dependency changes (e.g. biometricSupported resolving).
+    if (biometricLockEnabled && didInitialBiometricCheckForUserRef.current !== userId) {
+      didInitialBiometricCheckForUserRef.current = userId;
       setIsLocked(true);
       unlockWithBiometrics();
     }
@@ -530,19 +584,26 @@ useEffect(() => {
 
   useEffect(() => {
     if (!userId) return;
+  
     const sub = AppState.addEventListener("change", (state) => {
+      // When app goes background/inactive, lock so it requires auth when returning.
+      if (state === "background" || state === "inactive") {
+        if (biometricLockEnabled) setIsLocked(true);
+        return;
+      }
+  
       if (state === "active") {
-        if (biometricLockEnabled) {
-          setIsLocked(true);
+        // IMPORTANT: do NOT force-lock on active.
+        // iOS can bounce AppState during the Face ID sheet which causes re-prompt loops.
+        if (biometricLockEnabled && isLockedRef.current) {
           unlockWithBiometrics();
         }
+  
         trySyncOfflineQueue();
       }
     });
   
-    return () => {
-      sub.remove();
-    };
+    return () => sub.remove();
   }, [userId, trySyncOfflineQueue, biometricLockEnabled, unlockWithBiometrics]);
 
   useEffect(() => {

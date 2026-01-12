@@ -91,66 +91,120 @@ const PrayerEntryModal: React.FC<Props> = ({
   const [dragPosition, setDragPosition] = useState<number | null>(null);
   const dragPositionRef = useRef<number | null>(null);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
+  // --- Audio reset/unload helpers ---
+  const resetAudioUiState = () => {
+    setLoadedDurationMs(null);
+    setPlaybackUrl(null);
+    setIsDragging(false);
+    setDragPosition(null);
+    dragPositionRef.current = null;
+  };
+
+  const unloadCurrentSound = async () => {
+    const s = soundRef.current;
+    if (!s) return;
+
+    try {
+      await s.stopAsync();
+    } catch {}
+
+    try {
+      await s.unloadAsync();
+    } catch {}
+
+    soundRef.current = null;
+  };
   console.log(
     "PrayerEntryModal render",
     "visible:", visible,
     "hasPrayer:", !!prayer,
     "prayerId:", prayer?.id
   );
-  
+  // If the modal closes OR a different prayer opens, stop/unload any prior audio
+  // and reset UI so we never show/play the previous prayer's audio.
   useEffect(() => {
-    let sound: Audio.Sound | null = null;
     let cancelled = false;
 
-    const loadAudio = async () => {
-      if (!prayer?.audio_path) return;
-
-      try {
-        let url = prayer.signed_audio_url;
-
-        if (!url) {
-          const { data, error } = await getSupabase()
-            .storage
-            .from("prayer-audio")
-            .createSignedUrl(prayer.audio_path, 60 * 60);
-
-          if (error || !data?.signedUrl) {
-            console.warn("No signed_audio_url for prayer", prayer.id);
-            return;
-          }
-
-          url = data.signedUrl;
-        }
-
-        if (cancelled) return;
-
-        setPlaybackUrl(url);
-
-        const result = await Audio.Sound.createAsync(
-          { uri: url },
-          { shouldPlay: false }
-        );
-
-        sound = result.sound;
-        soundRef.current = sound;
-
-        if (result.status.isLoaded && result.status.durationMillis) {
-          setLoadedDurationMs(result.status.durationMillis);
-        }
-      } catch (e) {
-        console.log("audio preload error", e);
+    const run = async () => {
+      // Always unload + reset when closing
+      if (!visible) {
+        await unloadCurrentSound();
+        if (!cancelled) resetAudioUiState();
+        return;
       }
+
+      // When switching to a new prayer while open:
+      await unloadCurrentSound();
+      if (!cancelled) resetAudioUiState();
     };
 
-    loadAudio();
+    run();
 
     return () => {
       cancelled = true;
-      if (sound) {
-        sound.unloadAsync();
-      }
     };
-  }, [prayer?.id, prayer?.audio_path]);
+  }, [visible, prayer?.id]);
+
+useEffect(() => {
+  let cancelled = false;
+
+  const loadAudio = async () => {
+    // Written-prayer mode: nothing to load/play.
+    if (!visible) return;
+    if (!prayer?.audio_path) return;
+
+    try {
+      let url = prayer.signed_audio_url;
+
+      if (!url) {
+        const { data, error } = await getSupabase()
+          .storage
+          .from("prayer-audio")
+          .createSignedUrl(prayer.audio_path, 60 * 60);
+
+        if (error || !data?.signedUrl) {
+          console.warn("No signed_audio_url for prayer", prayer.id);
+          return;
+        }
+
+        url = data.signedUrl;
+      }
+
+      if (cancelled) return;
+
+      setPlaybackUrl(url);
+
+      // Create a fresh sound instance for this prayer.
+      const result = await Audio.Sound.createAsync(
+        { uri: url },
+        { shouldPlay: false }
+      );
+
+      if (cancelled) {
+        try {
+          await result.sound.unloadAsync();
+        } catch {}
+        return;
+      }
+
+      soundRef.current = result.sound;
+
+      if (result.status.isLoaded && result.status.durationMillis) {
+        setLoadedDurationMs(result.status.durationMillis);
+      }
+    } catch (e) {
+      console.log("audio preload error", e);
+    }
+  };
+
+  loadAudio();
+
+  return () => {
+    cancelled = true;
+    // Important: do NOT unload here; unloading is centralized in the reset effect above.
+    // This avoids an old effect unloading a newly-created sound during fast prayer switching.
+  };
+}, [visible, prayer?.id, prayer?.audio_path]);
 
   const totalMs =
     loadedDurationMs ??
@@ -274,25 +328,32 @@ const PrayerEntryModal: React.FC<Props> = ({
           {/* ===== Body ===== */}
           <View style={styles.body}>
             <View>
-              {/* --- Audio block (big play button + progress) --- */}
-              <View
-                style={[
-                  styles.audioCard,
-                  { backgroundColor: colors.card },
-                ]}
-              >
+              {/* --- Audio block (only if this entry has audio) --- */}
+              {!!prayer.audio_path && (
+                <View
+                  key={prayer.id}
+                  style={[
+                    styles.audioCard,
+                    { backgroundColor: colors.card },
+                  ]}
+                >
                 {/* Play button */}
                 <TouchableOpacity
                   style={[
                     styles.bigPlayButton,
                     { backgroundColor: colors.accent + "30" },
                   ]}
-                  onPress={() =>
+                  onPress={() => {
+                    const url = playbackUrl ?? prayer.signed_audio_url ?? null;
+                    if (!url) {
+                      console.warn("No signed_audio_url for prayer", prayer.id);
+                      return;
+                    }
                     onPlayPause({
                       ...prayer,
-                      signed_audio_url: playbackUrl ?? prayer.signed_audio_url,
-                    })
-                  }
+                      signed_audio_url: url,
+                    });
+                  }}
                   disabled={isLoadingAudio}
                 >
                   {isLoadingAudio ? (
@@ -381,7 +442,7 @@ const PrayerEntryModal: React.FC<Props> = ({
                   </View>
                 </View>
               </View>
-
+            )}
               {/* --- Transcript label --- */}
               {!!prayer.transcript_text && (
                 <>
@@ -431,6 +492,7 @@ const PrayerEntryModal: React.FC<Props> = ({
                 </>
               )}
             </View>
+            
 
             <TouchableOpacity
               onPress={() => setShowDeleteConfirm(true)}

@@ -79,6 +79,20 @@ const formatMsToClock = (ms?: number | null) => {
 
 };
 
+const fetchBookmarkedPrayerIds = async (userId: string) => {
+  const { data, error } = await getSupabase()
+    .from("bookmarked_prayers")
+    .select("prayer_id")
+    .eq("user_id", userId);
+
+  if (error) {
+    console.warn("Failed to load bookmarks:", error.message);
+    return new Set<string>();
+  }
+
+  return new Set<string>((data ?? []).map((r: any) => r.prayer_id));
+};
+
 // ---- Reflection generator ----
 const triggerReflection = async (
   userId: string,
@@ -228,72 +242,42 @@ const bookmarkedPrayers = useMemo(() => {
 
     const fetchAllPrayers = async () => {
       setLoadingAllPrayers(true);
-
+    
+      // 1) Fetch bookmarks once
+      const bookmarkedIds = await fetchBookmarkedPrayerIds(userId);
+    
+      // 2) Fetch prayers once (select only what Journal needs)
       const { data, error } = await getSupabase()
         .from("prayers")
-        .select("*")
+        .select("id,user_id,prayed_at,transcript_text,duration_seconds,audio_path")
         .eq("user_id", userId)
         .order("prayed_at", { ascending: false });
-
+    
       if (error) {
         console.warn("Failed to load ALL prayers:", error.message);
         setAllPrayers([]);
-      } else {
-        const prayersWithUrls: Prayer[] = [];
-        
-        for (const p of data || []) {
-        // Determine bookmark status
-        const { data: bm } = await getSupabase()
-        .from("bookmarked_prayers")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("prayer_id", p.id)
-        .maybeSingle();
-
-        const isBookmarked = !!bm;
-        //if no audio, still include bookmark state
-        
-          if (!p.audio_path) {
-            prayersWithUrls.push({ ...(p as Prayer), signed_audio_url: null });
-            continue;
-          }
-          // Add signed URL
-          const { data: signed } = await getSupabase().storage
-            .from("prayer-audio")
-            .createSignedUrl(p.audio_path, 60 * 60 * 24 * 365);
-
-          prayersWithUrls.push({
-            ...(p as Prayer),
-            signed_audio_url: signed?.signedUrl ?? null,
-            is_bookmarked: isBookmarked,
-          });
-        }
-
-        // Prevent fetch from overwriting realtime inserts
-        setAllPrayers((prev) => {
-          if (!prayersWithUrls) return prev;
-
-          const map = new Map<string, Prayer>();
-
-          // fetched = base
-          for (const p of prayersWithUrls) {
-            map.set(p.id, p);
-          }
-
-          // keep any locally-added (realtime) items not yet in fetch
-          for (const p of prev) {
-            if (!map.has(p.id)) {
-              map.set(p.id, p);
-            }
-          }
-
-          return Array.from(map.values()).sort(
-            (a, b) =>
-              new Date(b.prayed_at).getTime() - new Date(a.prayed_at).getTime()
-          );
-        });
+        setLoadingAllPrayers(false);
+        return;
       }
-
+    
+      // 3) No bulk signed urls — set null, sign later when opening a prayer
+      const normalized: Prayer[] = (data ?? []).map((p: any) => ({
+        ...(p as Prayer),
+        signed_audio_url: null,
+        is_bookmarked: bookmarkedIds.has(p.id),
+      }));
+    
+      // Keep your “don’t overwrite realtime inserts” merge
+      setAllPrayers((prev) => {
+        const map = new Map<string, Prayer>();
+        for (const p of normalized) map.set(p.id, p);
+        for (const p of prev) if (!map.has(p.id)) map.set(p.id, p);
+    
+        return Array.from(map.values()).sort(
+          (a, b) => new Date(b.prayed_at).getTime() - new Date(a.prayed_at).getTime()
+        );
+      });
+    
       setLoadingAllPrayers(false);
     };
 
@@ -326,23 +310,13 @@ const bookmarkedPrayers = useMemo(() => {
           return;
         }
 
-        const withUrls: Prayer[] = [];
+        const bookmarkedIds = await fetchBookmarkedPrayerIds(userId);
 
-        for (const p of rows || []) {
-          if (!p.audio_path) {
-            withUrls.push({ ...(p as Prayer), signed_audio_url: null });
-            continue;
-          }
-
-          const { data: signed } = await getSupabase().storage
-            .from("prayer-audio")
-            .createSignedUrl(p.audio_path, 60 * 60 * 24 * 365);
-
-          withUrls.push({
-            ...(p as Prayer),
-            signed_audio_url: signed?.signedUrl ?? null,
-          });
-        }
+        const withUrls: Prayer[] = (rows ?? []).map((p: any) => ({
+          ...(p as Prayer),
+          signed_audio_url: null, // sign on-demand
+          is_bookmarked: bookmarkedIds.has(p.id),
+        }));
 
         // Authoritative month data
         setPrayers((prev) => {
@@ -1028,17 +1002,47 @@ const bookmarkedPrayers = useMemo(() => {
     }
   };
 // ---- Open the single-prayer "Prayer Entry" modal ----
-const openPrayerEntry = (p: Prayer) => {
-  console.log("openPrayerEntry called with", p.id); 
-  setSelectedPrayer(p);
-  setPrayerEntryVisible(true);
-};
-// NEW: open modal from anywhere
-const handleSelectPrayer = (p: Prayer) => {
-  console.log("handleSelectPrayer called with", p.id);
-  setSelectedPrayer(p);
-  setPrayerEntryVisible(true);
+const openPrayerEntry = async (p: Prayer) => {
+  try {
+    let selected: Prayer = p;
 
+    // Only sign when we need to play audio
+    if (p.audio_path && !p.signed_audio_url) {
+      const { data: signed, error } = await getSupabase().storage
+        .from("prayer-audio")
+        .createSignedUrl(p.audio_path, 60 * 60); // 1 hour
+
+      if (error) console.warn("Signed URL error:", error.message);
+
+      selected = {
+        ...(p as Prayer),
+        signed_audio_url: signed?.signedUrl ?? null,
+      };
+
+      // Cache into state so next open is instant
+      setAllPrayers((prev) =>
+        prev.map((row) =>
+          row.id === selected.id
+            ? { ...row, signed_audio_url: selected.signed_audio_url }
+            : row
+        )
+      );
+      setPrayers((prev) =>
+        prev.map((row) =>
+          row.id === selected.id
+            ? { ...row, signed_audio_url: selected.signed_audio_url }
+            : row
+        )
+      );
+    }
+
+    setSelectedPrayer(selected);
+    setPrayerEntryVisible(true);
+  } catch (err) {
+    console.warn("Failed to open prayer entry:", err);
+    setSelectedPrayer(p);
+    setPrayerEntryVisible(true);
+  }
 };
 
 // Open full reflection modal
@@ -1261,7 +1265,7 @@ const closeReflection = () => {
                 <Text
                   style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
                 >
-                  Weekly relfections are created on Sundays. 
+                  Weekly reflections are created on Sundays. 
                   Add journal entries thoughout the week and your reflection will appear here automatically.
                 </Text>
               </View>
@@ -1585,7 +1589,7 @@ const closeReflection = () => {
         loadingPrayers={loadingPrayers}
         toggleBookmark={toggleBookmark}
         handleDeletePrayer={handleDeletePrayer}
-        onSelectPrayer={handleSelectPrayer}
+        onSelectPrayer={openPrayerEntry}
         isEntryOpen={prayerEntryVisible}
       />
       {bookmarksModalVisible && (
