@@ -249,7 +249,7 @@ const bookmarkedPrayers = useMemo(() => {
       // 2) Fetch prayers once (select only what Journal needs)
       const { data, error } = await getSupabase()
         .from("prayers")
-        .select("id,user_id,prayed_at,transcript_text,duration_seconds,audio_path")
+        .select("id,user_id,prayed_at,transcript_text,duration_seconds,audio_path,bible_reference,bible_version,location_name")
         .eq("user_id", userId)
         .order("prayed_at", { ascending: false });
     

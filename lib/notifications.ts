@@ -2,6 +2,22 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
+const DAILY_KIND = "daily_prayer_reminder";
+const NIGHTLY_KIND = "nightly_reflection_prompt";
+
+async function cancelScheduledByKind(kind: string) {
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  const matches = scheduled.filter((n: any) => n?.content?.data?.kind === kind);
+  await Promise.all(
+    matches.map((n: any) => Notifications.cancelScheduledNotificationAsync(n.identifier))
+  );
+}
+
+async function isScheduledKind(kind: string): Promise<boolean> {
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  return scheduled.some((n: any) => n?.content?.data?.kind === kind);
+}
+
 // Global handler – how notifications behave when received
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -38,15 +54,15 @@ export async function scheduleDailyPrayerNotification(time: string) {
   const hour = parseInt(hStr || "8", 10);
   const minute = parseInt(mStr || "0", 10);
 
-  // Clear existing prayer notifications (simple MVP approach)
-  await Notifications.cancelAllScheduledNotificationsAsync();
+  // Only cancel daily reminders, not all notifications
+  await cancelScheduledByKind(DAILY_KIND);
 
   return Notifications.scheduleNotificationAsync({
     content: {
       title: "Time to pray 🙏",
       body: "Take a moment to pause and pray.",
       sound: Platform.OS === "ios" ? "default" : undefined,
-      data: { kind: "daily_prayer_reminder" },
+      data: { kind: DAILY_KIND },
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
@@ -62,7 +78,7 @@ export async function cancelDailyPrayerNotification() {
     console.log("Notifications not supported on web; skipping cancelDailyPrayerNotification.");
     return;
   }
-  await Notifications.cancelAllScheduledNotificationsAsync();
+  await cancelScheduledByKind(DAILY_KIND);
 }
 
 export async function getDailyPrayerReminderStatus(): Promise<{
@@ -78,7 +94,7 @@ export async function getDailyPrayerReminderStatus(): Promise<{
 
     const match = scheduled.find((n: any) => {
       const kind = n?.content?.data?.kind;
-      if (kind === "daily_prayer_reminder") return true;
+      if (kind === DAILY_KIND) return true;
 
       // Back-compat: older scheduled notifications may not have `data`
       const title = (n?.content?.title ?? "").toString();
@@ -100,5 +116,46 @@ export async function getDailyPrayerReminderStatus(): Promise<{
     return { enabled: true, time: `${hh}:${mm}` };
   } catch {
     return { enabled: false, time: null };
+  }
+}
+
+// --- NIGHTLY REFLECTION PROMPT ---
+export async function scheduleNightlyReflectionPrompt() {
+  if (Platform.OS === "web") return null;
+
+  // Only schedule once (idempotent)
+  if (await isScheduledKind(NIGHTLY_KIND)) return null;
+
+  // Ensure we don't duplicate an older version
+  await cancelScheduledByKind(NIGHTLY_KIND);
+
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: "Evening Examen",
+      body: "Where did you see God today? Where did you resist God? What are you grateful for?",
+      sound: Platform.OS === "ios" ? "default" : undefined,
+      data: { kind: NIGHTLY_KIND },
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
+      hour: 21,
+      minute: 0,
+      repeats: true,
+    },
+  });
+}
+
+export async function cancelNightlyReflectionPrompt() {
+  if (Platform.OS === "web") return;
+  await cancelScheduledByKind(NIGHTLY_KIND);
+}
+
+export async function getNightlyReflectionPromptStatus(): Promise<{ enabled: boolean }> {
+  if (Platform.OS === "web") return { enabled: false };
+  try {
+    const enabled = await isScheduledKind(NIGHTLY_KIND);
+    return { enabled };
+  } catch {
+    return { enabled: false };
   }
 }

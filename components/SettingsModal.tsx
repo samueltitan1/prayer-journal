@@ -22,8 +22,11 @@ import {
 
 import {
   cancelDailyPrayerNotification,
+  cancelNightlyReflectionPrompt,
+  getNightlyReflectionPromptStatus,
   requestNotificationPermissions,
   scheduleDailyPrayerNotification,
+  scheduleNightlyReflectionPrompt,
 } from "../lib/notifications";
 
 import { router } from "expo-router";
@@ -56,6 +59,7 @@ export default function SettingsModal({
   const [dailyReminderEnabled, setDailyReminderEnabled] = useState(false);
   const [reminderTime, setReminderTime] = useState("08:00");
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [nightlyReflectionEnabled, setNightlyReflectionEnabled] = useState(true);
   const [deleteAudioAfterTranscription, setDeleteAudioAfterTranscription] =
     useState(false);
   const [subscriptionPlan, setSubscriptionPlan] = useState("Core Plan");
@@ -207,7 +211,54 @@ export default function SettingsModal({
     };
 
     loadSettings();
+
+    // Nightly reflection toggle and schedule (local-only)
+    (async () => {
+      try {
+        // Default ON unless user explicitly turned it off before
+        const stored = await AsyncStorage.getItem("nightly_reflection_enabled");
+        const enabled = stored === null ? true : stored === "true";
+        setNightlyReflectionEnabled(enabled);
+
+        if (!enabled) {
+          await cancelNightlyReflectionPrompt();
+          return;
+        }
+
+        // Ensure it's scheduled (idempotent)
+        const status = await getNightlyReflectionPromptStatus();
+        if (!status.enabled) {
+          const ok = await requestNotificationPermissions();
+          if (ok) await scheduleNightlyReflectionPrompt();
+        }
+      } catch {
+        // ignore
+      }
+    })();
   }, [visible, userId]);
+  const handleNightlyReflectionToggle = async () => {
+    const next = !nightlyReflectionEnabled;
+    setNightlyReflectionEnabled(next);
+    await AsyncStorage.setItem("nightly_reflection_enabled", String(next));
+
+    if (next) {
+      const ok = await requestNotificationPermissions();
+      if (!ok) {
+        Alert.alert(
+          "Notifications Disabled",
+          "Enable notifications to receive nightly reflection prompts."
+        );
+        setNightlyReflectionEnabled(false);
+        await AsyncStorage.setItem("nightly_reflection_enabled", "false");
+        return;
+      }
+      await scheduleNightlyReflectionPrompt();
+      showToast("Nightly reflection prompt enabled");
+    } else {
+      await cancelNightlyReflectionPrompt();
+      showToast("Nightly reflection prompt disabled");
+    }
+  };
 
   // ==========================
   // Update Setting helper
@@ -525,6 +576,36 @@ export default function SettingsModal({
             <Switch
               value={dailyReminderEnabled}
               onValueChange={handleReminderToggle}
+            />
+          </View>
+
+          <View
+            style={[
+              styles.settingRow,
+              { backgroundColor: colors.card },
+            ]}
+          >
+            <Ionicons
+              name="moon-outline"
+              size={20}
+              color={colors.textPrimary}
+            />
+            <View style={styles.settingText}>
+              <Text
+                style={[styles.settingLabel, { color: colors.textPrimary }]}
+              >
+                Evening Examen
+              </Text>
+              <Text
+                style={[styles.settingSub, { color: colors.textSecondary }]}
+              >
+                Reflect on God's presence in your day
+              </Text>
+            </View>
+            <Switch
+              value={nightlyReflectionEnabled}
+              onValueChange={handleNightlyReflectionToggle}
+              disabled={loadingSettings}
             />
           </View>
 
@@ -879,7 +960,7 @@ const styles = StyleSheet.create({
   },
   settingText: { flex: 1, marginLeft: spacing.sm, marginRight: spacing.sm },
   settingLabel: { fontFamily: fonts.heading, fontSize: 15 },
-  settingSub: { fontFamily: fonts.body, fontSize: 13, marginTop: 2 },
+  settingSub: { fontFamily: fonts.body, fontSize: 11, marginTop: 2 },
   timePickerContainer: {
     borderRadius: 16,
     paddingVertical: spacing.sm,

@@ -8,7 +8,10 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
 import * as FileSystem from "expo-file-system/legacy";
+import * as ImagePicker from "expo-image-picker";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as LocalAuthentication from "expo-local-authentication";
+import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -33,6 +36,13 @@ import { fonts, spacing } from "../../../theme/theme";
 
 type PrayState = "idle" | "recording" | "saved";
 const MAX_SECONDS_DEFAULT = 10 * 60;
+const MAX_PHOTOS_PER_PRAYER = 4;
+
+// expo-image-picker changed `mediaTypes` API across versions.
+// Use a runtime-safe value that works on older + newer versions.
+const IMAGE_MEDIA_TYPES: any = (ImagePicker as any)?.MediaType?.Images
+  ? [(ImagePicker as any).MediaType.Images]
+  : ImagePicker.MediaTypeOptions.Images;
 
 export default function PrayScreen() {
   const router = useRouter();
@@ -95,8 +105,17 @@ export default function PrayScreen() {
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [keepAudio, setKeepAudio] = useState(true);
   const [editorMode, setEditorMode] = useState<"audio" | "text">("audio");
-
-
+  // --- NEW: Bible enrichment draft state ---
+  const [entrySource, setEntrySource] = useState<"audio" | "text" | "ocr">("audio");
+  const [draftBibleRef, setDraftBibleRef] = useState<string | null>(null);
+  const [draftBibleVersion, setDraftBibleVersion] = useState<string | null>(null);
+  const [draftBibleProvider, setDraftBibleProvider] = useState<string | null>("manual");
+  // Verse editor state
+  const [isVerseEditorOpen, setIsVerseEditorOpen] = useState(false);
+  const [verseDraftRef, setVerseDraftRef] = useState("");
+  const [verseDraftVersion, setVerseDraftVersion] = useState("");
+  const [draftPhotoUris, setDraftPhotoUris] = useState<string[]>([]);
+  const [draftLocationName, setDraftLocationName] = useState<string | null>(null);
   // Load user ID
   useEffect(() => {
     const getUserId = async () => {
@@ -191,37 +210,46 @@ useEffect(() => {
     if (!userId) return;
 
     const fetchSettings = async () => {
-      const { data } = await getSupabase()
+      const { data, error } = await getSupabase()
         .from("user_settings")
         .select("daily_reminder_enabled, reminder_time, biometric_lock_enabled")
         .eq("user_id", userId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
-    
+
+      // If DB read fails, fall back to on-device schedule status
+      if (error) {
+        const status = await getDailyPrayerReminderStatus();
+        setDailyReminderEnabled(Boolean(status.enabled));
+        return;
+      }
+
       const dbDailyEnabled = data?.daily_reminder_enabled ?? false;
       const dbReminderTime = (data as any)?.reminder_time ?? null;
-    
+
       setBiometricLockEnabled(data?.biometric_lock_enabled ?? false);
-    
+
       // If DB says OFF but a reminder is actually scheduled on-device,
       // treat it as enabled and backfill the DB so the CTA doesn't show.
       if (!dbDailyEnabled) {
         const status = await getDailyPrayerReminderStatus();
         if (status.enabled) {
           setDailyReminderEnabled(true);
-    
+
           // Best-effort backfill so future loads/devices are consistent
           try {
             const payload: any = {
               user_id: userId,
               daily_reminder_enabled: true,
             };
-            
+
             // Only write reminder_time if we actually know it.
             // Never overwrite an existing DB value with null.
             if (status.time) {
               payload.reminder_time = status.time;
             }
-            
+
             try {
               await getSupabase().from("user_settings").upsert(payload, { onConflict: "user_id" });
             } catch {
@@ -230,11 +258,11 @@ useEffect(() => {
           } catch {
             // ignore
           }
-    
+
           return;
         }
       }
-    
+
       setDailyReminderEnabled(dbDailyEnabled);
     };
 
@@ -335,6 +363,10 @@ useEffect(() => {
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: true,
       playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      interruptionModeIOS: (Audio as any).InterruptionModeIOS?.DoNotMix ?? 1,
+      interruptionModeAndroid: (Audio as any).InterruptionModeAndroid?.DoNotMix ?? 1,
+      shouldDuckAndroid: true,
     });
 
     return true;
@@ -351,7 +383,11 @@ useEffect(() => {
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
       });
-
+      // Keep the screen awake while recording so the phone doesn't sleep mid-prayer.
+      try {
+        await activateKeepAwakeAsync();
+      } catch {}
+      
       const recording = new Audio.Recording();
 
       await recording.prepareToRecordAsync({
@@ -418,10 +454,20 @@ useEffect(() => {
       setIsBookmarked(false);
       setKeepAudio(true);
       setEditorMode("audio");
+      setEntrySource("audio");
+      setDraftBibleRef(null);
+      setDraftBibleVersion(null);
+      setDraftBibleProvider("youversion");
+      setDraftPhotoUris([]);
       setShowEditModal(true);
+      setDraftLocationName(null);
     } catch {
       Alert.alert("Error", "Failed to process prayer.");
     } finally {
+      // Keep the screen awake while recording so the phone doesn't sleep mid-prayer.
+      try {
+        deactivateKeepAwake();
+      } catch {}
       setIsProcessing(false);
     }
   };
@@ -484,6 +530,40 @@ useEffect(() => {
 
       if (error) return null;
       return data.path;
+    } catch {
+      return null;
+    }
+  };
+
+  const uploadImageToSupabase = async (userId: string, prayerId: string, uri: string) => {
+    try {
+      const extFromUri = uri.split("?")[0].split("#")[0].split(".").pop();
+      const fileExt = (extFromUri || "jpg").toLowerCase();
+      const contentType = fileExt === "png" ? "image/png" : "image/jpeg";
+  
+      // Storage RLS expects first folder segment == auth.uid()
+      const fileName = `${Date.now()}-${Math.random().toString(16).slice(2)}.${
+        fileExt === "png" ? "png" : "jpg"
+      }`;
+      const filePath = `${userId}/${prayerId}/${fileName}`;
+  
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: "base64" });
+  
+      const binary = globalThis.atob
+        ? globalThis.atob(base64)
+        : Buffer.from(base64, "base64").toString("binary");
+  
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+  
+      const { data, error } = await getSupabase().storage
+        .from("prayer-attachments")
+        .upload(filePath, bytes, { contentType, upsert: false });
+  
+      if (error) return null;
+      return data.path; // store in DB as storage_path
     } catch {
       return null;
     }
@@ -663,6 +743,12 @@ useEffect(() => {
               transcript_text: draftTranscript || null,
               duration_seconds: draftDuration ?? null,
               audio_path: storagePath,
+              entry_source: entrySource,
+              bible_reference: draftBibleRef,
+              bible_version: draftBibleVersion,
+              bible_provider: draftBibleProvider,
+              bible_added_at: draftBibleRef ? new Date().toISOString() : null,
+              location_name: draftLocationName,
             },
           ])
           .select()
@@ -681,10 +767,47 @@ useEffect(() => {
           if (bookmarkError) throw bookmarkError;
         }
 
+        // Upload and attach selected photos (online only)
+        if (draftPhotoUris.length > 0 && insertedPrayer?.id) {
+          const uploadedPaths: string[] = [];
+
+          for (const uri of draftPhotoUris) {
+            const p = await uploadImageToSupabase(userId, insertedPrayer.id, uri);
+            if (p) uploadedPaths.push(p);
+          }
+
+          if (uploadedPaths.length) {
+            const rows = uploadedPaths.map((storagePath) => ({
+              user_id: userId,
+              prayer_id: insertedPrayer.id,
+              storage_path: storagePath,
+              storage_bucket: "prayer-attachments",
+            }));
+
+            const { error: attachErr } = await getSupabase()
+              .from("prayer_attachments")
+              .insert(rows);
+
+            if (attachErr) {
+              console.error("Failed to insert prayer_attachments rows", attachErr);
+              // Don’t fail the whole save — prayer is already saved.
+            }
+          }
+        }
+
         // If we saved online, opportunistically flush any offline queue
         trySyncOfflineQueue();
       } catch (e: any) {
         // Offline fallback: queue locally, keep same success UX
+        // Photos are not supported offline yet, so warn and clear them.
+        if (draftPhotoUris.length > 0) {
+          Alert.alert(
+            "Photos need connection",
+            "Photo attachments will be supported offline in a later update. Please save photos when you’re online."
+          );
+          setDraftPhotoUris([]);
+        }
+
         await enqueuePrayer({
           userId,
           prayedAtISO,
@@ -743,8 +866,16 @@ useEffect(() => {
       setDraftDuration(null);
       setIsBookmarked(false);
       setKeepAudio(true);
-
+      setEntrySource("audio");
+      setDraftBibleRef(null);
+      setDraftBibleVersion(null);
+      setDraftBibleProvider("manual");
+      setDraftPhotoUris([]);
       setPrayState("saved");
+      setDraftLocationName(null);
+      setIsVerseEditorOpen(false);
+      setVerseDraftRef("");
+      setVerseDraftVersion("");
 
       // Auto-dismiss Prayer Saved card after 3s
       if (prayerSavedTimeoutRef.current) clearTimeout(prayerSavedTimeoutRef.current);
@@ -833,27 +964,327 @@ useEffect(() => {
     setPrayState("idle");
     setIsBookmarked(false);
     setKeepAudio(true);
+    setEntrySource("audio");
+    setDraftBibleRef(null);
+    setDraftBibleVersion(null);
+    setDraftBibleProvider("manual");
+    setDraftPhotoUris([]);
+    setDraftLocationName(null);
+    setIsVerseEditorOpen(false);
+    setVerseDraftRef("");
+    setVerseDraftVersion("");
+    try {
+      deactivateKeepAwake();
+    } catch {}
   };
   
   const handleOpenTextEntry = () => {
     setEditorMode("text");
+    setEntrySource("text");
+    setDraftBibleRef(null);
+    setDraftBibleVersion(null);
+    setDraftBibleProvider("manual");
     setShowEditModal(true);
     setDraftAudioUri(null);
     setDraftDuration(null);
     setDraftTranscript("");
     setIsBookmarked(false);
     setKeepAudio(true);
+    setDraftPhotoUris([]);
     setPrayState("idle");
+    setDraftLocationName(null);
+    setIsVerseEditorOpen(false);
+    setVerseDraftRef("");
+    setVerseDraftVersion("");
   };
 
-  // Greeting + date
-  const greeting = useMemo(() => {
-    const h = new Date().getHours();
-    if (h < 12) return "Good morning";
-    if (h < 18) return "Good afternoon";
-    return "Good evening";
-  }, []);
+  const handlePressVerse = () => {
+    // Toggle editor
+    setIsVerseEditorOpen((open) => {
+      const next = !open;
+      if (next) {
+        // Pre-fill with existing values if present
+        setVerseDraftRef(draftBibleRef ?? "");
+        setVerseDraftVersion(draftBibleVersion ?? "");
+      }
+      return next;
+    });
+  };
 
+  const handleAttachVerse = () => {
+    const ref = verseDraftRef.trim();
+    const ver = verseDraftVersion.trim();
+
+    if (!ref) {
+      Alert.alert("Add a verse reference", "Please enter something like John 3:16.");
+      return;
+    }
+
+    setDraftBibleRef(ref);
+    setDraftBibleVersion(ver || null);
+    setDraftBibleProvider("manual");
+    setIsVerseEditorOpen(false);
+  };
+
+  const handleRemoveVerse = () => {
+    setDraftBibleRef(null);
+    setDraftBibleVersion(null);
+    setDraftBibleProvider("manual");
+    setVerseDraftRef("");
+    setVerseDraftVersion("");
+    setIsVerseEditorOpen(false);
+  };
+  
+  const addDraftPhotos = (uris: string[]) => {
+    if (!uris.length) return;
+
+    setDraftPhotoUris((prev) => {
+      const remaining = Math.max(0, MAX_PHOTOS_PER_PRAYER - prev.length);
+      if (remaining <= 0) {
+        Alert.alert(
+          "Max photos reached",
+          `You can attach up to ${MAX_PHOTOS_PER_PRAYER} photos to a prayer.`
+        );
+        return prev;
+      }
+      const toAdd = uris.slice(0, remaining);
+      return [...prev, ...toAdd];
+    });
+  };
+
+  const pickPhotos = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== "granted") {
+        Alert.alert("Permission needed", "Please allow photo library access to attach photos.");
+        return;
+      }
+
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: IMAGE_MEDIA_TYPES,
+        allowsMultipleSelection: true,
+        quality: 0.9,
+      });
+
+      if (res.canceled) return;
+
+      const uris = (res.assets ?? [])
+        .map((a: ImagePicker.ImagePickerAsset) => a.uri)
+        .filter(Boolean) as string[];
+      if (!uris.length) return;
+
+      addDraftPhotos(uris);
+    } catch {
+      Alert.alert("Error", "Could not pick photos.");
+    }
+  };
+
+  const takePhotoAttachment = async () => {
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (perm.status !== "granted") {
+        Alert.alert("Permission needed", "Please allow camera access to take a photo.");
+        return;
+      }
+
+      const res = await ImagePicker.launchCameraAsync({
+        mediaTypes: IMAGE_MEDIA_TYPES,
+        allowsMultipleSelection: false,
+        allowsEditing: true, // crop helps readability and keeps content focused
+        quality: 0.9,
+      });
+
+      if (res.canceled) return;
+
+      const uri = res.assets?.[0]?.uri;
+      if (!uri) return;
+
+      addDraftPhotos([uri]);
+    } catch {
+      Alert.alert("Error", "Could not take a photo.");
+    }
+  };
+
+  const scanHandwritingToText = async () => {
+    try {
+      // Offer camera (scan) or library
+      const choice = await new Promise<"camera" | "library" | null>((resolve) => {
+        Alert.alert(
+          "Scan handwriting",
+          "How would you like to add your handwritten prayer?",
+          [
+            { text: "Cancel", style: "cancel", onPress: () => resolve(null) },
+            { text: "Scan with camera", onPress: () => resolve("camera") },
+            { text: "Choose from library", onPress: () => resolve("library") },
+          ]
+        );
+      });
+
+      if (!choice) return;
+
+      let res: ImagePicker.ImagePickerResult;
+
+      if (choice === "camera") {
+        const camPerm = await ImagePicker.requestCameraPermissionsAsync();
+        if (camPerm.status !== "granted") {
+          Alert.alert(
+            "Permission needed",
+            "Please allow camera access to scan handwriting."
+          );
+          return;
+        }
+
+        res = await ImagePicker.launchCameraAsync({
+          mediaTypes: IMAGE_MEDIA_TYPES,
+          allowsMultipleSelection: false,
+          allowsEditing: true, // lets the user crop tightly to the page
+          quality: 0.9,
+          base64: true,
+        });
+      } else {
+        const libPerm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (libPerm.status !== "granted") {
+          Alert.alert(
+            "Permission needed",
+            "Please allow photo library access to scan handwriting."
+          );
+          return;
+        }
+
+        res = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: IMAGE_MEDIA_TYPES,
+          allowsMultipleSelection: false,
+          allowsEditing: true, // cropping improves OCR
+          quality: 0.9,
+          base64: true,
+        });
+      }
+
+      if (res.canceled) return;
+
+      const uri = res.assets?.[0]?.uri;
+      if (!uri) return;
+
+      setIsProcessing(true);
+
+      // Use base64 directly from the picker result
+      const image_base64 = res.assets?.[0]?.base64;
+      if (!image_base64) {
+        Alert.alert("Scan failed", "We couldn’t read the image. Please try again.");
+        return;
+      }
+
+      const { data, error } = await getSupabase().functions.invoke("ocr", {
+        body: { image_base64 },
+      });
+
+      if (error || !data) {
+        let details: any = null;
+        try {
+          const ctx = (error as any)?.context;
+          // supabase-js provides a Response in error.context for FunctionsHttpError
+          if (ctx && typeof ctx.json === "function") {
+            details = await ctx.json();
+          } else if (ctx && typeof ctx.text === "function") {
+            details = await ctx.text();
+          }
+        } catch {
+          // ignore
+        }
+
+        console.error("OCR failed", { error, details });
+
+        Alert.alert(
+          "OCR failed",
+          "We couldn’t read that handwriting. Try better lighting and a tighter crop."
+        );
+        return;
+      }
+
+      const text = (data as any).text || "";
+      console.log("OCR response:", data);
+      if (!text.trim()) {
+        Alert.alert(
+          "No text found",
+          "We couldn’t detect readable text. Try better lighting and a tighter crop."
+        );
+        return;
+      }
+
+      // Populate editor
+      setEditorMode("text");
+      setEntrySource("ocr");
+      setDraftTranscript(text);
+      setDraftAudioUri(null);
+      setDraftDuration(null);
+      setShowEditModal(true);
+    } catch (e: any) {
+      Alert.alert("Error", e?.message || "Could not scan handwriting.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handlePressPhoto = () => {
+    pickPhotos();
+  };
+
+  const handlePressScan = () => {
+    scanHandwritingToText();
+  };
+
+  const handlePressLocation = async () => {
+    try {
+      // If already set, allow quick remove
+      if (draftLocationName) {
+        Alert.alert("Remove location?", draftLocationName, [
+          { text: "Cancel", style: "cancel" },
+          { text: "Remove", style: "destructive", onPress: () => setDraftLocationName(null) },
+        ]);
+        return;
+      }
+
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Location permission needed",
+          "Allow location access to tag where this prayer happened."
+        );
+        return;
+      }
+
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const [place] = await Location.reverseGeocodeAsync({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+      });
+
+      const stripLeadingNumber = (s?: string | null) => {
+        if (!s) return "";
+        // Remove a leading house/door number (e.g. "50 Scholefield Road" -> "Scholefield Road")
+        return s.replace(/^\s*\d+[\w-]*\s*/g, "").trim();
+      };
+
+      // Prefer `street` if available; fall back to `name` only if needed.
+      const rawStreet = (place as any).street ?? (place as any).name ?? "";
+      const street = stripLeadingNumber(String(rawStreet));
+      const city = (place as any).city ?? (place as any).subregion ?? "";
+
+      const label = [street, city]
+        .map((v) => (typeof v === "string" ? v.trim() : ""))
+        .filter((v) => v.length > 0)
+        .join(", ");
+
+      setDraftLocationName(label || "Current location");
+    } catch {
+      Alert.alert("Location unavailable", "Could not determine your location.");
+    }
+  };
+
+  // Date
   const today = useMemo(() => {
     return new Intl.DateTimeFormat("en-GB", {
       weekday: "long",
@@ -1116,6 +1547,30 @@ useEffect(() => {
         onToggleBookmark={() => setIsBookmarked((v) => !v)}
         keepAudio={keepAudio}
         onToggleKeepAudio={() => setKeepAudio((v) => !v)}
+        onPressVerse={handlePressVerse}
+        onPressPhoto={handlePressPhoto}
+        onPressCamera={takePhotoAttachment}
+        onPressScan={handlePressScan}
+        verseLabel={
+          draftBibleRef
+            ? `${draftBibleRef}${draftBibleVersion ? ` (${draftBibleVersion})` : ""}`
+            : null
+        }
+        onPressLocation={handlePressLocation}
+        locationLabel={draftLocationName}
+        onRemoveLocation={() => setDraftLocationName(null)}
+        photoUris={draftPhotoUris}
+        onRemovePhotoAt={(index) =>
+          setDraftPhotoUris((prev) => prev.filter((_, i) => i !== index))
+        }
+        showScanHint={entrySource === "ocr"}
+        verseEditorOpen={isVerseEditorOpen}
+        verseDraftRef={verseDraftRef}
+        verseDraftVersion={verseDraftVersion}
+        onChangeVerseRef={setVerseDraftRef}
+        onChangeVerseVersion={setVerseDraftVersion}
+        onAttachVerse={handleAttachVerse}
+        onRemoveVerse={handleRemoveVerse}
       />
 
       {/* Milestone Modal */}

@@ -7,6 +7,7 @@ import { Audio } from "expo-av";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Image,
   Modal,
   PanResponder,
   SafeAreaView,
@@ -46,15 +47,15 @@ type Props = {
 const formatHeaderDateTime = (prayed_at: string) => {
   const d = new Date(prayed_at);
   const date = d.toLocaleDateString("en-GB", {
-    weekday: "long",
     day: "numeric",
     month: "short",
+    year: "numeric"
   });
   const time = d.toLocaleTimeString("en-GB", {
     hour: "numeric",
     minute: "2-digit",
   });
-  return `${date} – ${time}`;
+  return `${date} at ${time}`;
 };
 
 const formatMsToClock = (ms?: number | null) => {
@@ -91,6 +92,61 @@ const PrayerEntryModal: React.FC<Props> = ({
   const [dragPosition, setDragPosition] = useState<number | null>(null);
   const dragPositionRef = useRef<number | null>(null);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
+  // ---- Attachment + image viewer state ----
+  const [attachmentUrls, setAttachmentUrls] = useState<string[]>([]);
+  const [imageViewerOpen, setImageViewerOpen] = useState(false);
+  const [activeImageUrl, setActiveImageUrl] = useState<string | null>(null);
+
+  // Load photo attachments (signed URLs) when modal opens
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAttachments = async () => {
+      if (!visible) {
+        setAttachmentUrls([]);
+        return;
+      }
+      if (!prayer?.id) {
+        setAttachmentUrls([]);
+        return;
+      }
+
+      try {
+        const { data: rows, error } = await getSupabase()
+          .from("prayer_attachments")
+          .select("storage_path")
+          .eq("prayer_id", prayer.id)
+          .order("created_at", { ascending: true });
+
+        if (error || !rows) {
+          if (!cancelled) setAttachmentUrls([]);
+          return;
+        }
+
+        const urls: string[] = [];
+        for (const r of rows as any[]) {
+          const p = r?.storage_path;
+          if (!p) continue;
+          const { data } = await getSupabase()
+            .storage
+            .from("prayer-attachments")
+            .createSignedUrl(p, 60 * 10);
+
+          if (data?.signedUrl) urls.push(data.signedUrl);
+        }
+
+        if (!cancelled) setAttachmentUrls(urls);
+      } catch {
+        if (!cancelled) setAttachmentUrls([]);
+      }
+    };
+
+    loadAttachments();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, prayer?.id]);
   // --- Audio reset/unload helpers ---
   const resetAudioUiState = () => {
     setLoadedDurationMs(null);
@@ -310,16 +366,14 @@ useEffect(() => {
             </View>
 
             <View style={styles.headerActions}>
-
-              {/* Close */}
               <TouchableOpacity
-                onPress={onClose}
+                onPress={() => onToggleBookmark(prayer.id)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 <Ionicons
-                  name="close"
+                  name={prayer.is_bookmarked ? "heart" : "heart-outline"}
                   size={22}
-                  color={colors.textPrimary}
+                  color={colors.accent}
                 />
               </TouchableOpacity>
             </View>
@@ -446,61 +500,107 @@ useEffect(() => {
               {/* --- Transcript label --- */}
               {!!prayer.transcript_text && (
                 <>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.transcriptLabel,
-                        { color: colors.textSecondary },
-                      ]}
-                    >
-                      TRANSCRIPT
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => onToggleBookmark(prayer.id)}
-                    >
-                      <Ionicons
-                        name={
-                          prayer.is_bookmarked ? "heart" : "heart-outline"
-                        }
-                        size={22}
-                        color={colors.accent}
-                      />
-                    </TouchableOpacity>
-                  </View>
-
+                  <View style={{ height: 8 }} />
                   {/* Full transcript */}
                   <ScrollView
                     style={{ maxHeight: 250 }}
                     nestedScrollEnabled={true}
                     showsVerticalScrollIndicator={false}
                   >
-                    <Text
-                      style={[
-                        styles.transcriptBody,
-                        { color: colors.textPrimary },
-                      ]}
-                    >
+                    <Text style={[styles.transcriptBody, { color: colors.textPrimary }]}> 
                       {prayer.transcript_text}
+                      {prayer.bible_reference ? "\n" : ""}
+                      {prayer.bible_reference ? (
+                        <Text style={[styles.verseMeta, { color: colors.textSecondary }]}>
+                          {` - ${prayer.bible_reference}${prayer.bible_version ? ` (${prayer.bible_version})` : ""}`}
+                        </Text>
+                      ) : null}
                     </Text>
                   </ScrollView>
+                  {attachmentUrls.length > 0 && (
+                    <View style={{ marginTop: spacing.md }}>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={{ gap: spacing.sm }}
+                      >
+                        {attachmentUrls.map((url) => (
+                          <TouchableOpacity
+                            key={url}
+                            onPress={() => {
+                              setActiveImageUrl(url);
+                              setImageViewerOpen(true);
+                            }}
+                            activeOpacity={0.85}
+                          >
+                            <Image
+                              source={{ uri: url }}
+                              style={{ width: 64, height: 64, borderRadius: 10 }}
+                            />
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
                 </>
               )}
             </View>
             
 
-            <TouchableOpacity
-              onPress={() => setShowDeleteConfirm(true)}
-              style={{ alignSelf: "flex-end", marginTop: spacing.lg }}
-            >
-              <Ionicons name="trash-outline" size={22} color={colors.textSecondary} />
-            </TouchableOpacity>
+            <View style={[styles.footerRow, { marginTop: spacing.lg }]}> 
+              <View style={{ flex: 1, paddingRight: spacing.md }}>
+                {!!prayer.location_name && (
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.footerMeta, { color: colors.textSecondary + "60" }]}
+                  >
+                    {prayer.location_name}
+                  </Text>
+                )}
+              </View>
+
+              <TouchableOpacity
+                onPress={() => setShowDeleteConfirm(true)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="trash-outline" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
           </View>
+
+          {imageViewerOpen && activeImageUrl && (
+            <Modal
+              visible={imageViewerOpen}
+              transparent={true}
+              animationType="fade"
+              onRequestClose={() => {
+                setImageViewerOpen(false);
+                setActiveImageUrl(null);
+              }}
+            >
+              <TouchableWithoutFeedback
+                onPress={() => {
+                  setImageViewerOpen(false);
+                  setActiveImageUrl(null);
+                }}
+              >
+                <View
+                  style={{
+                    flex: 1,
+                    backgroundColor: "rgba(0,0,0,0.9)",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    padding: spacing.lg,
+                  }}
+                >
+                  <Image
+                    source={{ uri: activeImageUrl }}
+                    style={{ width: "100%", height: "80%", resizeMode: "contain" }}
+                  />
+                </View>
+              </TouchableWithoutFeedback>
+            </Modal>
+          )}
 
           {showDeleteConfirm && (
             <View style={styles.confirmOverlay}>
@@ -625,16 +725,26 @@ const styles = StyleSheet.create({
   },
 
   // Transcript
-  transcriptLabel: {
-    fontFamily: fonts.heading,
-    fontSize: 14,
-    letterSpacing: 1,
-    marginBottom: spacing.xs,
-  },
   transcriptBody: {
     fontFamily: fonts.body,
     fontSize: 14,
     lineHeight: 22,
+  },
+  verseMeta: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    fontStyle: "italic",
+  },
+
+  footerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  footerMeta: {
+    fontFamily: fonts.body,
+    fontSize: 12,
   },
 
   confirmOverlay: {
