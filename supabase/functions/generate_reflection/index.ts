@@ -9,20 +9,37 @@ import OpenAI from "npm:openai";
 // TYPES
 // ---------------------------------------------------------
 interface ReflectionRequest {
-  user_id: string;
+  user_id?: string;
   type: "weekly" | "monthly";
 }
 
 serve(async (req: Request): Promise<Response> => {
   try {
-    const { user_id, type }: ReflectionRequest = await req.json();
+    const url = new URL(req.url);
 
-    if (!user_id || !["weekly", "monthly"].includes(type)) {
-      return new Response(
-        JSON.stringify({ error: "Missing or invalid parameters" }),
-        { status: 400 }
-      );
+    // 1) Try query param first (Cron calls will use ?type=weekly)
+    let type = (url.searchParams.get("type") ?? "") as any;
+    let user_id: string | undefined = undefined;
+    
+    // 2) If not present, try JSON body
+    if (!type) {
+      try {
+        const body = (await req.json()) as Partial<ReflectionRequest>;
+        type = body.type as any;
+        user_id = body.user_id;
+      } catch {
+        // no body
+      }
     }
+    
+    if (!["weekly", "monthly"].includes(type)) {
+      return new Response(JSON.stringify({ error: "Missing or invalid type" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    // Decide execution mode: batch if user_id is not present
+    const isBatchMode = !user_id;
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -55,15 +72,35 @@ serve(async (req: Request): Promise<Response> => {
 
     let rangeStart: Date;
     let rangeEnd: Date;
+    
+    let weekKey: string | null = null;
+    let monthKey: string | null = null;
+
+    const toDateKeyUTC = (d: Date) => {
+      // YYYY-MM-DD in UTC
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(d.getUTCDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    };
+
+    const toMonthKeyUTC = (d: Date) => {
+      // YYYY-MM
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+      return `${y}-${m}`;
+    };
 
     // -----------------------------------------------------
     // DETERMINE RANGE + VALIDATION
     // -----------------------------------------------------
     if (type === "weekly") {
-      // Only generate on Sundays
+      // If cron is running this, it SHOULD already be Sunday.
+      // Keep as a soft-skip rather than an error.
       if (today.getDay() !== 0) {
         return new Response(JSON.stringify({ skipped: "Not Sunday" }), {
           status: 200,
+          headers: { "Content-Type": "application/json" },
         });
       }
 
@@ -79,6 +116,8 @@ serve(async (req: Request): Promise<Response> => {
 
       rangeStart = start;
       rangeEnd = end;
+      // Use the summarized period start date as the idempotency key
+      weekKey = toDateKeyUTC(rangeStart);    
     } else {
       // ✅ Only run on the 1st of the month
       const isFirstDay = today.getDate() === 1;
@@ -99,125 +138,112 @@ serve(async (req: Request): Promise<Response> => {
 
       rangeStart = start;
       rangeEnd = end;
+      monthKey = toMonthKeyUTC(rangeStart);
     }
 
-    // -----------------------------------------------------
-    // PREVENT DUPLICATE REFLECTIONS
-    // -----------------------------------------------------
-    // Block only if we already generated a reflection *today (UTC)*.
-    // Do NOT use the summarized period for dedupe, because a reflection created
-    // on the boundary (e.g., last Sunday) can fall inside the next week's range.
+    const getCandidateUserIds = async (): Promise<string[]> => {
+      const { data, error } = await supabase
+        .from("prayers")
+        .select("user_id")
+        .gte("prayed_at", rangeStart.toISOString())
+        .lte("prayed_at", rangeEnd.toISOString())
+        .is("deleted_at", null);
+    
+      if (error) {
+        console.error("Failed to load candidate users:", error);
+        return [];
+      }
+    
+      const set = new Set<string>();
+      for (const row of data ?? []) {
+        if (row?.user_id) set.add(row.user_id);
+      }
+      return Array.from(set);
+    };
 
-    const startOfTodayUTC = new Date(
-      Date.UTC(
-        today.getUTCFullYear(),
-        today.getUTCMonth(),
-        today.getUTCDate(),
-        0,
-        0,
-        0,
-        0
-      )
-    );
+    // Per-user reflection generator function
+    const generateReflectionForUser = async (uid: string): Promise<"inserted" | "skipped"> => {
+      // -----------------------------------------------------
+      // PREVENT DUPLICATE REFLECTIONS (IDEMPOTENT BY PERIOD)
+      // -----------------------------------------------------
+      // Weekly: (user_id, type, week_key)
+      // Monthly: (user_id, type, month_key)
+      const dedupeCol = type === "weekly" ? "week_key" : "month_key";
+      const dedupeVal = type === "weekly" ? weekKey : monthKey;
+      
+      
+      if (!dedupeVal) {
+        console.error("Missing dedupe key for type", type);
+        return "skipped";
+      }
 
-    const endOfTodayUTC = new Date(
-      Date.UTC(
-        today.getUTCFullYear(),
-        today.getUTCMonth(),
-        today.getUTCDate(),
-        23,
-        59,
-        59,
-        999
-      )
-    );
+      const { data: existing, error } = await supabase
+        .from("reflections")
+        .select("id, created_at")
+        .eq("user_id", uid)
+        .eq("type", type)
+        .eq(dedupeCol, dedupeVal)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    const { data: existing, error } = await supabase
-      .from("reflections")
-      .select("id, created_at")
-      .eq("user_id", user_id)
-      .eq("type", type)
-      .gte("created_at", startOfTodayUTC.toISOString())
-      .lte("created_at", endOfTodayUTC.toISOString())
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      if (error) {
+        console.error("Error checking existing reflections:", error);
+      }
 
-    if (error) {
-      console.error("Error checking existing reflections:", error);
-    }
+      if (existing) {
+        // Already generated for this period, skip
+        console.log("Reflection already exists; skipping", { uid, type, [dedupeCol]: dedupeVal });
+        return "skipped";
+      }
 
-    if (existing) {
-      return new Response(
-        JSON.stringify({
-          skipped: "Reflection already exists for today",
-          debug: {
-            user_id,
-            type,
-            now: new Date().toISOString(),
-            startOfTodayUTC: startOfTodayUTC.toISOString(),
-            endOfTodayUTC: endOfTodayUTC.toISOString(),
-            existing,
-          },
-        }),
-        { status: 200 }
-      );
-    }
+      // -----------------------------------------------------
+      // FETCH PRAYERS IN RANGE
+      // -----------------------------------------------------
+      const { data: prayers, error: prayersError } = await supabase
+        .from("prayers")
+        .select("transcript_text, prayed_at")
+        .eq("user_id", uid)
+        .gte("prayed_at", rangeStart.toISOString())
+        .lte("prayed_at", rangeEnd.toISOString())
+        .order("prayed_at", { ascending: true });
 
-    // -----------------------------------------------------
-    // FETCH PRAYERS IN RANGE
-    // -----------------------------------------------------
-    const { data: prayers, error: prayersError } = await supabase
-      .from("prayers")
-      .select("transcript_text, prayed_at")
-      .eq("user_id", user_id)
-      .gte("prayed_at", rangeStart.toISOString())
-      .lte("prayed_at", rangeEnd.toISOString())
-      .order("prayed_at", { ascending: true });
+      if (prayersError) {
+        console.error("Error fetching prayers for user", uid, prayersError);
+        return "skipped";
+      }
 
-    if (prayersError) throw prayersError;
+      const transcripts = (prayers || [])
+        .filter((p) => p.transcript_text)
+        .map((p) => p.transcript_text)
+        .join("\n");
 
-    const transcripts = (prayers || [])
-      .filter((p) => p.transcript_text)
-      .map((p) => p.transcript_text)
-      .join("\n");
+      // -----------------------------------------------------
+      // MINIMUM REQUIREMENTS
+      // -----------------------------------------------------
+      if (type === "weekly" && (prayers?.length ?? 0) < 2) {
+        return "skipped";
+      }
 
-    // -----------------------------------------------------
-    // MINIMUM REQUIREMENTS
-    // -----------------------------------------------------
-    if (type === "weekly" && (prayers?.length ?? 0) < 2) {
-      return new Response(
-        JSON.stringify({ skipped: "Not enough prayers for weekly" }),
-        { status: 200 }
-      );
-    }
+      if (type === "monthly" && (prayers?.length ?? 0) < 4) {
+        return "skipped";
+      }
 
-    if (type === "monthly" && (prayers?.length ?? 0) < 4) {
-      return new Response(
-        JSON.stringify({ skipped: "Not enough prayers for monthly" }),
-        { status: 200 }
-      );
-    }
+      if (!transcripts || transcripts.trim().length < 20) {
+        return "skipped";
+      }
 
-    if (!transcripts || transcripts.trim().length < 20) {
-      return new Response(
-        JSON.stringify({ skipped: "Transcripts too short" }),
-        { status: 200 }
-      );
-    }
+      // -----------------------------------------------------
+      // GENERATE REFLECTION
+      // -----------------------------------------------------
+      const openai = new OpenAI({
+        apiKey: Deno.env.get("OPENAI_API_KEY")!,
+      });
 
-    // -----------------------------------------------------
-    // GENERATE REFLECTION
-    // -----------------------------------------------------
-    const openai = new OpenAI({
-      apiKey: Deno.env.get("OPENAI_API_KEY")!,
-    });
-
-    // -----------------------------------------------------
-// PROMPTS (SEPARATED BY TYPE)
-// -----------------------------------------------------
-
-const weeklyPrompt = `
+      // -----------------------------------------------------
+      // PROMPTS (SEPARATED BY TYPE)
+      // -----------------------------------------------------
+      const weeklyPrompt = `
 You are creating a gentle, observational reflection on someone's personal prayers from the past week.
 
 YOUR ROLE:
@@ -261,7 +287,7 @@ ${transcripts}
 -------------------------
 `;
 
-const monthlyPrompt = `
+      const monthlyPrompt = `
 You are creating a thoughtful, observational reflection on someone's personal prayers from the past month.
 
 YOUR ROLE:
@@ -306,39 +332,35 @@ ${transcripts}
 -------------------------
 `;
 
-const prompt = type === "weekly" ? weeklyPrompt : monthlyPrompt;
+      const prompt = type === "weekly" ? weeklyPrompt : monthlyPrompt;
 
-const completion = await openai.chat.completions.create({
-  model: "gpt-4o-mini",
-  messages: [
-    {
-      role: "system",
-      content:
-        "You are writing a reflection. You MUST obey the requested word-count range exactly. Output ONLY the reflection text.",
-    },
-    { role: "user", content: prompt },
-  ],
-  temperature: 0.35,
-  max_tokens: 1200,
-});
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are writing a reflection. You MUST obey the requested word-count range exactly. Output ONLY the reflection text.",
+          },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.35,
+        max_tokens: 1200,
+      });
 
-    const summary = completion.choices[0].message?.content?.trim() ?? null;
+      const summary = completion.choices[0].message?.content?.trim() ?? null;
+      if (!summary) {
+        console.error("AI returned no content for user", uid);
+        return "skipped";
+      }
 
-if (!summary) {
-  return new Response(JSON.stringify({ error: "AI returned no content" }), {
-    status: 500,
-  });
-}
+      const countWords = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
+      const bounds =
+        type === "weekly" ? { min: 80, max: 120 } : { min: 150, max: 200 };
 
-const countWords = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
-
-const bounds =
-  type === "weekly" ? { min: 80, max: 120 } : { min: 150, max: 200 };
-
-const enforceWordBounds = async (text: string) => {
-  const targetWords = Math.round((bounds.min + bounds.max) / 2);
-
-  const rewritePrompt = `
+      const enforceWordBounds = async (text: string) => {
+        const targetWords = Math.round((bounds.min + bounds.max) / 2);
+        const rewritePrompt = `
 Rewrite the reflection below so it is WITHIN ${bounds.min}–${bounds.max} words.
 
 Rules (do not break these):
@@ -351,51 +373,100 @@ If you struggle to hit the range, aim for EXACTLY ${targetWords} words.
 REFLECTION TO REWRITE:
 ${text}
 `;
+        const retry = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You MUST obey the requested word-count range. Output ONLY the reflection text.",
+            },
+            { role: "user", content: rewritePrompt },
+          ],
+          temperature: 0.2,
+          max_tokens: 1200,
+        });
+        return retry.choices[0].message?.content?.trim() ?? text;
+      };
 
-  const retry = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      {
-        role: "system",
-        content:
-          "You MUST obey the requested word-count range. Output ONLY the reflection text.",
-      },
-      { role: "user", content: rewritePrompt },
-    ],
-    temperature: 0.2,
-    max_tokens: 1200,
-  });
+      // Enforce bounds (one retry)
+      let finalSummary = summary;
+      let finalWc = countWords(finalSummary);
+      if (finalWc < bounds.min || finalWc > bounds.max) {
+        finalSummary = await enforceWordBounds(finalSummary);
+        finalWc = countWords(finalSummary);
+      }
 
-  return retry.choices[0].message?.content?.trim() ?? text;
-};
+      // INSERT REFLECTION
+      await supabase.from("reflections").insert({
+        user_id: uid,
+        type,
+        title: type === "weekly" ? "This Week’s Reflection" : "This Month’s Reflection",
+        body: finalSummary,
+        week_key: type === "weekly" ? weekKey : null,
+        month_key: type === "monthly" ? monthKey : null,
+      });
 
-// Enforce bounds (one retry)
-let finalSummary = summary;
-let finalWc = countWords(finalSummary);
+      return "inserted";
+    };
 
-if (finalWc < bounds.min || finalWc > bounds.max) {
-  finalSummary = await enforceWordBounds(finalSummary);
-  finalWc = countWords(finalSummary);
-}
+    // ---- Batch Mode ----
+    if (isBatchMode) {
+      const candidates = await getCandidateUserIds();
 
-// INSERT REFLECTION
-await supabase.from("reflections").insert({
-  user_id,
-  type,
-  title: type === "weekly" ? "This Week’s Reflection" : "This Month’s Reflection",
-  body: finalSummary,
-  created_at: new Date().toISOString(),
+      let inserted = 0;
+      let skipped = 0;
+
+      for (const uid of candidates) {
+        const r = await generateReflectionForUser(uid);
+        if (r === "inserted") inserted++;
+        else skipped++;
+      }
+
+      console.log("Batch reflection run complete", {
+        type,
+        rangeStart: rangeStart.toISOString(),
+        rangeEnd: rangeEnd.toISOString(),
+        weekKey,
+        monthKey,
+        candidates: candidates.length,
+        inserted,
+        skipped,
+      });
+
+      return new Response(
+        JSON.stringify({
+          mode: "batch",
+          type,
+          candidates: candidates.length,
+          inserted,
+          skipped,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // ---- Single User Mode ----
+    if (user_id) {
+      const result = await generateReflectionForUser(user_id);
+      return new Response(
+        JSON.stringify({ mode: "single", result }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // ---- Final fallback ----
+    return new Response(JSON.stringify({ error: "Unhandled execution path" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err: any) {
+    console.error("Reflection generation error:", err);
+    return new Response(JSON.stringify({ error: err?.message ?? String(err) }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 });
 
-return new Response(
-  JSON.stringify({ summary: finalSummary, word_count: finalWc, bounds, type }),
-  { headers: { "Content-Type": "application/json" }, status: 200 }
-);
-} catch (err: any) {
-  console.error("Reflection generation error:", err);
-  return new Response(JSON.stringify({ error: err?.message ?? String(err) }), {
-    status: 500,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-});
+  

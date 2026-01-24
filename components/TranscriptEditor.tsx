@@ -406,7 +406,7 @@ export default function TranscriptEditor({
 
               {Array.isArray(photoUris) && photoUris.length > 0 ? (
                 <View style={styles.thumbRow}>
-                  {photoUris.slice(0, 3).map((uri, idx) => (
+                  {photoUris.slice(0, 4).map((uri, idx) => (
                     <View key={`${uri}-${idx}`} style={styles.thumbWrapRow}>
                       <Image source={{ uri }} style={styles.thumbImgRow} />
                       <TouchableOpacity

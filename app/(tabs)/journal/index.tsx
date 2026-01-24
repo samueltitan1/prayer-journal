@@ -2,16 +2,17 @@
 
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
 import { Audio } from "expo-av";
 import { useRouter } from "expo-router";
 import React, {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import {
-  Alert,
   Image,
   LayoutAnimation,
   Platform,
@@ -38,6 +39,10 @@ import { Portal, PortalProvider } from "@gorhom/portal";
 import SettingsModal from "../../../components/SettingsModal";
 import { useTheme } from "../../../contexts/ThemeContext";
 import { getSupabase } from "../../../lib/supabaseClient";
+import {
+  scheduleInactiveNudgeIfNeeded,
+  scheduleReflectionReadyNotificationsForUser,
+} from "../../../lib/notifications";
 import { fonts, spacing } from "../../../theme/theme";
 // ---- Types -----------------------------------------------------------
 
@@ -93,7 +98,8 @@ const fetchBookmarkedPrayerIds = async (userId: string) => {
   return new Set<string>((data ?? []).map((r: any) => r.prayer_id));
 };
 
-// ---- Reflection generator ----
+// NOTE: Reflections are generated server-side via cron.
+// This helper is retained for manual / DEV invocation only.
 const triggerReflection = async (
   userId: string,
   type: "weekly" | "monthly"
@@ -173,10 +179,6 @@ export default function JournalScreen() {
 
   
   const [showReflectionBadge, setShowReflectionBadge] = useState<"weekly" | "monthly" | null>(null);
-  // last reflection Seen
-  const [lastReflectionSeen, setLastReflectionSeen] = useState<string | null>(null);
-  const [showReflectionToast, setShowReflectionToast] = useState(false);
-  const [reflectionToastMessage, setReflectionToastMessage] = useState("");
   const [loadingReflections, setLoadingReflections] = useState(true);
   const [reflectionsRefreshNonce, setReflectionsRefreshNonce] = useState(0);
 
@@ -224,6 +226,34 @@ const [activeReflection, setActiveReflection] = useState<Reflection | null>(null
 // ---- Bookmarked prayers state ----
 const [bookmarksModalVisible, setBookmarksModalVisible] = useState(false);
 const [searchQuery, setSearchQuery] = useState("");
+
+  const refreshBookmarkedPrayers = useCallback(
+    async (opts?: { applyToState?: boolean }): Promise<Set<string>> => {
+      if (!userId) return new Set<string>();
+
+      // Fetch from DB (non-recursive)
+      const bookmarkedIds: Set<string> = await fetchBookmarkedPrayerIds(userId);
+
+      // Optionally apply to local state so UI updates instantly
+      if (opts?.applyToState !== false) {
+        setAllPrayers((prev) =>
+          prev.map((p) => ({
+            ...p,
+            is_bookmarked: bookmarkedIds.has(p.id),
+          }))
+        );
+        setPrayers((prev) =>
+          prev.map((p) => ({
+            ...p,
+            is_bookmarked: bookmarkedIds.has(p.id),
+          }))
+        );
+      }
+
+      return bookmarkedIds;
+    },
+    [userId]
+  );
 
 // Derive bookmarks from `allPrayers` so the Journal preview updates instantly
 const bookmarkedPrayers = useMemo(() => {
@@ -310,7 +340,7 @@ const bookmarkedPrayers = useMemo(() => {
           return;
         }
 
-        const bookmarkedIds = await fetchBookmarkedPrayerIds(userId);
+        const bookmarkedIds = await refreshBookmarkedPrayers({ applyToState: false });
 
         const withUrls: Prayer[] = (rows ?? []).map((p: any) => ({
           ...(p as Prayer),
@@ -478,85 +508,18 @@ const bookmarkedPrayers = useMemo(() => {
     return () => { getSupabase().removeChannel(channel); };
   }, [userId]);
 
+  useFocusEffect(
+    useCallback(() => {
+      void refreshBookmarkedPrayers();
+      if (userId) {
+        void scheduleReflectionReadyNotificationsForUser(userId);
+        void scheduleInactiveNudgeIfNeeded(userId);
+      }
+    }, [refreshBookmarkedPrayers, userId])
+  );
+
   // ---- Reflections ----------------------------------------------------
-  // ---- Reflection generation (separate effect to avoid loops) ----
-  useEffect(() => {
-    if (!userId) return;
-    checkReflectionGeneration(); // run generation logic separately
-    console.log("checkReflectionGeneration fired", {
-      userId,
-      allPrayersCount: allPrayers.length,
-      now: new Date().toISOString(),
-      dayOfWeek: new Date().getDay(),
-      day: new Date().getDate(),
-    });
-  }, [userId, allPrayers]);
-
-  // ---- Check if weekly + monthly reflections should be generated ----
-  const checkReflectionGeneration = async () => {
-    if (!userId || allPrayers.length === 0) return;
-
-    const today = new Date();
-    const dayOfWeek = today.getDay(); // 0 = Sunday
-    const day = today.getDate();
-    const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-
-    // Create date keys
-    const todayKey = today.toISOString().slice(0, 10);
-
-    // ------- WEEKLY LOGIC -------
-    if (dayOfWeek === 0) {
-      // Guard: only run once per Sunday (prevents repeated invokes when allPrayers changes)
-      const lastRun = await AsyncStorage.getItem(LAST_WEEKLY_REFLECTION_RUN_KEY);
-      if (lastRun === todayKey) return;
-
-      // Count prayers in the previous full week (Sun–Sat) that just ended (matches the Edge Function)
-      const end = new Date(today);
-      end.setHours(0, 0, 0, 0);
-      end.setMilliseconds(end.getMilliseconds() - 1); // Sat 23:59:59.999
-
-      const start = new Date(end);
-      start.setDate(start.getDate() - 6); // Sun 00:00
-      start.setHours(0, 0, 0, 0);
-
-      const prayersInPeriod = allPrayers.filter((p) => {
-        const d = new Date(p.prayed_at);
-        return d >= start && d <= end;
-      });
-
-      if (prayersInPeriod.length >= 2) {
-        await runTriggerReflection("weekly");
-        await AsyncStorage.setItem(LAST_WEEKLY_REFLECTION_RUN_KEY, todayKey);
-      }
-    }
-
-    // ------- MONTHLY LOGIC -------
-    if (day === 1) {
-      // Guard: only run once per day-1 (prevents repeated invokes when allPrayers changes / loads)
-      const lastRun = await AsyncStorage.getItem(LAST_MONTHLY_REFLECTION_RUN_KEY);
-      if (lastRun === todayKey) return;
-
-      // Count prayers in the previous calendar month (matches the Edge Function)
-      // Example: if today is Jan 1, summarize Dec 1–Dec 31.
-      const prevMonthAnchor = new Date(today.getFullYear(), today.getMonth() - 1, 15);
-
-      const start = new Date(prevMonthAnchor.getFullYear(), prevMonthAnchor.getMonth(), 1);
-      start.setHours(0, 0, 0, 0);
-
-      const end = new Date(prevMonthAnchor.getFullYear(), prevMonthAnchor.getMonth() + 1, 0);
-      end.setHours(23, 59, 59, 999);
-
-      const prayersInPeriod = allPrayers.filter((p) => {
-        const d = new Date(p.prayed_at);
-        return d >= start && d <= end;
-      });
-
-      if (prayersInPeriod.length >= 4) {
-        await runTriggerReflection("monthly"); // ✅ ensures refetch nonce increments
-        await AsyncStorage.setItem(LAST_MONTHLY_REFLECTION_RUN_KEY, todayKey);
-      }
-    }
-  };
+  
 
   // ---- Fetch reflections ----
   useEffect(() => {
@@ -576,16 +539,8 @@ const bookmarkedPrayers = useMemo(() => {
           .limit(1)
           .maybeSingle();
   
-        if (weekly) {setWeeklyReflection(weekly as Reflection);
-          
-          // NEW: trigger toast if this weekly reflection is new
-          if (weekly.id !== lastReflectionSeen) {
-            setReflectionToastMessage("New weekly reflection ready 🙏");
-            setShowReflectionToast(true);
-            setLastReflectionSeen(weekly.id);
-
-            setTimeout(() => setShowReflectionToast(false), 3500);
-          }
+        if (weekly) {
+          setWeeklyReflection(weekly as Reflection);
         }    
 
         // fetch monthly reflection
@@ -598,16 +553,8 @@ const bookmarkedPrayers = useMemo(() => {
           .limit(1)
           .maybeSingle();
   
-        if (monthly) {setMonthlyReflection(monthly as Reflection);
-    
-          // NEW: trigger toast if this monthly reflection is new
-          if (monthly.id !== lastReflectionSeen) {
-            setReflectionToastMessage("New monthly reflection ready 🙏");
-            setShowReflectionToast(true);
-            setLastReflectionSeen(monthly.id);
-
-            setTimeout(() => setShowReflectionToast(false), 3500);
-          }
+        if (monthly) {
+          setMonthlyReflection(monthly as Reflection);
         }
 
       } catch (err) {
@@ -885,60 +832,49 @@ const bookmarkedPrayers = useMemo(() => {
 
   // ---- Delete prayer (row + storage audio) ---------------------------
 
-  const handleDeletePrayer = (p: Prayer) => {
-    Alert.alert(
-      "Delete prayer?",
-      "This will remove the recording and transcript for this entry.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const { error } = await getSupabase()
-                .from("prayers")
-                .delete()
-                .eq("id", p.id);
+  const handleDeletePrayer = async (p: Prayer) => {
+    try {
+      const { error } = await getSupabase()
+        .from("prayers")
+        .delete()
+        .eq("id", p.id);
 
-              if (error) {
-                console.warn("Delete prayer error:", error.message);
-                return;
-              }
+      if (error) {
+        console.warn("Delete prayer error:", error.message);
+        return;
+      }
 
-              if (p.audio_path) {
-                const { error: storageErr } = await getSupabase().storage
-                  .from("prayer-audio")
-                  .remove([p.audio_path]);
+      if (p.audio_path) {
+        const { error: storageErr } = await getSupabase().storage
+          .from("prayer-audio")
+          .remove([p.audio_path]);
 
-                if (storageErr) {
-                  console.warn(
-                    "Delete storage object error:",
-                    storageErr.message
-                  );
-                }
-              }
+        if (storageErr) {
+          console.warn(
+            "Delete storage object error:",
+            storageErr.message
+          );
+        }
+      }
 
-              setPrayers((prev) => prev.filter((row) => row.id !== p.id));
-              setAllPrayers((prev) => prev.filter((row) => row.id !== p.id));
+      setPrayers((prev) => prev.filter((row) => row.id !== p.id));
+      setAllPrayers((prev) => prev.filter((row) => row.id !== p.id));
+      setPrayerEntryVisible(false);
+      setSelectedPrayer(null);
 
-              if (playingId === p.id && soundRef.current) {
-                try {
-                  await soundRef.current.stopAsync();
-                  await soundRef.current.unloadAsync();
-                } catch {}
-                soundRef.current = null;
-                setPlayingId(null);
-                setPlaybackPosition(0);
-                setPlaybackDuration(null);
-              }
-            } catch (e) {
-              console.warn("Unexpected delete error:", e);
-            }
-          },
-        },
-      ]
-    );
+      if (playingId === p.id && soundRef.current) {
+        try {
+          await soundRef.current.stopAsync();
+          await soundRef.current.unloadAsync();
+        } catch {}
+        soundRef.current = null;
+        setPlayingId(null);
+        setPlaybackPosition(0);
+        setPlaybackDuration(null);
+      }
+    } catch (e) {
+      console.warn("Unexpected delete error:", e);
+    }
   };
 
   // ---- Bookmark toggle ----
@@ -972,6 +908,7 @@ const bookmarkedPrayers = useMemo(() => {
             p.id === prayerId ? { ...p, is_bookmarked: false } : p
           )
         );
+        await refreshBookmarkedPrayers();
         // Keep the Journal "Bookmarked prayers" preview in sync instantly
         // (preview is derived from allPrayers, so no extra state update needed)
       } else {
@@ -994,6 +931,7 @@ const bookmarkedPrayers = useMemo(() => {
             p.id === prayerId ? { ...p, is_bookmarked: true } : p
           )
         );
+        await refreshBookmarkedPrayers();
         // Keep the Journal "Bookmarked prayers" preview in sync instantly
         // (preview is derived from allPrayers, so no extra state update needed)
       }
@@ -1548,35 +1486,6 @@ const closeReflection = () => {
 
         </ScrollView>
 
-        {/* Reflection Toast stays inside normal layout */}
-        {showReflectionToast && (
-          <View
-            style={{
-              position: "absolute",
-              left: spacing.lg,
-              right: spacing.lg,
-              bottom: spacing.lg,
-              backgroundColor: colors.card,
-              padding: spacing.md,
-              borderRadius: 16,
-              flexDirection: "row",
-              alignItems: "center",
-              shadowColor: "#000",
-              shadowOpacity: 0.1,
-              shadowRadius: 8,
-            }}
-          >
-            <Ionicons
-              name="sparkles-outline"
-              size={18}
-              color={colors.accent}
-              style={{ marginRight: 8 }}
-            />
-            <Text style={{ color: colors.textPrimary, fontFamily: fonts.body }}>
-              {reflectionToastMessage}
-            </Text>
-          </View>
-        )}
       </SafeAreaView>
       {/* Modals */}
       <PrayerDayModal

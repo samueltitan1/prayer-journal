@@ -17,8 +17,22 @@ export type OfflineQueuedPrayer = {
   status: "queued" | "uploading" | "failed";
   attempts: number;
   last_error?: string;
+  
 };
 
+export type OfflineQueuedAttachment = {
+  id: string;
+  created_at: string; // ISO
+  user_id: string;
+  prayer_id: string;
+  local_image_uri: string; // file://
+  status: "queued" | "uploading" | "failed";
+  attempts: number;
+  last_error?: string;
+};
+
+const ATTACHMENTS_STORAGE_KEY = "offline_prayer_attachments_queue_v1";
+const ATTACHMENTS_LOCK_KEY = "offline_prayer_attachments_queue_lock_v1";
 const STORAGE_KEY = "offline_prayer_queue_v1";
 const LOCK_KEY = "offline_prayer_queue_lock_v1";
 
@@ -41,6 +55,37 @@ async function writeQueue(items: OfflineQueuedPrayer[]) {
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(items));
 }
 
+async function readAttachmentQueue(): Promise<OfflineQueuedAttachment[]> {
+  const raw = await AsyncStorage.getItem(ATTACHMENTS_STORAGE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as OfflineQueuedAttachment[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeAttachmentQueue(items: OfflineQueuedAttachment[]) {
+  await AsyncStorage.setItem(ATTACHMENTS_STORAGE_KEY, JSON.stringify(items));
+}
+
+async function tryAcquireAttachmentsLock(): Promise<boolean> {
+  const now = Date.now();
+  const raw = await AsyncStorage.getItem(ATTACHMENTS_LOCK_KEY);
+  if (raw) {
+    const ts = Number(raw);
+    if (!Number.isNaN(ts) && now - ts < 60_000) return false;
+  }
+  await AsyncStorage.setItem(ATTACHMENTS_LOCK_KEY, String(now));
+  return true;
+}
+
+async function releaseAttachmentsLock() {
+  await AsyncStorage.removeItem(ATTACHMENTS_LOCK_KEY);
+}
+
+
 export async function enqueuePrayer(params: {
   userId: string;
   prayedAtISO: string;
@@ -48,6 +93,8 @@ export async function enqueuePrayer(params: {
   durationSeconds: number | null;
   isBookmarked: boolean;
   audioUri: string | null; // file://
+  imageUri?: string;
+  prayerId?: string;
 }): Promise<OfflineQueuedPrayer> {
   const queue = await readQueue();
 
@@ -95,6 +142,49 @@ export async function enqueuePrayer(params: {
   await writeQueue(queue);
   return item;
 }
+
+export async function enqueueAttachment(params: {
+  userId: string;
+  prayerId: string;
+  imageUri: string; // file://
+}): Promise<OfflineQueuedAttachment> {
+  const queue = await readAttachmentQueue();
+
+  const ext = params.imageUri.split("?")[0].split("#")[0].split(".").pop() || "jpg";
+  const safeExt = ext.toLowerCase() === "png" ? "png" : "jpg";
+  const fileName = `offline_attachment_${Date.now()}_${Math.random().toString(16).slice(2)}.${safeExt}`;
+  const dest = `${FileSystem.documentDirectory}${fileName}`;
+
+  let local_image_uri = params.imageUri;
+  try {
+    if (FileSystem.documentDirectory && !params.imageUri.startsWith(FileSystem.documentDirectory)) {
+      await FileSystem.copyAsync({ from: params.imageUri, to: dest });
+      local_image_uri = dest;
+    }
+  } catch {
+    // keep original uri
+  }
+
+  const item: OfflineQueuedAttachment = {
+    id: uuidLike(),
+    created_at: new Date().toISOString(),
+    user_id: params.userId,
+    prayer_id: params.prayerId,
+    local_image_uri,
+    status: "queued",
+    attempts: 0,
+  };
+
+  queue.unshift(item);
+  await writeAttachmentQueue(queue);
+  return item;
+}
+
+export async function getQueuedAttachmentsCount(userId?: string): Promise<number> {
+  const queue = await readAttachmentQueue();
+  return userId ? queue.filter((q) => q.user_id === userId).length : queue.length;
+}
+
 
 export async function getQueuedCount(userId?: string): Promise<number> {
   const queue = await readQueue();
@@ -265,5 +355,89 @@ export async function syncQueuedPrayers(args: {
       return { synced, failed };
     } finally {
       await releaseLock();
+    }
+  }
+  
+export async function syncQueuedAttachments(args: {
+    userId: string;
+    supabase: any;
+    uploadImage: (userId: string, prayerId: string, uri: string) => Promise<string | null>;
+    onProgress?: (info: { total: number; remaining: number; lastSyncedId?: string }) => void;
+  }): Promise<{ synced: number; failed: number }> {
+    const locked = await tryAcquireAttachmentsLock();
+    if (!locked) return { synced: 0, failed: 0 };
+  
+    try {
+      let queue = await readAttachmentQueue();
+      const userQueue = queue.filter((q) => q.user_id === args.userId);
+      if (userQueue.length === 0) return { synced: 0, failed: 0 };
+  
+      let synced = 0;
+      let failed = 0;
+      const total = userQueue.length;
+  
+      for (const item of userQueue) {
+        queue = await readAttachmentQueue();
+        const idx = queue.findIndex((q) => q.id === item.id);
+        if (idx === -1) continue;
+  
+        queue[idx] = {
+          ...queue[idx],
+          status: "uploading",
+          attempts: (queue[idx].attempts || 0) + 1,
+          last_error: undefined,
+        };
+        await writeAttachmentQueue(queue);
+  
+        try {
+          const storagePath = await args.uploadImage(
+            args.userId,
+            queue[idx].prayer_id,
+            queue[idx].local_image_uri
+          );
+  
+          if (!storagePath) throw new Error("Image upload failed");
+  
+          const { error: insertErr } = await args.supabase
+            .from("prayer_attachments")
+            .insert({
+              user_id: args.userId,
+              prayer_id: queue[idx].prayer_id,
+              storage_path: storagePath,
+              storage_bucket: "prayer-attachments",
+            });
+  
+          if (insertErr) throw insertErr;
+  
+          try {
+            await FileSystem.deleteAsync(queue[idx].local_image_uri, { idempotent: true });
+          } catch {}
+  
+          queue = await readAttachmentQueue();
+          await writeAttachmentQueue(queue.filter((q) => q.id !== item.id));
+  
+          synced++;
+          args.onProgress?.({ total, remaining: Math.max(0, total - synced - failed), lastSyncedId: item.id });
+        } catch (e: any) {
+          failed++;
+  
+          queue = await readAttachmentQueue();
+          const j = queue.findIndex((q) => q.id === item.id);
+          if (j !== -1) {
+            queue[j] = {
+              ...queue[j],
+              status: "failed",
+              last_error: e?.message ? String(e.message) : "Sync failed",
+            };
+            await writeAttachmentQueue(queue);
+          }
+  
+          args.onProgress?.({ total, remaining: Math.max(0, total - synced - failed) });
+        }
+      }
+  
+      return { synced, failed };
+    } finally {
+      await releaseAttachmentsLock();
     }
   }

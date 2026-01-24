@@ -2,12 +2,11 @@ import type { MilestoneConfig } from "@/app/constants/milestonesConfig";
 import { MILESTONES } from "@/app/constants/milestonesConfig";
 import NetInfo from "@react-native-community/netinfo";
 import MilestoneModal from "../../../components/MilestoneModal";
-import { enqueuePrayer, getQueuedCount, syncQueuedPrayers } from "../../../lib/offlineQueue";
+import { enqueueAttachment, enqueuePrayer, getQueuedAttachmentsCount, getQueuedCount, syncQueuedPrayers } from "../../../lib/offlineQueue";
 // app/(tabs)/pray/index.tsx
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
-import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as LocalAuthentication from "expo-local-authentication";
@@ -27,6 +26,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import "react-native-get-random-values";
+import { v4 as uuidv4 } from "uuid";
+
+import SecurityNoticeModal, { shouldShowSecurityNotice } from "@/components/SecurityNoticeModal";
 import SettingsModal from "../../../components/SettingsModal";
 import TranscriptEditor from "../../../components/TranscriptEditor";
 import { useTheme } from "../../../contexts/ThemeContext";
@@ -37,6 +40,8 @@ import { fonts, spacing } from "../../../theme/theme";
 type PrayState = "idle" | "recording" | "saved";
 const MAX_SECONDS_DEFAULT = 10 * 60;
 const MAX_PHOTOS_PER_PRAYER = 4;
+
+const makePrayerId = () => uuidv4();
 
 // expo-image-picker changed `mediaTypes` API across versions.
 // Use a runtime-safe value that works on older + newer versions.
@@ -59,6 +64,10 @@ export default function PrayScreen() {
   const [milestoneModalVisible, setMilestoneModalVisible] = useState(false);
   const [unlockedMilestone, setUnlockedMilestone] = useState<MilestoneConfig | null>(null);
   const milestoneCheckRef = useRef(false);
+
+  // --- Security Notice modal state ---
+  const [securityNoticeVisible, setSecurityNoticeVisible] = useState(false);
+  const pendingStartAfterNotice = useRef<null | (() => void)>(null);
 
   // Clear timeout on unmount
   useEffect(() => {
@@ -87,7 +96,7 @@ export default function PrayScreen() {
   const [isSyncingOffline, setIsSyncingOffline] = useState(false);
   const [syncBanner, setSyncBanner] = useState<string | null>(null);
   const syncBannerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
+  const [offlineQueuedAttachmentsCount, setOfflineQueuedAttachmentsCount] = useState(0);
   const showSyncBanner = (msg: string, ms = 3500) => {
     setSyncBanner(msg);
     if (syncBannerTimeoutRef.current) clearTimeout(syncBannerTimeoutRef.current);
@@ -141,14 +150,20 @@ export default function PrayScreen() {
   const refreshOfflineCount = async (uid?: string | null) => {
     if (!uid) {
       setOfflineQueuedCount(0);
+      setOfflineQueuedAttachmentsCount(0);
       return;
     }
-
+  
     try {
-      const c = await getQueuedCount(uid);
-      setOfflineQueuedCount(c);
+      setOfflineQueuedCount(await getQueuedCount(uid));
     } catch {
       setOfflineQueuedCount(0);
+    }
+  
+    try {
+      setOfflineQueuedAttachmentsCount(await getQueuedAttachmentsCount(uid));
+    } catch {
+      setOfflineQueuedAttachmentsCount(0);
     }
   };
 
@@ -395,8 +410,9 @@ useEffect(() => {
         ios: {
           ...Audio.RecordingOptionsPresets.HIGH_QUALITY.ios,
           audioQuality: Audio.IOSAudioQuality.MAX,
-          sampleRate: 44100,
+          sampleRate: 24000,
           numberOfChannels: 1,
+          bitRate: 64000,
         },
       });
 
@@ -457,7 +473,7 @@ useEffect(() => {
       setEntrySource("audio");
       setDraftBibleRef(null);
       setDraftBibleVersion(null);
-      setDraftBibleProvider("youversion");
+      setDraftBibleProvider("manual");
       setDraftPhotoUris([]);
       setShowEditModal(true);
       setDraftLocationName(null);
@@ -472,9 +488,33 @@ useEffect(() => {
     }
   };
 
-  const handleMicPress = () => {
+  const startRecordingWithSecurityNotice = async () => {
+    // If we are already recording, behave like the stop button
+    if (prayState === "recording") {
+      stopRecordingAndProcess();
+      return;
+    }
+  
+    // If processing, do nothing
     if (isProcessing) return;
-    prayState === "recording" ? stopRecordingAndProcess() : startRecording();
+  
+    // Show security notice only when needed
+    const shouldShow = await shouldShowSecurityNotice();
+    if (shouldShow) {
+      pendingStartAfterNotice.current = () => {
+        // fire-and-forget so modal close isn't blocked
+        void startRecording();
+      };
+      setSecurityNoticeVisible(true);
+      return;
+    }
+  
+    // Otherwise record immediately
+    await startRecording();
+  };
+  
+  const handleMicPress = () => {
+    void startRecordingWithSecurityNotice();
   };
 
   const transcribeAudioWithWhisper = async (uri: string) => {
@@ -508,22 +548,13 @@ useEffect(() => {
       const fileName = `${Date.now()}.${fileExt}`;
       const filePath = `${userId}/${fileName}`;
 
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: "base64",
-      });
-
-      const binary = globalThis.atob
-        ? globalThis.atob(base64)
-        : Buffer.from(base64, "base64").toString("binary");
-
-      const fileBytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        fileBytes[i] = binary.charCodeAt(i);
-      }
+      const res = await fetch(uri);
+      const buf = await res.arrayBuffer();
+      const bytes = new Uint8Array(buf);
 
       const { data, error } = await getSupabase().storage
         .from("prayer-audio")
-        .upload(filePath, fileBytes, {
+        .upload(filePath, bytes, {
           contentType: `audio/${fileExt}`,
           upsert: false,
         });
@@ -540,32 +571,49 @@ useEffect(() => {
       const extFromUri = uri.split("?")[0].split("#")[0].split(".").pop();
       const fileExt = (extFromUri || "jpg").toLowerCase();
       const contentType = fileExt === "png" ? "image/png" : "image/jpeg";
-  
-      // Storage RLS expects first folder segment == auth.uid()
+
       const fileName = `${Date.now()}-${Math.random().toString(16).slice(2)}.${
         fileExt === "png" ? "png" : "jpg"
       }`;
       const filePath = `${userId}/${prayerId}/${fileName}`;
-  
-      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: "base64" });
-  
-      const binary = globalThis.atob
-        ? globalThis.atob(base64)
-        : Buffer.from(base64, "base64").toString("binary");
-  
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-  
+
+      const res = await fetch(uri);
+      const buf = await res.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+
       const { data, error } = await getSupabase().storage
         .from("prayer-attachments")
         .upload(filePath, bytes, { contentType, upsert: false });
-  
+
       if (error) return null;
-      return data.path; // store in DB as storage_path
+      return data.path;
     } catch {
       return null;
+    }
+  };
+
+  const uploadImagesInBackground = async (userId: string, prayerId: string, uris: string[]) => {
+    for (const uri of uris) {
+      try {
+        const storagePath = await uploadImageToSupabase(userId, prayerId, uri);
+        if (!storagePath) throw new Error("upload_failed");
+
+        await getSupabase().from("prayer_attachments").insert({
+          user_id: userId,
+          prayer_id: prayerId,
+          storage_path: storagePath,
+          storage_bucket: "prayer-attachments",
+        });
+      } catch {
+        // Enqueue failed image for retry (does NOT block prayer save)
+        try {
+          await enqueueAttachment({ userId, prayerId, imageUri: uri });
+          await refreshOfflineCount(userId);
+          showSyncBanner("Some photos couldn’t upload — we’ll retry when you’re online.", 4500);
+        } catch {
+          // last resort: swallow
+        }
+      }
     }
   };
 
@@ -726,23 +774,20 @@ useEffect(() => {
 
       // Try online-first
       try {
-        const storagePath =
-          editorMode === "audio" && keepAudioToSave && draftAudioUri
-            ? await uploadAudioToSupabase(userId, draftAudioUri)
-            : null;
+        // 1) Create prayer row FIRST (fast) so the UI can complete instantly.
+        const prayerId = makePrayerId();
 
-        if (editorMode === "audio" && keepAudioToSave && !storagePath) {
-          throw new Error("Upload failed");
-        }
-        const { data: insertedPrayer, error: insertError } = await getSupabase()
+        const { error: insertError } = await getSupabase()
           .from("prayers")
           .insert([
             {
+              id: prayerId,
               user_id: userId,
               prayed_at: prayedAtISO,
               transcript_text: draftTranscript || null,
               duration_seconds: draftDuration ?? null,
-              audio_path: storagePath,
+              // Optimistic: upload audio after saving so the Save UI is instant.
+              audio_path: null,
               entry_source: entrySource,
               bible_reference: draftBibleRef,
               bible_version: draftBibleVersion,
@@ -750,52 +795,76 @@ useEffect(() => {
               bible_added_at: draftBibleRef ? new Date().toISOString() : null,
               location_name: draftLocationName,
             },
-          ])
-          .select()
-          .single();
+          ]);
 
         if (insertError) throw insertError;
 
-        if (bookmarkToSave && insertedPrayer?.id) {
+        if (bookmarkToSave) {
           const { error: bookmarkError } = await getSupabase()
             .from("bookmarked_prayers")
             .insert({
               user_id: userId,
-              prayer_id: insertedPrayer.id,
+              prayer_id: prayerId,
             });
 
           if (bookmarkError) throw bookmarkError;
         }
 
-        // Upload and attach selected photos (online only)
-        if (draftPhotoUris.length > 0 && insertedPrayer?.id) {
-          const uploadedPaths: string[] = [];
+        // 2) Immediately complete the UI (no waiting for uploads)
+        setShowEditModal(false);
+        setDraftAudioUri(null);
+        setDraftTranscript("");
+        setDraftDuration(null);
+        setIsBookmarked(false);
+        setKeepAudio(true);
+        setEntrySource("audio");
+        setDraftBibleRef(null);
+        setDraftBibleVersion(null);
+        setDraftBibleProvider("manual");
+        setDraftPhotoUris([]);
+        setDraftLocationName(null);
+        setIsVerseEditorOpen(false);
+        setVerseDraftRef("");
+        setVerseDraftVersion("");
+        setPrayState("saved");
 
-          for (const uri of draftPhotoUris) {
-            const p = await uploadImageToSupabase(userId, insertedPrayer.id, uri);
-            if (p) uploadedPaths.push(p);
-          }
+        // Auto-dismiss Prayer Saved card after 3s
+        if (prayerSavedTimeoutRef.current) clearTimeout(prayerSavedTimeoutRef.current);
+        prayerSavedTimeoutRef.current = setTimeout(() => {
+          setPrayState("idle");
+        }, 3000);
 
-          if (uploadedPaths.length) {
-            const rows = uploadedPaths.map((storagePath) => ({
-              user_id: userId,
-              prayer_id: insertedPrayer.id,
-              storage_path: storagePath,
-              storage_bucket: "prayer-attachments",
-            }));
+        // 3) Fire-and-forget uploads in background
+        // Audio upload (if applicable): upload then update prayer row
+        if (editorMode === "audio" && keepAudioToSave && draftAudioUri) {
+          (async () => {
+            try {
+              const storagePath = await uploadAudioToSupabase(userId, draftAudioUri);
+              if (!storagePath) throw new Error("audio_upload_failed");
 
-            const { error: attachErr } = await getSupabase()
-              .from("prayer_attachments")
-              .insert(rows);
+              const { error: updErr } = await getSupabase()
+                .from("prayers")
+                .update({ audio_path: storagePath })
+                .eq("id", prayerId)
+                .eq("user_id", userId);
 
-            if (attachErr) {
-              console.error("Failed to insert prayer_attachments rows", attachErr);
-              // Don’t fail the whole save — prayer is already saved.
+              if (updErr) throw updErr;
+            } catch {
+              // Do NOT fail the prayer. Just inform user.
+              showSyncBanner(
+                "Prayer saved, but audio is still uploading (or failed). We’ll retry when possible.",
+                4500
+              );
             }
-          }
+          })();
         }
 
-        // If we saved online, opportunistically flush any offline queue
+        // Photos upload (if any)
+        if (draftPhotoUris.length > 0) {
+          uploadImagesInBackground(userId, prayerId, draftPhotoUris);
+        }
+
+        // Opportunistically flush any offline queue
         trySyncOfflineQueue();
       } catch (e: any) {
         // Offline fallback: queue locally, keep same success UX
@@ -858,30 +927,6 @@ useEffect(() => {
       } catch {
         // ignore
       }
-
-      // Reset draft state for the next prayer
-      setShowEditModal(false);
-      setDraftAudioUri(null);
-      setDraftTranscript("");
-      setDraftDuration(null);
-      setIsBookmarked(false);
-      setKeepAudio(true);
-      setEntrySource("audio");
-      setDraftBibleRef(null);
-      setDraftBibleVersion(null);
-      setDraftBibleProvider("manual");
-      setDraftPhotoUris([]);
-      setPrayState("saved");
-      setDraftLocationName(null);
-      setIsVerseEditorOpen(false);
-      setVerseDraftRef("");
-      setVerseDraftVersion("");
-
-      // Auto-dismiss Prayer Saved card after 3s
-      if (prayerSavedTimeoutRef.current) clearTimeout(prayerSavedTimeoutRef.current);
-      prayerSavedTimeoutRef.current = setTimeout(() => {
-        setPrayState("idle");
-      }, 3000);
 
       // Show Day X complete toast only once per calendar day, if not showing milestone modal
       try {
@@ -1526,6 +1571,21 @@ useEffect(() => {
           </Text>
         </View>
       )}
+
+      {/* Security Notice Modal (shows before first recording) */}
+      <SecurityNoticeModal
+        visible={securityNoticeVisible}
+        onClose={() => {
+          setSecurityNoticeVisible(false);
+          pendingStartAfterNotice.current = null;
+        }}
+        onContinue={() => {
+          setSecurityNoticeVisible(false);
+          const fn = pendingStartAfterNotice.current;
+          pendingStartAfterNotice.current = null;
+          if (fn) fn();
+        }}
+      />
 
       {/* Settings Modal */}
       <SettingsModal

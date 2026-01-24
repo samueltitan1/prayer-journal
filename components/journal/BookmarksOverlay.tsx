@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   LayoutAnimation,
   Platform,
@@ -127,11 +128,12 @@ export default function BookmarksModal({ visible, onClose, userId, onSelectPraye
   const [bookmarkedPrayers, setBookmarkedPrayers] = useState<Prayer[]>([]);
   const [bookmarked, setBookmarked] = useState<Prayer[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [isLoadingBookmarks, setIsLoadingBookmarks] = useState(false);
   const [allPrayers, setAllPrayers] = useState<Prayer[]>([]);
   const [bookmarkedIds, setBookmarkedIds] = useState<string[]>([]);
   const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [signedUrlById, setSignedUrlById] = useState<Record<string, string>>({});
 
   const [playbackPosition, setPlaybackPosition] = useState(0); // ms
   const [playbackDuration, setPlaybackDuration] = useState<number | null>(null); // ms
@@ -156,7 +158,8 @@ export default function BookmarksModal({ visible, onClose, userId, onSelectPraye
     const fetchData = async () => {
       try {
         setLocallyUnbookmarkedIds([]);
-        setLoading(true);
+        setSignedUrlById({});
+        setIsLoadingBookmarks(true);
 
         // 1) Bookmarked prayers
         const { data, error } = await getSupabase()
@@ -173,7 +176,8 @@ export default function BookmarksModal({ visible, onClose, userId, onSelectPraye
             )
           `)
           .eq("user_id", userId)
-          .order("created_at", { ascending: false });
+          .order("created_at", { ascending: false })
+          .limit(50);
 
         if (error) {
           console.warn("Bookmark fetch error:", error.message);
@@ -184,66 +188,39 @@ export default function BookmarksModal({ visible, onClose, userId, onSelectPraye
           }
         } else {
           const prayersRaw = (data || []).map((row: any) => row.prayers);
-          const bookmarkedWithUrls: Prayer[] = [];
-
-          for (const p of prayersRaw) {
-            if (!p.audio_path) {
-              bookmarkedWithUrls.push({ ...p, signed_audio_url: null });
-              continue;
-            }
-
-            const { data: signed } = await getSupabase().storage
-              .from("prayer-audio")
-              .createSignedUrl(p.audio_path, 60 * 60 * 24 * 365); // 1 year
-
-            bookmarkedWithUrls.push({
-              ...p,
-              signed_audio_url: signed?.signedUrl ?? null,
-            });
-          }
+          const bookmarkedFast: Prayer[] = (prayersRaw || []).filter(Boolean).map((p: any) => ({
+            ...p,
+            signed_audio_url: null,
+          }));
 
           if (active) {
-            setBookmarked(bookmarkedWithUrls);
-            setBookmarkedPrayers(bookmarkedWithUrls);
-            setBookmarkedIds(bookmarkedWithUrls.map((p) => p.id));
+            setBookmarked(bookmarkedFast);
+            setBookmarkedPrayers(bookmarkedFast);
+            setBookmarkedIds(bookmarkedFast.map((p) => p.id));
           }
         }
 
         // 2) All prayers (for global search), cached once per open
         const { data: allData, error: allError } = await getSupabase()
           .from("prayers")
-          .select("*")
+          .select("id, prayed_at, transcript_text, duration_seconds, audio_path")
           .eq("user_id", userId)
-          .order("prayed_at", { ascending: false });
+          .order("prayed_at", { ascending: false })
+          .limit(500);
 
         if (allError) {
           console.warn("Full search fetch error:", allError.message);
           if (active) setAllPrayers([]);
         } else {
-          const allWithUrls: Prayer[] = [];
+          const allFast: Prayer[] = (allData || []).map((p: any) => ({
+            ...p,
+            signed_audio_url: null,
+          }));
 
-          for (const p of allData || []) {
-            if (!p.audio_path) {
-              allWithUrls.push({ ...p, signed_audio_url: null });
-              continue;
-            }
-
-            const { data: signed } = await getSupabase().storage
-              .from("prayer-audio")
-              .createSignedUrl(p.audio_path, 60 * 60 * 24 * 365);
-
-            allWithUrls.push({
-              ...p,
-              signed_audio_url: signed?.signedUrl ?? null,
-            });
-          }
-
-          if (active) {
-            setAllPrayers(allWithUrls);
-          }
+          if (active) setAllPrayers(allFast);
         }
       } finally {
-        if (active) setLoading(false);
+        if (active) setIsLoadingBookmarks(false);
       }
     };
 
@@ -294,16 +271,33 @@ export default function BookmarksModal({ visible, onClose, userId, onSelectPraye
         soundRef.current = null;
       }
 
-      if (!p.signed_audio_url) {
-        console.warn("No signed_audio_url for prayer", p.id);
-        return;
+      let signedUrl = p.signed_audio_url || signedUrlById[p.id] || null;
+
+      if (!signedUrl) {
+        if (!p.audio_path) {
+          console.warn("No audio_path for prayer", p.id);
+          return;
+        }
+
+        // Sign on demand (shorter expiry is fine because we cache per session)
+        const { data: signed, error: signErr } = await getSupabase().storage
+          .from("prayer-audio")
+          .createSignedUrl(p.audio_path, 60 * 30); // 30 minutes
+
+        if (signErr || !signed?.signedUrl) {
+          console.warn("Failed to create signed URL", signErr?.message);
+          return;
+        }
+
+        signedUrl = signed.signedUrl;
+        setSignedUrlById((prev) => ({ ...prev, [p.id]: signedUrl as string }));
       }
 
       setLoadingAudioId(p.id);
       await configureAudioMode();
 
       const { sound, status } = await Audio.Sound.createAsync({
-        uri: p.signed_audio_url,
+        uri: signedUrl,
       });
 
       soundRef.current = sound;
@@ -481,9 +475,41 @@ if (!visible) return null;
           }}
           showsVerticalScrollIndicator={false}
         >
+          {isLoadingBookmarks && (
+            <View style={{ paddingTop: spacing.lg, alignItems: "center" }}>
+              <ActivityIndicator color={colors.accent} />
+              <View style={{ height: spacing.lg }} />
+              {[0, 1, 2].map((idx) => (
+                <View
+                  key={`bookmark-skeleton-${idx}`}
+                  style={[
+                    styles.prayerCard,
+                    { backgroundColor: colors.card, opacity: 0.5, width: "100%" },
+                  ]}
+                >
+                  <View
+                    style={{
+                      height: 14,
+                      width: "80%",
+                      backgroundColor: colors.textSecondary + "22",
+                      borderRadius: 8,
+                    }}
+                  />
+                  <View
+                    style={{
+                      height: 10,
+                      width: "55%",
+                      backgroundColor: colors.textSecondary + "18",
+                      borderRadius: 8,
+                      marginTop: spacing.sm,
+                    }}
+                  />
+                </View>
+              ))}
+            </View>
+          )}
 
-          {/* EMPTY STATE: No bookmarks */}
-          {!loading &&
+          {!isLoadingBookmarks &&
             filtered.length === 0 &&
             searchQuery.trim().length === 0 && (
               <View
@@ -509,8 +535,7 @@ if (!visible) return null;
               </View>
             )}
 
-          {/* EMPTY STATE: Search yielded nothing */}
-          {!loading &&
+          {!isLoadingBookmarks &&
             filtered.length === 0 &&
             searchQuery.trim().length > 0 && (
               <View
@@ -536,8 +561,8 @@ if (!visible) return null;
               </View>
             )}
 
-          {/* LIST OF BOOKMARKED PRAYERS */}
-          {filtered.map((p) => {
+          {!isLoadingBookmarks &&
+            filtered.map((p) => {
             const dateObj = new Date(p.prayed_at);
 
             const dateLabel = dateObj.toLocaleDateString("en-GB", {
