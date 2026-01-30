@@ -73,4 +73,8 @@ jest-html-reporters-*.html
 # Expo Dev / Simulator State
 # =====================
 .expo/
-*.expo-dev-client.json
+*.expo-dev-client.
+
+# Supabase local artifacts
+supabase/.temp/
+supabase/.branches/
