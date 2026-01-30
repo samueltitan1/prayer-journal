@@ -11,24 +11,54 @@ const FORBIDDEN_KEYS = new Set([
   "verse_text",
   "image_base64",
   "image_uri",
-  "imageUri",
+  "imageuri",
   "audio_uri",
-  "audioUri",
+  "audiouri",
   "uri",
-  "storagePath",
+  "storagepath",
   "storage_path",
   "audio_path",
   "image_path",
   "location_name",
+  "walk_map_path",
+  "walkmappath",
+  "walk_map_uri",
+  "walkmapuri",
+  "signed_url",
+  "signedurl",
+  "token",
+  "latitude",
+  "longitude",
+  "coords",
+  "walkcoords",
+  "route",
+  "polyline",
 ]);
 
 let client: PostHog | null = null;
+
+const URL_KEY_RE = /(url|uri)/i;
 
 function redactProps(props?: Record<string, unknown>) {
   if (!props) return undefined;
   const cleaned: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(props)) {
-    if (FORBIDDEN_KEYS.has(key)) continue;
+    const keyLower = key.toLowerCase();
+    if (FORBIDDEN_KEYS.has(keyLower)) continue;
+    if (typeof value === "string") {
+      const lowered = value.toLowerCase();
+      if (lowered.startsWith("http") || lowered.startsWith("file://") || lowered.startsWith("data:")) {
+        continue;
+      }
+    }
+    if (URL_KEY_RE.test(keyLower)) {
+      if (typeof value === "boolean") {
+        cleaned[key] = value;
+      } else if (typeof value === "number" && Number.isFinite(value)) {
+        cleaned[key] = value;
+      }
+      continue;
+    }
     cleaned[key] = value;
   }
   return cleaned;

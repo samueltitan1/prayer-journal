@@ -114,6 +114,12 @@ const formatSearchDuration = (p: Prayer) => {
   ).padStart(2, "0")}`;
 };
 
+const normalizeEntrySource = (p: Prayer): "audio" | "text" | "ocr" | "walk" => {
+  const src = String((p as any)?.entry_source ?? "").toLowerCase();
+  if (src === "audio" || src === "text" || src === "ocr" || src === "walk") return src;
+  return p.audio_path ? "audio" : "text";
+};
+
 // ---- Highlight matching parts of text (for search results) ----
 const highlightMatches = (
   text: string,
@@ -300,21 +306,122 @@ const [activeReflection, setActiveReflection] = useState<Reflection | null>(null
 const [bookmarksModalVisible, setBookmarksModalVisible] = useState(false);
 const [searchQuery, setSearchQuery] = useState("");
   const [searchOverlayTop, setSearchOverlayTop] = useState(0);
+  const prevSearchLenRef = useRef(0);
+  const searchUpdateThrottleRef = useRef<{
+    lastSentAt: number;
+    timeout: NodeJS.Timeout | null;
+    pending: {
+      query_len: number;
+      result_count: number;
+      match_location: boolean;
+      match_bible: boolean;
+      match_transcript: boolean;
+    } | null;
+  }>({ lastSentAt: 0, timeout: null, pending: null });
 
-  const filteredSearchResults = useMemo(() => {
+  const searchMeta = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return [];
-    return allPrayers.filter((p) => {
+    if (!q) {
+      return {
+        results: [] as Prayer[],
+        match_location: false,
+        match_bible: false,
+        match_transcript: false,
+      };
+    }
+    let match_location = false;
+    let match_bible = false;
+    let match_transcript = false;
+    const results = allPrayers.filter((p) => {
       const location = p.location_name?.toLowerCase() ?? "";
       const bibleRef = p.bible_reference?.toLowerCase() ?? "";
       const transcript = p.transcript_text?.toLowerCase() ?? "";
-      return (
-        location.includes(q) || bibleRef.includes(q) || transcript.includes(q)
-      );
+      const hasLocation = location.includes(q);
+      const hasBible = bibleRef.includes(q);
+      const hasTranscript = transcript.includes(q);
+      const matched = hasLocation || hasBible || hasTranscript;
+      if (matched) {
+        if (hasLocation) match_location = true;
+        if (hasBible) match_bible = true;
+        if (hasTranscript) match_transcript = true;
+      }
+      return matched;
     });
+    return { results, match_location, match_bible, match_transcript };
   }, [searchQuery, allPrayers]);
 
-  const isSearchOpen = searchQuery.trim().length > 0;
+  const filteredSearchResults = searchMeta.results;
+  const searchQueryLen = searchQuery.trim().length;
+  const isSearchOpen = searchQueryLen > 0;
+
+  useEffect(() => {
+    const prevLen = prevSearchLenRef.current;
+    if (searchQueryLen > 0 && prevLen === 0) {
+      capture("journal_search_opened", { query_len: searchQueryLen });
+    }
+    if (searchQueryLen === 0 && prevLen > 0) {
+      capture("journal_search_cleared");
+    }
+    prevSearchLenRef.current = searchQueryLen;
+  }, [searchQueryLen]);
+
+  useEffect(() => {
+    const throttleState = searchUpdateThrottleRef.current;
+    if (!searchQueryLen) {
+      if (throttleState.timeout) {
+        clearTimeout(throttleState.timeout);
+        throttleState.timeout = null;
+      }
+      throttleState.pending = null;
+      return;
+    }
+
+    const payload = {
+      query_len: searchQueryLen,
+      result_count: filteredSearchResults.length,
+      match_location: searchMeta.match_location,
+      match_bible: searchMeta.match_bible,
+      match_transcript: searchMeta.match_transcript,
+    };
+
+    const now = Date.now();
+    const elapsed = now - throttleState.lastSentAt;
+    throttleState.pending = payload;
+
+    const send = () => {
+      const pending = throttleState.pending;
+      if (!pending) return;
+      capture("journal_search_updated", pending);
+      throttleState.lastSentAt = Date.now();
+      throttleState.pending = null;
+      throttleState.timeout = null;
+    };
+
+    if (elapsed >= 500) {
+      send();
+      return;
+    }
+
+    if (!throttleState.timeout) {
+      throttleState.timeout = setTimeout(send, Math.max(0, 500 - elapsed));
+    }
+  }, [
+    searchQueryLen,
+    filteredSearchResults.length,
+    searchMeta.match_location,
+    searchMeta.match_bible,
+    searchMeta.match_transcript,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      const throttleState = searchUpdateThrottleRef.current;
+      if (throttleState.timeout) {
+        clearTimeout(throttleState.timeout);
+        throttleState.timeout = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     console.log("journal:prayerEntryVisible", prayerEntryVisible);
@@ -1244,6 +1351,11 @@ const closeReflection = () => {
                         ]}
                         activeOpacity={0.85}
                         onPress={() => {
+                          capture("journal_search_result_clicked", {
+                            query_len: searchQueryLen,
+                            result_count: filteredSearchResults.length,
+                            entry_source: normalizeEntrySource(p),
+                          });
                           openPrayerEntry(p);
                           setSearchQuery("");
                         }}

@@ -1,4 +1,5 @@
 import { useTheme } from "@/contexts/ThemeContext";
+import { capture } from "@/lib/posthog";
 import { getSupabase } from "@/lib/supabaseClient";
 import { fonts, spacing } from "@/theme/theme";
 import { Prayer } from "@/types/Prayer";
@@ -192,6 +193,8 @@ const PrayerEntryModal: React.FC<Props> = ({
         walkMapPath,
       });
 
+      const signedUrlStart = Date.now();
+      capture("walk_map_signed_url_requested", { has_walk_map_path: !!walkMapPath });
       try {
         const { data, error } = await getSupabase()
           .storage
@@ -200,6 +203,10 @@ const PrayerEntryModal: React.FC<Props> = ({
 
         if (error || !data?.signedUrl) {
           console.log("walk:modal signedUrl failed", { error, data });
+          capture("walk_map_signed_url_failed", {
+            ms: Date.now() - signedUrlStart,
+            error_code: String((error as any)?.code || (error as any)?.name || "signed_url_failed"),
+          });
           if (!cancelled) {
             setWalkMapSignedUrl(null);
             setWalkMapLocalUri(null);
@@ -208,6 +215,7 @@ const PrayerEntryModal: React.FC<Props> = ({
         }
 
         console.log("walk:modal signedUrl ok", data.signedUrl);
+        capture("walk_map_signed_url_succeeded", { ms: Date.now() - signedUrlStart });
         if (cancelled) return;
         setWalkMapSignedUrl(data.signedUrl);
         console.log("walk:modal signedUrl set");
@@ -250,6 +258,7 @@ const PrayerEntryModal: React.FC<Props> = ({
         }
       } catch (err) {
         console.log("walk:modal signedUrl failed (exception)", err);
+        capture("walk_map_signed_url_failed", { ms: Date.now() - signedUrlStart, error_code: "exception" });
         if (!cancelled) {
           setWalkMapSignedUrl(null);
           setWalkMapLocalUri(null);
@@ -547,9 +556,18 @@ useEffect(() => {
                   source={{ uri: walkMapLocalUri }}
                   style={styles.walkMapImage}
                   resizeMode="cover"
-                  onLoadStart={() => console.log("walk:modal mapImage load start", { uri: walkMapLocalUri })}
-                  onLoadEnd={() => console.log("walk:modal mapImage load end")}
-                  onError={(e) => console.log("walk:modal mapImage error", e?.nativeEvent)}
+                  onLoadStart={() => {
+                    capture("walk_map_render_started");
+                    console.log("walk:modal mapImage load start", { uri: walkMapLocalUri });
+                  }}
+                  onLoadEnd={() => {
+                    capture("walk_map_render_succeeded");
+                    console.log("walk:modal mapImage load end");
+                  }}
+                  onError={(e) => {
+                    capture("walk_map_render_failed", { error_code: "image_load_failed" });
+                    console.log("walk:modal mapImage error", e?.nativeEvent);
+                  }}
                 />
               </View>
             ) : (

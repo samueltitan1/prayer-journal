@@ -151,7 +151,7 @@ export default function PrayScreen() {
   const [walkMapUri, setWalkMapUri] = useState<string | null>(null);
   const [mapSnapshotVisible, setMapSnapshotVisible] = useState(false);
   const [mapSnapshotCoords, setMapSnapshotCoords] = useState<Array<{ latitude: number; longitude: number }>>([]);
-  const mapSnapshotResolveRef = useRef<null | ((uri: string | null) => void)>(null);
+  const mapSnapshotResolveRef = useRef<null | ((uri: string | null, errorCode?: string) => void)>(null);
   const mapViewRef = useRef<MapView | null>(null);
   const mapSnapshotInFlightRef = useRef(false);
 
@@ -459,7 +459,8 @@ useEffect(() => {
         "Turn on Location Services",
         "Location Services are off. Please enable them in iOS Settings to use Prayer Walk."
       );
-      return false;
+      capture("walk_route_unavailable", { reason: "services_disabled" });
+      return { ok: false, services_enabled: false, has_location_permission: false };
     }
 
     const { status } = await Location.requestForegroundPermissionsAsync();
@@ -469,9 +470,10 @@ useEffect(() => {
         "Location permission required",
         "Prayer Walk needs your location to draw your route. Please enable location services to continue."
       );
-      return false;
+      capture("walk_route_unavailable", { reason: "permissions" });
+      return { ok: false, services_enabled: true, has_location_permission: false };
     }
-    return true;
+    return { ok: true, services_enabled: true, has_location_permission: true };
   };
 
   const computeZoomForSpan = (span: number) => {
@@ -505,14 +507,35 @@ useEffect(() => {
   const takeRouteMapSnapshot = async (
     coords: Array<{ latitude: number; longitude: number }>
   ): Promise<string | null> => {
-    if (!coords || coords.length < 1) return null;
-    if (mapSnapshotInFlightRef.current) return null;
+    if (!coords || coords.length < 1) {
+      capture("walk_map_snapshot_failed", { ms: 0, error_code: "no_points" });
+      return null;
+    }
+    if (mapSnapshotInFlightRef.current) {
+      capture("walk_map_snapshot_failed", { ms: 0, error_code: "in_flight" });
+      return null;
+    }
   
     mapSnapshotInFlightRef.current = true;
+    const startedAt = Date.now();
+    capture("walk_map_snapshot_started", { point_count: coords.length });
   
     return new Promise<string | null>((resolve) => {
-      mapSnapshotResolveRef.current = (uri) => {
+      mapSnapshotResolveRef.current = async (uri, errorCode) => {
         mapSnapshotInFlightRef.current = false;
+        const ms = Date.now() - startedAt;
+        if (uri) {
+          let bytes: number | undefined = undefined;
+          try {
+            const info = await FileSystem.getInfoAsync(uri);
+            if (info.exists && typeof info.size === "number") {
+              bytes = info.size;
+            }
+          } catch {}
+          capture("walk_map_snapshot_succeeded", bytes ? { ms, bytes } : { ms });
+        } else {
+          capture("walk_map_snapshot_failed", { ms, error_code: errorCode || "snapshot_failed" });
+        }
         resolve(uri);
       };
   
@@ -523,7 +546,7 @@ useEffect(() => {
       setTimeout(() => {
         if (mapSnapshotResolveRef.current) {
           setMapSnapshotVisible(false);
-          mapSnapshotResolveRef.current?.(null);
+          mapSnapshotResolveRef.current?.(null, "timeout");
           mapSnapshotResolveRef.current = null;
         }
       }, 10000);
@@ -543,8 +566,8 @@ useEffect(() => {
     const micOk = await requestMicPermission();
     if (!micOk) return;
 
-    const locOk = await requestLocationPermission();
-    if (!locOk) return;
+    const locResult = await requestLocationPermission();
+    if (!locResult.ok) return;
 
     setIsProcessing(true);
     setWalkCoords([]);
@@ -642,6 +665,11 @@ useEffect(() => {
       }
 
       setIsWalking(true);
+      capture("walk_started", {
+        has_mic_permission: micOk,
+        has_location_permission: locResult.has_location_permission,
+        services_enabled: locResult.services_enabled,
+      });
       if (walkNoCoordsTimeoutRef.current) clearTimeout(walkNoCoordsTimeoutRef.current);
       walkNoCoordsTimeoutRef.current = setTimeout(() => {
         // GPS can take a while to produce movement-based points (especially if you're stationary or indoors).
@@ -650,11 +678,13 @@ useEffect(() => {
             "Route tracking unavailable",
             "We couldn't collect enough route points yet. Keep walking for a bit (preferably outdoors) and make sure Location Services are enabled."
           );
+          capture("walk_route_unavailable", { reason: "timeout" });
         }
       }, 30000);
     } catch {
       Alert.alert("Error", "Could not start prayer walk.");
       walkRecordingRef.current = null;
+      capture("walk_route_unavailable", { reason: "unknown" });
       try {
         deactivateKeepAwake();
       } catch {}
@@ -734,6 +764,7 @@ useEffect(() => {
           "Route tracking limited",
           "We couldn’t collect a location point for your walk. Please ensure location services are enabled."
         );
+        capture("walk_route_unavailable", { reason: "no_points" });
       }
       let mapUri: string | null = null;
       try {
@@ -752,6 +783,10 @@ useEffect(() => {
       const durationSeconds = startedAt
         ? Math.round((Date.now() - startedAt) / 1000)
         : null;
+      capture("walk_stopped", {
+        duration_seconds: durationSeconds ?? 0,
+        point_count: coordsSnapshot.length,
+      });
 
       if (!mapUri) {
         showSyncBanner("Route map couldn’t be generated — you can still save your prayer.", 4500);
@@ -1163,6 +1198,7 @@ useEffect(() => {
   const uploadWalkMapToSupabase = async (userId: string, prayerId: string, localUri: string) => {
     const path = `${userId}/${prayerId}/map.png`;
   
+    const uploadStart = Date.now();
     try {
       const base64 = await FileSystem.readAsStringAsync(localUri, {
         encoding: FileSystem.EncodingType.Base64,
@@ -1170,10 +1206,12 @@ useEffect(() => {
   
       if (!base64 || base64.length < 5000) {
         console.log("walk:map_upload_invalid_base64", { len: base64?.length ?? 0 });
+        capture("walk_map_upload_failed", { ms: Date.now() - uploadStart, error_code: "invalid_base64" });
         return null;
       }
   
       const bytes = b64ToBytes(base64);
+      capture("walk_map_upload_started", { bytes: bytes.length });
   
       const { error } = await getSupabase()
         .storage
@@ -1185,13 +1223,19 @@ useEffect(() => {
   
       if (error) {
         console.log("walk:map_upload_error", error);
+        capture("walk_map_upload_failed", {
+          ms: Date.now() - uploadStart,
+          error_code: String((error as any)?.code || (error as any)?.name || "upload_failed"),
+        });
         return null;
       }
   
       console.log("walk:map_upload_ok", { path, bytes: bytes.length });
+      capture("walk_map_upload_succeeded", { ms: Date.now() - uploadStart });
       return path;
     } catch (e) {
       console.log("walk:map_upload_exception", e);
+      capture("walk_map_upload_failed", { ms: Date.now() - uploadStart, error_code: "exception" });
       return null;
     }
   };
@@ -1218,10 +1262,12 @@ useEffect(() => {
     const saveMode = entrySource === "ocr" ? "ocr" : editorMode;
     const baseSaveProps = {
       mode: saveMode as "audio" | "text" | "ocr",
+      entry_source: entrySource,
       has_audio: editorMode === "audio" && !!draftAudioUri,
       image_count: draftPhotoUris.length,
       has_verse: !!draftBibleRef,
       has_location: !!draftLocationName,
+      has_walk_map: entrySource === "walk" && !!walkMapUri,
       duration_seconds: draftDuration ?? undefined,
     };
     let saveStart = 0;
@@ -1991,6 +2037,7 @@ useEffect(() => {
           <Switch
             value={isWalking}
             onValueChange={(next) => {
+              capture("walk_mode_toggled", { enabled: next });
               if (next) {
                 void startWalkWithNotice();
               } else {
@@ -2317,7 +2364,7 @@ useEffect(() => {
                   mapSnapshotResolveRef.current?.(uri);
                 } catch {
                   setMapSnapshotVisible(false);
-                  mapSnapshotResolveRef.current?.(null);
+                  mapSnapshotResolveRef.current?.(null, "snapshot_error");
                 } finally {
                   mapSnapshotResolveRef.current = null;
                 }
