@@ -13,12 +13,22 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "@/contexts/AuthProvider";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { requestNotificationPermissions } from "@/lib/notifications";
+import { identifyUser, initPostHog, resetAnalytics } from "@/lib/posthog";
 
 function RootNavigator() {
   const auth = useAuth();
   if (!auth) return null;
 
   const { user, loading, emailConfirmed } = auth;
+
+  useEffect(() => {
+    if (loading) return;
+    if (user?.id) {
+      identifyUser(user.id);
+    } else {
+      resetAnalytics();
+    }
+  }, [loading, user]);
 
   if (loading) {
     return (
@@ -52,6 +62,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     requestNotificationPermissions();
+    initPostHog();
   }, []);
 
   if (!fontsLoaded) {

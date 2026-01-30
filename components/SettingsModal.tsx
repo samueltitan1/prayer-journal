@@ -28,6 +28,7 @@ import {
   scheduleDailyPrayerNotification,
   scheduleNightlyReflectionPrompt,
 } from "../lib/notifications";
+import { capture } from "../lib/posthog";
 
 import { router } from "expo-router";
 
@@ -253,9 +254,11 @@ export default function SettingsModal({
         return;
       }
       await scheduleNightlyReflectionPrompt();
+      capture("nightly_prompt_toggled", { enabled: true });
       showToast("Nightly reflection prompt enabled");
     } else {
       await cancelNightlyReflectionPrompt();
+      capture("nightly_prompt_toggled", { enabled: false });
       showToast("Nightly reflection prompt disabled");
     }
   };
@@ -315,10 +318,12 @@ export default function SettingsModal({
       await updateSetting("reminder_time", reminderTime);
   
       await scheduleDailyPrayerNotification(reminderTime);
+      capture("daily_reminder_toggled", { enabled: true, time: reminderTime });
       showToast(`Reminder set for ${reminderTime}`);
     } else {
       await updateSetting("daily_reminder_enabled", false);
       await cancelDailyPrayerNotification();
+      capture("daily_reminder_toggled", { enabled: false });
       showToast("Daily reminder turned off");
     }
   };

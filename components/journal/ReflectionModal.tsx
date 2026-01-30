@@ -3,11 +3,11 @@ import { fonts, spacing } from "@/theme/theme";
 import React from "react";
 import {
   Modal,
+  Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
-  TouchableWithoutFeedback,
   View
 } from "react-native";
 
@@ -41,64 +41,66 @@ const ReflectionModal: React.FC<Props> = ({ visible, reflection, onClose }) => {
       onRequestClose={onClose}
     >
       {/* Backdrop */}
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={styles.backdrop}>
-          <TouchableWithoutFeedback onPress={() => {}}>
-          <SafeAreaView
-            style={[styles.card, { backgroundColor: colors.surface || colors.card }]}
-          >
-            {/* Header */}
-            <View
-              style={[
-                styles.header,
-                { borderBottomColor: colors.textSecondary + "20" },
-              ]}
-            >
-              <View>
-                <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
-                  {reflection.title}
-                </Text>
-                <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>
-                  {new Date(reflection.created_at).toLocaleDateString("en-GB", {
-                    weekday: "short",
-                    day: "numeric",
-                    month: "short",
-                    year: "numeric",
-                  })}
-                </Text>
-              </View>
-            </View>
+<View style={styles.backdrop}>
+  {/* Tap OUTSIDE card to close */}
+  <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
 
-            {/* ✅ Scrollable content area */}
-            <ScrollView
-              style={{ flex: 1 }}
-              contentContainerStyle={{
-                paddingHorizontal: spacing.lg,
-                paddingTop: spacing.md,
-                paddingBottom: spacing.xl,
-              }}
-              showsVerticalScrollIndicator={false}
-            >
-              {!!reflection.subtitle && (
-                <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-                  {reflection.subtitle}
-                </Text>
-              )}
-
-              <Text style={[styles.body, { color: colors.textPrimary }]}>
-                {reflection.body}
-              </Text>
-
-              {!!reflection.verse_reference && (
-                <Text style={[styles.verse, { color: colors.textSecondary }]}>
-                  {reflection.verse_reference} — {reflection.verse_text}
-                </Text>
-              )}
-            </ScrollView>
-          </SafeAreaView>
-          </TouchableWithoutFeedback>
+  {/* Card captures touches so ScrollView can scroll */}
+  <View
+    style={[styles.card, { backgroundColor: colors.surface || colors.card }]}>
+    <SafeAreaView style={styles.cardInner}>
+      {/* Header */}
+      <View
+        style={[
+          styles.header,
+          { borderBottomColor: colors.textSecondary + "20" },
+        ]}
+      >
+        <View>
+          <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
+            {reflection.title}
+          </Text>
+          <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>
+            {new Date(reflection.created_at).toLocaleDateString("en-GB", {
+              weekday: "short",
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            })}
+          </Text>
         </View>
-      </TouchableWithoutFeedback>
+      </View>
+
+      {/* Scrollable content */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{
+          paddingHorizontal: spacing.lg,
+          paddingTop: spacing.md,
+          paddingBottom: spacing.xl,
+        }}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {!!reflection.subtitle && (
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+            {reflection.subtitle}
+          </Text>
+        )}
+
+        <Text style={[styles.body, { color: colors.textPrimary }]}>
+          {reflection.body}
+        </Text>
+
+        {!!reflection.verse_reference && (
+          <Text style={[styles.verse, { color: colors.textSecondary }]}>
+            {reflection.verse_reference} — {reflection.verse_text}
+          </Text>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+</View>
+</View>
     </Modal>
   );
 };
@@ -110,14 +112,16 @@ backgroundColor: "rgba(0,0,0,0.45)",
 justifyContent: "center",
 paddingHorizontal: spacing.lg,
 },
-  card: {
+card: {
   width: "95%",
   maxHeight: "85%",
   minHeight: "60%",
   alignSelf: "center",
   borderRadius: 24,
   overflow: "hidden",
-  flex: 0,
+},
+cardInner: {
+  flex: 1,
 },
   header: {
     paddingHorizontal: spacing.lg,

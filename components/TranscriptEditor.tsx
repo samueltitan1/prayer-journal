@@ -23,6 +23,8 @@ import { fonts, spacing } from "../theme/theme";
 interface TranscriptEditorProps {
   visible: boolean;
   mode: "audio" | "text";
+  entrySource?: "audio" | "text" | "ocr" | "walk";
+  walkMapUri?: string | null;
   transcript: string;
   onChangeText: (text: string) => void;
   onSave: (opts?: { isBookmarked?: boolean; keepAudio?: boolean }) => void;
@@ -56,6 +58,8 @@ export default function TranscriptEditor({
   visible,
   mode,
   transcript,
+  entrySource,
+  walkMapUri,
   onChangeText,
   onSave,
   onDiscard,
@@ -95,7 +99,7 @@ export default function TranscriptEditor({
           <View style={[styles.modal, { backgroundColor: colors.card }]}>
           <View style={styles.headerRow}>
           <Text style={[styles.title, { color: colors.textPrimary }]}>
-            {mode === "text" ? "Journal Entry" : "Review your prayer"}
+            {mode === "text" ? "Journal Entry" : "Journal Entry"}
           </Text>
 
               <TouchableOpacity
@@ -113,12 +117,23 @@ export default function TranscriptEditor({
               </TouchableOpacity>
             </View>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              {mode === "text"
+              {entrySource === "walk"
+                ? "Review your prayer before saving."
+                : mode === "text"
                 ? "Write your prayer and save it to your journal."
-                : "You can correct any words before saving."}
+                : "Review your prayer before saving."}
             </Text>
 
-            
+            {entrySource === "walk" && walkMapUri ? (
+              <Image
+                source={{ uri: walkMapUri }}
+                style={styles.walkMapImage}
+                resizeMode="cover"
+                onLoadStart={() => console.log("walk:mapImage load start")}
+                onLoadEnd={() => console.log("walk:mapImage load end")}
+                onError={(e) => console.log("walk:mapImage error", e?.nativeEvent)}
+              />
+            ) : null}
 
             {mode === "audio" && (
               <View
@@ -392,11 +407,13 @@ export default function TranscriptEditor({
                 multiline
                 value={transcript}
                 onChangeText={onChangeText}
+                scrollEnabled
                 style={[
                   styles.input,
                   {
                     color: colors.textPrimary,
                     borderColor: colors.textSecondary + "33",
+                    paddingBottom: spacing.xl * 7,
                   },
                 ]}
                 placeholder="Your words to the Father..."
@@ -481,6 +498,12 @@ const styles = StyleSheet.create({
   subtitle: {
     fontFamily: fonts.body,
     fontSize: 13,
+    marginBottom: spacing.md,
+  },
+  walkMapImage: {
+    width: "100%",
+    height: 200,
+    borderRadius: 16,
     marginBottom: spacing.md,
   },
   input: {

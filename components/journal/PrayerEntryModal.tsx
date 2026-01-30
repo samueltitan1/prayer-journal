@@ -4,6 +4,7 @@ import { fonts, spacing } from "@/theme/theme";
 import { Prayer } from "@/types/Prayer";
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-av";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -86,6 +87,7 @@ const PrayerEntryModal: React.FC<Props> = ({
   const { colors } = useTheme();
   const [loadedDurationMs, setLoadedDurationMs] = useState<number | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isBookmarkedLocal, setIsBookmarkedLocal] = useState<boolean>(false);
   const soundRef = useRef<Audio.Sound | null>(null);
   const progressTrackWidth = useRef<number>(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -96,6 +98,16 @@ const PrayerEntryModal: React.FC<Props> = ({
   const [attachmentUrls, setAttachmentUrls] = useState<string[]>([]);
   const [imageViewerOpen, setImageViewerOpen] = useState(false);
   const [activeImageUrl, setActiveImageUrl] = useState<string | null>(null);
+  const walkMapPath = (prayer as any)?.walk_map_path ?? null;
+  const [walkMapSignedUrl, setWalkMapSignedUrl] = useState<string | null>(null);
+  const [walkMapLocalUri, setWalkMapLocalUri] = useState<string | null>(null);
+  const prevPrayerIdRef = useRef<string | null>(null);
+  const [allowBackdropClose, setAllowBackdropClose] = useState(false);
+  const isWalkEntry = prayer?.entry_source === "walk";
+  
+  useEffect(() => {
+    setIsBookmarkedLocal(!!prayer?.is_bookmarked);
+  }, [visible, prayer?.id, prayer?.is_bookmarked]);
 
   // Load photo attachments (signed URLs) when modal opens
   useEffect(() => {
@@ -147,6 +159,110 @@ const PrayerEntryModal: React.FC<Props> = ({
       cancelled = true;
     };
   }, [visible, prayer?.id]);
+
+  // Load walk map image (signed URL) when modal opens
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadWalkMap = async () => {
+      if (!visible) {
+        console.log("walk:modal clear (hidden)");
+        setWalkMapSignedUrl(null);
+        setWalkMapLocalUri(null);
+        return;
+      }
+      if (!isWalkEntry || !walkMapPath) {
+        console.log("walk:modal clear (not-walk-or-missing-path)", {
+          isWalkEntry,
+          walkMapPath,
+        });
+        setWalkMapSignedUrl(null);
+        setWalkMapLocalUri(null);
+        return;
+      }
+
+      console.log("walk:modal clear (start load)", { prayerId: prayer?.id });
+      setWalkMapSignedUrl(null);
+      setWalkMapLocalUri(null);
+
+      // Explicit debug logging for walk-map signed URL failures
+      console.log("walk:modal", {
+        prayerId: prayer?.id,
+        isWalkEntry,
+        walkMapPath,
+      });
+
+      try {
+        const { data, error } = await getSupabase()
+          .storage
+          .from("prayer-walk-maps")
+          .createSignedUrl(walkMapPath, 60 * 10);
+
+        if (error || !data?.signedUrl) {
+          console.log("walk:modal signedUrl failed", { error, data });
+          if (!cancelled) {
+            setWalkMapSignedUrl(null);
+            setWalkMapLocalUri(null);
+          }
+          return;
+        }
+
+        console.log("walk:modal signedUrl ok", data.signedUrl);
+        if (cancelled) return;
+        setWalkMapSignedUrl(data.signedUrl);
+        console.log("walk:modal signedUrl set");
+
+        // Download to local cache for reliable iOS rendering.
+        try {
+          const cacheDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+          if (!cacheDir) {
+            console.log("walk:modal no cacheDirectory");
+            setWalkMapLocalUri(null);
+            return;
+          }
+
+          const normalizedBaseDir = cacheDir.endsWith("/") ? cacheDir : `${cacheDir}/`;
+          const dest = `${normalizedBaseDir}walk-map-${prayer?.id ?? "unknown"}.png`;
+          console.log("walk:modal map download start", { dest });
+          const dl = await FileSystem.downloadAsync(data.signedUrl, dest);
+          console.log("walk:modal map download done", { status: dl.status, uri: dl.uri });
+          if (dl.status && dl.status !== 200) {
+            console.log("walk:modal map download non-200", dl.status);
+            setWalkMapLocalUri(null);
+            return;
+          }
+
+          // Basic sanity: ensure file exists
+          const info = await FileSystem.getInfoAsync(dl.uri);
+          console.log("walk:modal map file info", info);
+          if (!info.exists) {
+            console.log("walk:modal map file missing", info);
+            setWalkMapLocalUri(null);
+            return;
+          }
+
+          if (cancelled) return;
+          setWalkMapLocalUri(dl.uri);
+          console.log("walk:modal localUri set", dl.uri);
+        } catch (e) {
+          console.log("walk:modal map download failed", e);
+          setWalkMapLocalUri(null);
+        }
+      } catch (err) {
+        console.log("walk:modal signedUrl failed (exception)", err);
+        if (!cancelled) {
+          setWalkMapSignedUrl(null);
+          setWalkMapLocalUri(null);
+        }
+      }
+    };
+
+    loadWalkMap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, prayer?.id, isWalkEntry, walkMapPath]);
   // --- Audio reset/unload helpers ---
   const resetAudioUiState = () => {
     setLoadedDurationMs(null);
@@ -154,6 +270,8 @@ const PrayerEntryModal: React.FC<Props> = ({
     setIsDragging(false);
     setDragPosition(null);
     dragPositionRef.current = null;
+    // IMPORTANT: do NOT clear walkMapSignedUrl here.
+    // Walk map URL is managed by the walk-map effect, and clearing here can race and hide the image.
   };
 
   const unloadCurrentSound = async () => {
@@ -185,20 +303,46 @@ const PrayerEntryModal: React.FC<Props> = ({
       // Always unload + reset when closing
       if (!visible) {
         await unloadCurrentSound();
-        if (!cancelled) resetAudioUiState();
+        if (!cancelled) {
+          resetAudioUiState();
+          console.log("walk:modal clear (modal closed)");
+          setWalkMapSignedUrl(null);
+          setWalkMapLocalUri(null);
+          setAllowBackdropClose(false);
+        }
         return;
       }
 
       // When switching to a new prayer while open:
       await unloadCurrentSound();
       if (!cancelled) resetAudioUiState();
+      if (
+        prevPrayerIdRef.current &&
+        prayer?.id &&
+        prevPrayerIdRef.current !== prayer.id
+      ) {
+        console.log("walk:modal clear (prayer changed)", {
+          from: prevPrayerIdRef.current,
+          to: prayer.id,
+        });
+        setWalkMapSignedUrl(null);
+        setWalkMapLocalUri(null);
+      }
     };
 
     run();
+    prevPrayerIdRef.current = prayer?.id ?? null;
 
     return () => {
       cancelled = true;
     };
+  }, [visible, prayer?.id]);
+
+  useEffect(() => {
+    if (!visible) return;
+    setAllowBackdropClose(false);
+    const t = setTimeout(() => setAllowBackdropClose(true), 150);
+    return () => clearTimeout(t);
   }, [visible, prayer?.id]);
 
 useEffect(() => {
@@ -334,7 +478,15 @@ useEffect(() => {
       {/* ===== Backdrop + card ===== */}
       <View style={styles.backdrop}>
         {/* Tap outside card to close */}
-        <TouchableWithoutFeedback onPress={onClose}>
+        <TouchableWithoutFeedback
+          onPress={() => {
+            if (!allowBackdropClose) {
+              console.log("walk:modal backdrop press ignored (opening)");
+              return;
+            }
+            onClose();
+          }}
+        >
           <View style={StyleSheet.absoluteFillObject} />
         </TouchableWithoutFeedback>
 
@@ -363,27 +515,57 @@ useEffect(() => {
               >
                 {metaLabel}
               </Text>
+              {isWalkEntry ? (
+                <Text style={[styles.walkLabel, { color: colors.textSecondary }]}>
+                  Prayer Walk
+                </Text>
+              ) : null}
             </View>
 
             <View style={styles.headerActions}>
-              <TouchableOpacity
-                onPress={() => onToggleBookmark(prayer.id)}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Ionicons
-                  name={prayer.is_bookmarked ? "heart" : "heart-outline"}
-                  size={22}
-                  color={colors.accent}
-                />
-              </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => {
+                setIsBookmarkedLocal((prev) => !prev); // instant UI feedback
+                onToggleBookmark(prayer.id);
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons
+                name={isBookmarkedLocal ? "heart" : "heart-outline"}
+                size={22}
+                color={colors.accent}
+              />
+            </TouchableOpacity>
             </View>
           </View>
+
+          {isWalkEntry ? (
+            walkMapLocalUri ? (
+              <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.md }}>
+                <Image
+                  key={walkMapSignedUrl ?? walkMapLocalUri ?? "walk-map"}
+                  source={{ uri: walkMapLocalUri }}
+                  style={styles.walkMapImage}
+                  resizeMode="cover"
+                  onLoadStart={() => console.log("walk:modal mapImage load start", { uri: walkMapLocalUri })}
+                  onLoadEnd={() => console.log("walk:modal mapImage load end")}
+                  onError={(e) => console.log("walk:modal mapImage error", e?.nativeEvent)}
+                />
+              </View>
+            ) : (
+              <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.md }}>
+                <Text style={{ color: colors.textSecondary, fontFamily: fonts.body, fontSize: 12, opacity: 0.8 }}>
+                  Route map unavailable.
+                </Text>
+              </View>
+            )
+          ) : null}
 
           {/* ===== Body ===== */}
           <View style={styles.body}>
             <View>
               {/* --- Audio block (only if this entry has audio) --- */}
-              {!!prayer.audio_path && (
+              {!!prayer.audio_path && !isWalkEntry && (
                 <View
                   key={prayer.id}
                   style={[
@@ -659,6 +841,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 2,
   },
+  walkLabel: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    marginTop: 4,
+    opacity: 0.8,
+  },
   headerActions: {
     flexDirection: "row",
     alignItems: "center",
@@ -775,6 +963,13 @@ const styles = StyleSheet.create({
   deleteBtn: {
     fontFamily: fonts.heading,
     fontSize: 15,
+  },
+  walkMapImage: {
+    width: "100%",
+    height: 200,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#00000022",
   },
 });
 

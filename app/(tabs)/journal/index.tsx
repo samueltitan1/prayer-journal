@@ -20,7 +20,9 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   UIManager,
   View
 } from "react-native";
@@ -38,11 +40,12 @@ import { Prayer } from "@/types/Prayer";
 import { Portal, PortalProvider } from "@gorhom/portal";
 import SettingsModal from "../../../components/SettingsModal";
 import { useTheme } from "../../../contexts/ThemeContext";
-import { getSupabase } from "../../../lib/supabaseClient";
 import {
   scheduleInactiveNudgeIfNeeded,
   scheduleReflectionReadyNotificationsForUser,
 } from "../../../lib/notifications";
+import { capture } from "../../../lib/posthog";
+import { getSupabase } from "../../../lib/supabaseClient";
 import { fonts, spacing } from "../../../theme/theme";
 // ---- Types -----------------------------------------------------------
 
@@ -82,6 +85,75 @@ const formatMsToClock = (ms?: number | null) => {
   const secs = totalSeconds % 60;
   return `${mins}:${String(secs).padStart(2, "0")}`;
 
+};
+
+const formatSearchDateTime = (p: Prayer) => {
+  const d = new Date(p.prayed_at);
+
+  const date = d.toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+
+  const time = d
+    .toLocaleTimeString("en-GB", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    })
+    .toUpperCase();
+
+  return `${date} • ${time}`;
+};
+
+const formatSearchDuration = (p: Prayer) => {
+  if (p.duration_seconds == null) return "";
+  return `${Math.floor(p.duration_seconds / 60)}:${String(
+    p.duration_seconds % 60
+  ).padStart(2, "0")}`;
+};
+
+// ---- Highlight matching parts of text (for search results) ----
+const highlightMatches = (
+  text: string,
+  query: string,
+  accentColor: string
+) => {
+  if (!query.trim()) return <Text>{text}</Text>;
+
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+
+  const parts: React.ReactNode[] = [];
+  let start = 0;
+
+  while (true) {
+    const idx = lowerText.indexOf(lowerQuery, start);
+    if (idx === -1) {
+      parts.push(text.slice(start));
+      break;
+    }
+
+    if (idx > start) parts.push(text.slice(start, idx));
+
+    parts.push(
+      <Text
+        key={`${idx}-${query}`}
+        style={{
+          backgroundColor: accentColor + "40",
+          borderRadius: 4,
+          paddingHorizontal: 2,
+        }}
+      >
+        {text.slice(idx, idx + query.length)}
+      </Text>
+    );
+
+    start = idx + query.length;
+  }
+
+  return <Text>{parts}</Text>;
 };
 
 const fetchBookmarkedPrayerIds = async (userId: string) => {
@@ -137,6 +209,7 @@ export default function JournalScreen() {
   const user = (auth?.user ?? null) as any; // temporary TS fix
   const { colors } = useTheme();
   const userId = user?.id ?? null;
+  
 
   const [refreshKey] = useState(0); // kept but unused externally (safe)
   const [prayers, setPrayers] = useState<Prayer[]>([]);
@@ -226,6 +299,30 @@ const [activeReflection, setActiveReflection] = useState<Reflection | null>(null
 // ---- Bookmarked prayers state ----
 const [bookmarksModalVisible, setBookmarksModalVisible] = useState(false);
 const [searchQuery, setSearchQuery] = useState("");
+  const [searchOverlayTop, setSearchOverlayTop] = useState(0);
+
+  const filteredSearchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return allPrayers.filter((p) => {
+      const location = p.location_name?.toLowerCase() ?? "";
+      const bibleRef = p.bible_reference?.toLowerCase() ?? "";
+      const transcript = p.transcript_text?.toLowerCase() ?? "";
+      return (
+        location.includes(q) || bibleRef.includes(q) || transcript.includes(q)
+      );
+    });
+  }, [searchQuery, allPrayers]);
+
+  const isSearchOpen = searchQuery.trim().length > 0;
+
+  useEffect(() => {
+    console.log("journal:prayerEntryVisible", prayerEntryVisible);
+  }, [prayerEntryVisible]);
+
+  useEffect(() => {
+    console.log("journal:selectedPrayer", selectedPrayer?.id ?? null);
+  }, [selectedPrayer?.id]);
 
   const refreshBookmarkedPrayers = useCallback(
     async (opts?: { applyToState?: boolean }): Promise<Set<string>> => {
@@ -278,8 +375,8 @@ const bookmarkedPrayers = useMemo(() => {
     
       // 2) Fetch prayers once (select only what Journal needs)
       const { data, error } = await getSupabase()
-        .from("prayers")
-        .select("id,user_id,prayed_at,transcript_text,duration_seconds,audio_path,bible_reference,bible_version,location_name")
+      .from("prayers")
+      .select("id,user_id,prayed_at,transcript_text,duration_seconds,audio_path,bible_reference,bible_version,location_name,entry_source,walk_map_path")
         .eq("user_id", userId)
         .order("prayed_at", { ascending: false });
     
@@ -565,7 +662,7 @@ const bookmarkedPrayers = useMemo(() => {
     };
   
     fetchReflections();
-  }, [userId, allPrayers, reflectionsRefreshNonce]); // refetch on new prayers OR after reflection generation
+  }, [userId, reflectionsRefreshNonce]); // refetch on new prayers OR after reflection generation
 
 
   // ---- Derived data ---------------------------------------------------
@@ -859,6 +956,7 @@ const bookmarkedPrayers = useMemo(() => {
 
       setPrayers((prev) => prev.filter((row) => row.id !== p.id));
       setAllPrayers((prev) => prev.filter((row) => row.id !== p.id));
+      console.log("journal:closePrayerEntry (delete)", p.id);
       setPrayerEntryVisible(false);
       setSelectedPrayer(null);
 
@@ -878,7 +976,10 @@ const bookmarkedPrayers = useMemo(() => {
   };
 
   // ---- Bookmark toggle ----
-  const toggleBookmark = async (prayerId: string) => {
+  const toggleBookmark = async (
+    prayerId: string,
+    surface: "entry_modal" | "journal" | "day_modal" = "journal"
+  ) => {
     if (!userId) return;
 
     try {
@@ -909,6 +1010,7 @@ const bookmarkedPrayers = useMemo(() => {
           )
         );
         await refreshBookmarkedPrayers();
+        capture("bookmark_toggled", { state: false, surface });
         // Keep the Journal "Bookmarked prayers" preview in sync instantly
         // (preview is derived from allPrayers, so no extra state update needed)
       } else {
@@ -932,6 +1034,7 @@ const bookmarkedPrayers = useMemo(() => {
           )
         );
         await refreshBookmarkedPrayers();
+        capture("bookmark_toggled", { state: true, surface });
         // Keep the Journal "Bookmarked prayers" preview in sync instantly
         // (preview is derived from allPrayers, so no extra state update needed)
       }
@@ -942,6 +1045,7 @@ const bookmarkedPrayers = useMemo(() => {
 // ---- Open the single-prayer "Prayer Entry" modal ----
 const openPrayerEntry = async (p: Prayer) => {
   try {
+    console.log("journal:openPrayerEntry", p.id);
     let selected: Prayer = p;
 
     // Only sign when we need to play audio
@@ -978,6 +1082,7 @@ const openPrayerEntry = async (p: Prayer) => {
     setPrayerEntryVisible(true);
   } catch (err) {
     console.warn("Failed to open prayer entry:", err);
+    console.log("journal:openPrayerEntry fallback", p.id);
     setSelectedPrayer(p);
     setPrayerEntryVisible(true);
   }
@@ -1047,6 +1152,178 @@ const closeReflection = () => {
             />
           </TouchableOpacity>
         </View>
+
+        {/* Search bar */}
+        <View
+          style={[styles.searchBarWrap, { backgroundColor: colors.background }]}
+          onLayout={(e) =>
+            setSearchOverlayTop(e.nativeEvent.layout.y + e.nativeEvent.layout.height)
+          }
+        >
+          <View
+            style={[
+              styles.searchBar,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.textSecondary + "22",
+              },
+            ]}
+          >
+            <Ionicons name="search-outline" size={16} color={colors.textSecondary} />
+            <TextInput
+              style={[styles.searchInput, { color: colors.textPrimary }]}
+              placeholder="Search journal entries"
+              placeholderTextColor={colors.textSecondary}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+            {!!searchQuery && (
+              <TouchableOpacity
+                onPress={() => setSearchQuery("")}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+        {/* Search results overlay (inline so TextInput stays editable) */}
+        {isSearchOpen && (
+          <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+            {/* Backdrop only BELOW the search bar so it doesn't steal taps from the input */}
+            <TouchableWithoutFeedback onPress={() => setSearchQuery("")}
+>
+              <View
+                style={[
+                  styles.searchBackdrop,
+                  { top: searchOverlayTop, bottom: 0 },
+                ]}
+              />
+            </TouchableWithoutFeedback>
+
+            <View
+              style={[
+                styles.searchOverlayPanel,
+                {
+                  top: searchOverlayTop,
+                  backgroundColor: colors.background,
+                  borderColor: colors.textSecondary + "22",
+                },
+              ]}
+            >
+              <ScrollView
+                keyboardShouldPersistTaps="always"
+                showsVerticalScrollIndicator={false}
+              >
+                {filteredSearchResults.length === 0 ? (
+                  <Text
+                    style={[
+                      styles.searchEmptyText,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
+                    No results.
+                  </Text>
+                ) : (
+                  filteredSearchResults.map((p) => {
+                    const snippetRaw = p.transcript_text ?? "";
+                    const snippet =
+                      snippetRaw.length > 180
+                        ? `${snippetRaw.slice(0, 180)}…`
+                        : snippetRaw;
+
+                    return (
+                      <TouchableOpacity
+                        key={p.id}
+                        style={[
+                          styles.searchResultRow,
+                          { backgroundColor: colors.card },
+                        ]}
+                        activeOpacity={0.85}
+                        onPress={() => {
+                          openPrayerEntry(p);
+                          setSearchQuery("");
+                        }}
+                      >
+                        {/* Snippet first */}
+
+                        {!!p.location_name && (
+                          <Text
+                            style={[
+                              styles.searchDetail,
+                              { color: colors.textSecondary },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {highlightMatches(
+                              p.location_name,
+                              searchQuery,
+                              colors.accent
+                            )}
+                          </Text>
+                        )}
+
+                        {!!p.bible_reference && (
+                          <Text
+                            style={[
+                              styles.searchDetail,
+                              { color: colors.textSecondary },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {highlightMatches(
+                              p.bible_reference,
+                              searchQuery,
+                              colors.accent
+                            )}
+                          </Text>
+                        )}
+
+                        {!!snippet && (
+                          <Text
+                            style={[
+                              styles.searchSnippet,
+                              { color: colors.textPrimary },
+                            ]}
+                            numberOfLines={2}
+                          >
+                            {highlightMatches(
+                              snippet,
+                              searchQuery,
+                              colors.accent
+                            )}
+                          </Text>
+                        )}
+
+                        {/* Meta row under snippet */}
+                        <View style={styles.searchMetaRow}>
+                          <Text
+                            style={[styles.searchMetaLeft, { color: colors.textSecondary }]}
+                            numberOfLines={1}
+                          >
+                            {formatSearchDateTime(p)}
+                          </Text>
+
+                          {!!formatSearchDuration(p) && (
+                            <Text
+                              style={[styles.searchMetaRight, { color: colors.textSecondary }]}
+                              numberOfLines={1}
+                            >
+                              {formatSearchDuration(p)}
+                            </Text>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        )}
 
         <ScrollView
           contentContainerStyle={[styles.scrollContent]}
@@ -1210,104 +1487,6 @@ const closeReflection = () => {
             )}
           </View>
 
-            {/* Recent prayers (last 3) 
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-              Recent prayers
-            </Text>
-
-            {recentPrayers.length === 0 ? (
-              <View
-                style={[
-                  styles.emptyCard,
-                  { backgroundColor: colors.card },
-                ]}
-              >
-
-                <Text
-                  style={[
-                    styles.sectionSubtitle,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  No prayers recorded yet — tap the mic on the Pray tab to make
-                  your first entry.
-                </Text>
-              </View>
-            ) : (
-              recentPrayers.map((p) => {
-                const dateObj = new Date(p.prayed_at);
-                const dateLabel = dateObj.toLocaleDateString("en-GB", {
-                  weekday: "short",
-                  day: "numeric",
-                  month: "short",
-                });
-                const timeLabel = dateObj.toLocaleTimeString("en-GB", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                });
-                const isPlaying = playingId === p.id;
-
-                return (
-                  <View
-                    key={p.id}
-                    style={[
-                      styles.recentPrayerRow,
-                      { backgroundColor: colors.card },
-                    ]}
-                  >
-                    */}
-                    {/* Tap left side to open modal for that prayer 
-                    <TouchableOpacity
-                      style={{ flex: 1 }}
-                      onPress={() => {
-                        openPrayerEntry(p);
-                      }}
-                      activeOpacity={0.8}
-                    >
-
-                      {!!p.transcript_text && (
-                        <Text
-                          style={[
-                            styles.recentPrayerSnippet,
-                            { color: colors.textPrimary },
-                          ]}
-                          numberOfLines={2}
-                        >
-                          {p.transcript_text}
-                        </Text>
-                      )}
-                                            <Text
-                        style={[
-                          styles.prayerMeta,
-                          { color: colors.textSecondary },
-                        ]}
-                      >
-                        {dateLabel} • {timeLabel}
-                      </Text>
-                    </TouchableOpacity>
-*/}
-                    {/* Bookmark icon 
-                    <TouchableOpacity
-                      onPress={() => toggleBookmark(p.id)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      style={{ marginRight: spacing.sm }}
-                    >
-                      <Ionicons
-                        name={p.is_bookmarked ? "heart" : "heart-outline"}
-                        size={22}
-                        color={colors.accent}
-                        
-                      />
-                    </TouchableOpacity>
-
-                  </View>
-                );
-              })
-            )}
-          </View> 
-*/}
-
           {/* Bookmarked Prayers */}
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
@@ -1338,10 +1517,13 @@ const closeReflection = () => {
                     day: "numeric",
                     month: "short",
                   });
-                  const timeLabel = dateObj.toLocaleTimeString("en-GB", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  });
+                  const timeLabel = dateObj
+                    .toLocaleTimeString("en-GB", {
+                      hour: "numeric",
+                      minute: "2-digit",
+                      hour12: true,
+                    })
+                    .toUpperCase();
 
                   return (
                     <TouchableOpacity
@@ -1357,36 +1539,55 @@ const closeReflection = () => {
                         setSearchQuery("");
                       }}
                     >
-                      <View style={{ flex: 1 }}>
-                        {/* LEFT SIDE: transcript text snippet */}
-                        {!!p.transcript_text && (
-                          <Text
-                            style={[
-                              styles.recentPrayerSnippet,
-                              { color: colors.textPrimary },
-                            ]}
-                            numberOfLines={2}
-                          >
-                            {p.transcript_text}
-                          </Text>
-                        )}
-                        <Text
-                          style={[
-                            styles.prayerMeta,
-                            { color: colors.textSecondary },
-                          ]}
-                        >
-                          {/* LEFT SIDE: date • time + snippet */}
-                          {dateLabel} • {timeLabel}
-                        </Text>
-                      </View>
+                      <View style={{ flexDirection: "row", alignItems: "stretch" }}>
+                        {/* LEFT: snippet + date/time */}
+                        <View style={{ flex: 1, paddingRight: spacing.sm }}>
+                          {!!p.transcript_text && (
+                            <Text
+                              style={[styles.recentPrayerSnippet, { color: colors.textPrimary }]}
+                              numberOfLines={2}
+                            >
+                              {p.transcript_text}
+                            </Text>
+                          )}
 
-                      {/* Bookmark icon toggle */}
-                      <Ionicons
-                        name={p.is_bookmarked ? "heart" : "heart-outline"}
-                        size={22}
-                        color={colors.accent}
-                      />
+                          <Text
+                            style={[styles.prayerMeta, { color: colors.textSecondary, marginTop: spacing.xs }]}
+                            numberOfLines={1}
+                          >
+                            {dateLabel} • {timeLabel}
+                          </Text>
+                        </View>
+
+                        {/* RIGHT: vertically centered heart; duration directly under heart */}
+                        <View
+                          style={{
+                            width: 34,
+                            alignItems: "flex-end",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <View style={{ alignItems: "flex-end" }}>
+                            <Ionicons
+                              name={p.is_bookmarked ? "heart" : "heart-outline"}
+                              size={22}
+                              color={colors.accent}
+                            />
+
+                            {!!formatDuration(p.duration_seconds) && (
+                              <Text
+                                style={[
+                                  styles.prayerMeta,
+                                  { color: colors.textSecondary, marginTop: 4, textAlign: "right" },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {formatDuration(p.duration_seconds)}
+                              </Text>
+                            )}
+                          </View>
+                        </View>
+                      </View>
                     </TouchableOpacity>
                   );
                 })}
@@ -1517,6 +1718,7 @@ const closeReflection = () => {
         visible={prayerEntryVisible}
         prayer={selectedPrayer}
         onClose={() => {
+          console.log("journal:closePrayerEntry (onClose)", selectedPrayer?.id ?? null);
           setPrayerEntryVisible(false);
           setSelectedPrayer(null);
         }}
@@ -1525,7 +1727,7 @@ const closeReflection = () => {
         playbackPositionMs={playbackPosition}
         playbackDurationMs={playbackDuration}
         onPlayPause={(p) => handlePlayPause(p as any)}
-        onToggleBookmark={(id) => toggleBookmark(id)}
+        onToggleBookmark={(id) => toggleBookmark(id, "entry_modal")}
         onDeletePrayer={(p) => handleDeletePrayer(p as any)}
         onToggleTranscript={toggleTranscript}
         onSeek={handleSeek}
@@ -1573,6 +1775,88 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontFamily: fonts.heading,
     fontSize: 18,
+  },
+  searchBarWrap: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
+  },
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
+  },
+  searchInput: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 14,
+  },
+  searchOverlayRoot: {
+    flex: 1,
+  },
+  searchBackdrop: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    backgroundColor: "transparent",
+  },
+  searchOverlayPanel: {
+    position: "absolute",
+    left: spacing.lg,
+    right: spacing.lg,
+    maxHeight: "70%",
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: spacing.md,
+    zIndex: 50,
+    elevation: 50,
+  },
+  searchResultRow: {
+    borderRadius: 14,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  searchMeta: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    marginBottom: 4,
+  },
+  searchMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 6,
+  },
+  searchMetaLeft: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 11,
+  },
+  searchMetaRight: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    marginLeft: spacing.sm,
+    textAlign: "right",
+  },
+  searchDetail: {
+    fontFamily: fonts.body,
+    fontSize: 12,
+    marginBottom: 2,
+  },
+  searchSnippet: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    marginTop: 2,
+  },
+  searchEmptyText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    paddingVertical: spacing.sm,
+    textAlign: "center",
   },
   scrollContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
   section: { marginBottom: spacing.lg },

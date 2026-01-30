@@ -10,7 +10,8 @@ export type Prayer = {
     bible_reference?: string | null;
     bible_version?: string | null;
     bible_provider?: string | null;
-    entry_source?: "audio" | "text" | "ocr" | null;
+    entry_source?: "audio" | "text" | "ocr" | "walk" | null;
     location_name?: string | null; 
+    walk_map_path?: string | null;
     attachment_urls?: string[]; // or string[] | null
   };

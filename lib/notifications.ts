@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { getSupabase } from "./supabaseClient";
+import { capture } from "./posthog";
 
 const DAILY_KIND = "daily_prayer_reminder";
 const DAILY_NOTIFICATION_ID_KEY = "daily_prayer_notification_id_v1";
@@ -201,7 +202,7 @@ export async function scheduleReflectionReadyNotificationsForUser(userId: string
 
   const { data, error } = await getSupabase()
     .from("reflections")
-    .select("id, created_at, notified_at")
+    .select("id, created_at, notified_at, type")
     .eq("user_id", userId)
     .is("notified_at", null)
     .order("created_at", { ascending: false })
@@ -212,6 +213,11 @@ export async function scheduleReflectionReadyNotificationsForUser(userId: string
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   const todayKey = toLocalDateKey(new Date());
   const { hour, minute } = parseTimeString(REFLECTION_NOTIFY_TIME_LOCAL);
+
+  const counts: Record<"weekly" | "monthly", number> = {
+    weekly: 0,
+    monthly: 0,
+  };
 
   for (const reflection of data as any[]) {
     const createdAt = reflection?.created_at ? new Date(reflection.created_at) : null;
@@ -262,6 +268,25 @@ export async function scheduleReflectionReadyNotificationsForUser(userId: string
       .from("reflections")
       .update({ notified_at: new Date().toISOString() })
       .eq("id", reflection.id);
+
+    if (reflection?.type === "weekly" || reflection?.type === "monthly") {
+      counts[reflection.type] += 1;
+    }
+  }
+
+  if (counts.weekly > 0) {
+    capture("reflection_notification_scheduled", {
+      type: "weekly",
+      scheduled_for: "today",
+      count: counts.weekly,
+    });
+  }
+  if (counts.monthly > 0) {
+    capture("reflection_notification_scheduled", {
+      type: "monthly",
+      scheduled_for: "today",
+      count: counts.monthly,
+    });
   }
 }
 
@@ -304,4 +329,5 @@ export async function scheduleInactiveNudgeIfNeeded(userId: string) {
   });
 
   await AsyncStorage.setItem(storageKey, todayKey);
+  capture("inactive_nudge_sent", { days_inactive: diffDays });
 }
