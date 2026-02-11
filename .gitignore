@@ -77,4 +77,7 @@ jest-html-reporters-*.html
 
 # Supabase local artifacts
 supabase/.temp/
+supabase/.branches/supabase/.temp/
+supabase/.temp/
 supabase/.branches/
+supabase/.temp/

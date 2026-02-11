@@ -20,7 +20,17 @@
         "UIKeyboardDismissModeOnDrag": "YES",
         "UIKeyboardWillShowNotification": true,
         "ITSAppUsesNonExemptEncryption": false,
-        "NSMicrophoneUsageDescription": "Allow microphone access to record prayers."
+        "NSMicrophoneUsageDescription": "Allow microphone access to record prayers.",
+        "NSHealthShareUsageDescription": "We use Apple Health to enhance Prayer Walk insights (steps/distance) and show patterns over time.",
+        "NSHealthUpdateUsageDescription": "We write activity data (like walking distance) to Apple Health when you choose to connect it.",
+        "CFBundleURLTypes": [
+          {
+            "CFBundleTypeRole": "Editor",
+            "CFBundleURLSchemes": [
+              "com.googleusercontent.apps.188509000257-ig9lipuppsdiai4rqu2ifotekfle341q"
+            ]
+          }
+        ]
       },
       "supportsTablet": true,
       "bundleIdentifier": "com.sinaiglobal.prayerjournal",
@@ -46,11 +56,19 @@
       "expo-font",
       "expo-apple-authentication",
       [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "We use Apple Health to enhance Prayer Walk insights (steps/distance) and show patterns over time.",
+          "NSHealthUpdateUsageDescription": "We write activity data (like walking distance) to Apple Health when you choose to connect it."
+        }
+      ],
+      [
         "expo-av",
         {
           "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone"
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "extra": {
       "router": {},

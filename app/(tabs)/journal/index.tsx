@@ -33,7 +33,6 @@ import MilestoneTimelineModal from "@/components/journal/MilestoneTimelineModal"
 import PrayerDayModal from "@/components/journal/PrayerDayOverlay";
 import PrayerEntryModal from "@/components/journal/PrayerEntryModal";
 import ReflectionModal from "@/components/journal/ReflectionModal";
-import ReminderBanner from "@/components/ReminderBanner";
 import ShimmerCard from "@/components/ShimmerCard";
 import { useAuth } from "@/contexts/AuthProvider";
 import { Prayer } from "@/types/Prayer";
@@ -722,8 +721,44 @@ const bookmarkedPrayers = useMemo(() => {
     }, [refreshBookmarkedPrayers, userId])
   );
 
-  // ---- Reflections ----------------------------------------------------
-  
+// ---- Reflections ----------------------------------------------------
+useEffect(() => {
+  if (!userId) return;
+
+  const runOncePerDay = async () => {
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Weekly
+    const lastWeekly = await AsyncStorage.getItem(
+      LAST_WEEKLY_REFLECTION_RUN_KEY
+    );
+    if (lastWeekly !== today) {
+      await AsyncStorage.setItem(
+        LAST_WEEKLY_REFLECTION_RUN_KEY,
+        today
+      );
+      getSupabase().functions.invoke("generate_reflection", {
+        body: { type: "weekly" },
+      });
+    }
+
+    // Monthly
+    const lastMonthly = await AsyncStorage.getItem(
+      LAST_MONTHLY_REFLECTION_RUN_KEY
+    );
+    if (lastMonthly !== today) {
+      await AsyncStorage.setItem(
+        LAST_MONTHLY_REFLECTION_RUN_KEY,
+        today
+      );
+      getSupabase().functions.invoke("generate_reflection", {
+        body: { type: "monthly" },
+      });
+    }
+  };
+
+  runOncePerDay();
+}, [userId]);
 
   // ---- Fetch reflections ----
   useEffect(() => {
@@ -1479,12 +1514,6 @@ const closeReflection = () => {
             </View>
           </View>
 
-          {/* Reminder */}
-          {userId && (
-            <View style={styles.section}>
-              <ReminderBanner userId={userId} />
-            </View>
-          )}
 
           {/* Calendar */}
           <View style={styles.section}>

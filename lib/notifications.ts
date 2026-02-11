@@ -261,7 +261,7 @@ export async function scheduleReflectionReadyNotificationsForUser(userId: string
         sound: Platform.OS === "ios" ? "default" : undefined,
         data: { kind: REFLECTION_KIND, reflection_id: reflection.id },
       },
-      trigger: scheduledDate,
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: scheduledDate },
     });
 
     await getSupabase()
@@ -270,7 +270,8 @@ export async function scheduleReflectionReadyNotificationsForUser(userId: string
       .eq("id", reflection.id);
 
     if (reflection?.type === "weekly" || reflection?.type === "monthly") {
-      counts[reflection.type] += 1;
+      const type = reflection.type as "weekly" | "monthly";
+      counts[type] += 1;
     }
   }
 

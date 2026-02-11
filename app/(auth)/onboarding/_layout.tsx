@@ -7,13 +7,19 @@ export default function OnboardingLayout() {
         headerShown: false,
         animation: 'slide_from_right',
       }}
+      initialRouteName="welcome"
     >
-      <Stack.Screen name="1" />
-      <Stack.Screen name="2" />
-      <Stack.Screen name="3" />
+      <Stack.Screen name="welcome" />
+      <Stack.Screen name="survey" />
+      <Stack.Screen name="privacy" />
+      <Stack.Screen name="apple-health" />
+      <Stack.Screen name="login" />
       <Stack.Screen name="reminder" />
-      <Stack.Screen name="reminder2" />
+      <Stack.Screen name="signup" />
+      <Stack.Screen name="confirm-email" />
+      <Stack.Screen name="preparing" />
+      <Stack.Screen name="paywall" />
+      <Stack.Screen name="congratulations" />
     </Stack>
   );
 }
-

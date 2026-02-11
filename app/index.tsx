@@ -1,4 +1,6 @@
 import { getSupabase } from '@/lib/supabaseClient';
+import { getUserSettingsSnapshot } from '@/lib/userSettings';
+import { getOnboardingResponsesSnapshot } from '@/lib/onboardingResponses';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
@@ -16,11 +18,27 @@ export default function SplashScreen() {
       setIsAuthenticated(auth);
       setAuthResolved(true);
 
-      if (auth) {
-        router.replace('/(tabs)/journal');
-      } else {
-        router.replace('/(auth)/login');
+      if (!auth) {
+        router.replace('/(auth)/onboarding/welcome');
+        return;
       }
+
+      const userId = data.session?.user?.id;
+      const [settings, onboarding] = await Promise.all([
+        getUserSettingsSnapshot(userId),
+        getOnboardingResponsesSnapshot(userId),
+      ]);
+      const completed = Boolean(onboarding?.onboarding_completed_at);
+      const step = settings?.onboarding_step ?? null;
+      if (completed === false && step === "paywall") {
+        router.replace('/(auth)/onboarding/paywall');
+        return;
+      }
+      if (completed === false) {
+        router.replace('/(auth)/onboarding');
+        return;
+      }
+      router.replace('/(tabs)/journal');
     }
 
     resolveAuthAndNavigate();
@@ -35,7 +53,7 @@ export default function SplashScreen() {
           <View style={styles.logoContainer} data-name="Container" data-node-id="2:782">
             <View style={styles.logo} data-name="Logo" data-node-id="2:783">
               <Image
-                source={require('../assets/logo.png')}
+                source={require('@/assets/logo.png')}
                 style={styles.logoVector}
                 data-name="Vector (Stroke)"
                 data-node-id="83:3698"

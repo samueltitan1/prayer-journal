@@ -38,9 +38,11 @@ import SecurityNoticeModal, { shouldShowSecurityNotice } from "@/components/Secu
 import SettingsModal from "../../../components/SettingsModal";
 import TranscriptEditor from "../../../components/TranscriptEditor";
 import { useTheme } from "../../../contexts/ThemeContext";
+import { isHealthKitAvailable, requestHealthPermissions, savePrayerWalkWorkout } from "../../../lib/healthkit";
 import { getDailyPrayerReminderStatus } from "../../../lib/notifications";
 import { capture } from "../../../lib/posthog";
 import { getSupabase } from "../../../lib/supabaseClient";
+import { upsertUserSettingsOnboarding } from "../../../lib/userSettings";
 import { fonts, spacing } from "../../../theme/theme";
 
 type PrayState = "idle" | "recording" | "saved";
@@ -154,6 +156,9 @@ export default function PrayScreen() {
   const mapSnapshotResolveRef = useRef<null | ((uri: string | null, errorCode?: string) => void)>(null);
   const mapViewRef = useRef<MapView | null>(null);
   const mapSnapshotInFlightRef = useRef(false);
+  const healthKitNoticeShownRef = useRef(false);
+  const [appleHealthConnected, setAppleHealthConnected] = useState<boolean | null>(null);
+  const healthKitOptInRef = useRef(false);
 
   // Load user ID
   useEffect(() => {
@@ -200,6 +205,23 @@ export default function PrayScreen() {
   useEffect(() => {
     refreshOfflineCount(userId);
   }, [userId, prayState]);
+
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      try {
+        const { data, error } = await getSupabase()
+          .from("user_settings")
+          .select("apple_health_connected")
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (error) return;
+        const connected = data?.apple_health_connected === true;
+        setAppleHealthConnected(connected);
+        healthKitOptInRef.current = connected;
+      } catch {}
+    })();
+  }, [userId]);
 
   // Load streak count
 // Load streak (local calculation, instant + matches Journal)
@@ -503,6 +525,28 @@ useEffect(() => {
   
     return { latitude: centerLat, longitude: centerLon, latitudeDelta: latDelta, longitudeDelta: lonDelta };
   };
+
+  const computeDistanceMeters = (coords: Array<{ latitude: number; longitude: number }>) => {
+    if (coords.length < 2) return 0;
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const R = 6371000; // meters
+    let total = 0;
+    for (let i = 1; i < coords.length; i++) {
+      const prev = coords[i - 1];
+      const cur = coords[i];
+      const dLat = toRad(cur.latitude - prev.latitude);
+      const dLon = toRad(cur.longitude - prev.longitude);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(prev.latitude)) *
+          Math.cos(toRad(cur.latitude)) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      total += R * c;
+    }
+    return total;
+  };
   
   const takeRouteMapSnapshot = async (
     coords: Array<{ latitude: number; longitude: number }>
@@ -561,6 +605,51 @@ useEffect(() => {
     if (!userId) {
       Alert.alert("Error", "Missing user.");
       return;
+    }
+
+    if (appleHealthConnected === false && !healthKitNoticeShownRef.current) {
+      healthKitNoticeShownRef.current = true;
+      Alert.alert(
+        "Apple Health (Optional)",
+        "We can save workout details and route data to Apple Health. Your prayer content is never shared.",
+        [
+          {
+            text: "Continue without Apple Health",
+            style: "cancel",
+            onPress: () => {
+              healthKitOptInRef.current = false;
+              void startWalk();
+            },
+          },
+          {
+            text: "Connect Apple Health",
+            onPress: async () => {
+              const available = await isHealthKitAvailable();
+              if (!available) {
+                Alert.alert("Apple Health unavailable", "Apple Health is only available on iOS devices.");
+                healthKitOptInRef.current = false;
+                void startWalk();
+                return;
+              }
+              const ok = await requestHealthPermissions();
+              if (ok) {
+                healthKitOptInRef.current = true;
+                setAppleHealthConnected(true);
+                void upsertUserSettingsOnboarding(userId, {
+                  apple_health_connected: true,
+                });
+              } else {
+                healthKitOptInRef.current = false;
+              }
+              void startWalk();
+            },
+          },
+        ]
+      );
+      return;
+    }
+    if (appleHealthConnected === true) {
+      healthKitOptInRef.current = true;
     }
 
     const micOk = await requestMicPermission();
@@ -787,6 +876,26 @@ useEffect(() => {
         duration_seconds: durationSeconds ?? 0,
         point_count: coordsSnapshot.length,
       });
+
+      if (startedAt && healthKitOptInRef.current) {
+        try {
+          const available = await isHealthKitAvailable();
+          if (available) {
+            const ok = await requestHealthPermissions();
+            if (ok) {
+              const distanceMeters = computeDistanceMeters(
+                coordsSnapshot.map((c) => ({ latitude: c.latitude, longitude: c.longitude }))
+              );
+              await savePrayerWalkWorkout({
+                startDate: new Date(startedAt),
+                endDate: new Date(),
+                distanceMeters: distanceMeters > 0 ? distanceMeters : undefined,
+                route: coordsSnapshot,
+              });
+            }
+          }
+        } catch {}
+      }
 
       if (!mapUri) {
         showSyncBanner("Route map couldn’t be generated — you can still save your prayer.", 4500);

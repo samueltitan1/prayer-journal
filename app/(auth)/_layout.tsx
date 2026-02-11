@@ -1,22 +1,21 @@
 import { useAuth } from "@/contexts/AuthProvider";
-import { Redirect, Stack } from "expo-router";
+import { Redirect, Stack, useSegments } from "expo-router";
 
 export default function AuthLayout() {
   const auth = useAuth();
+  const segments = useSegments();
+  const isOnboardingRoute = segments.includes("onboarding");
 
-  // While auth is initializing, render nothing
   if (!auth || auth.loading) return null;
 
-  // If user somehow exists, never allow auth stack
-  if (auth.user) {
+  // If user is logged in, only allow access to onboarding routes from within (auth)
+  if (auth.user && !isOnboardingRoute) {
     return <Redirect href="/(tabs)" />;
   }
 
-  // Otherwise, force entry to login
+  // Always mount onboarding stack inside (auth)
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="login" />
-      <Stack.Screen name="signup" />
       <Stack.Screen name="onboarding" />
     </Stack>
   );

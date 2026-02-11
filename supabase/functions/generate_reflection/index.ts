@@ -38,14 +38,16 @@ serve(async (req: Request): Promise<Response> => {
         headers: { "Content-Type": "application/json" },
       });
     }
+    
+    const isScheduledInvocation = req.headers.get("x-supabase-scheduled") === "true";
     // Decide execution mode: batch if user_id is not present
-    const isBatchMode = !user_id;
+    const isBatchMode = !user_id && isScheduledInvocation;
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
-
+    
     // -----------------------------------------------------
     // DATE HELPERS
     // -----------------------------------------------------
@@ -97,11 +99,9 @@ serve(async (req: Request): Promise<Response> => {
     if (type === "weekly") {
       // If cron is running this, it SHOULD already be Sunday.
       // Keep as a soft-skip rather than an error.
-      if (today.getDay() !== 0) {
-        return new Response(JSON.stringify({ skipped: "Not Sunday" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
+      if (!isScheduledInvocation && today.getDay() !== 0) {
+        console.log("Weekly reflection skipped: not Sunday", today.toISOString());
+        return new Response(JSON.stringify({ skipped: true }), { status: 200 });
       }
 
       // ✅ Summarize the *previous* full week (Sun–Sat) that just ended.
@@ -121,10 +121,8 @@ serve(async (req: Request): Promise<Response> => {
     } else {
       // ✅ Only run on the 1st of the month
       const isFirstDay = today.getDate() === 1;
-      if (!isFirstDay) {
-        return new Response(JSON.stringify({ skipped: "Not first day of month" }), {
-          status: 200,
-        });
+      if (!isScheduledInvocation && today.getDate() !== 1) {
+        return new Response(JSON.stringify({ skipped: true }), { status: 200 });
       }
 
       // ✅ Summarize the *previous* calendar month.
@@ -225,7 +223,7 @@ serve(async (req: Request): Promise<Response> => {
         return "skipped";
       }
 
-      if (type === "monthly" && (prayers?.length ?? 0) < 4) {
+      if (type === "monthly" && (prayers?.length ?? 0) < 5) {
         return "skipped";
       }
 

@@ -1,20 +1,38 @@
+import OnboardingHeader from "@/components/onboarding/OnboardingHeader";
+import PrimaryButton from "@/components/onboarding/PrimaryButton";
 import ReminderConfirmationModal from '@/components/ReminderConfirmationModal';
+import { useAuth } from '@/contexts/AuthProvider';
 import { useTheme } from '@/contexts/ThemeContext';
+import {
+  trackOnboardingAction,
+  trackOnboardingStepViewed,
+} from "@/lib/analytics/onboarding";
 import { requestNotificationPermissions } from "@/lib/notifications";
-import { buttons } from '@/theme/theme';
+import { getOnboardingProgress } from "@/lib/onboardingProgress";
+import { upsertUserSettingsOnboarding } from '@/lib/userSettings';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
-import { Alert, Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function OnboardingReminder() {
   const router = useRouter();
+  const { user } = useAuth();
   const { colors } = useTheme();
   const [selectedTime, setSelectedTime] = useState(new Date());
   const [showPicker, setShowPicker] = useState(Platform.OS === 'ios');
   const [modalVisible, setModalVisible] = useState(false);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    trackOnboardingStepViewed("reminder");
+    void upsertUserSettingsOnboarding(user?.id, {
+      onboarding_step: "reminder",
+      onboarding_last_seen_at: new Date().toISOString(),
+    });
+  }, [user?.id]);
 
   const handleTimeChange = (event: any, date?: Date) => {
     if (Platform.OS === 'android') {
@@ -39,14 +57,13 @@ export default function OnboardingReminder() {
   };
 
   const handleSetReminder = async () => {
+    trackOnboardingAction("reminder", "continue");
     const ok = await requestNotificationPermissions();
     if (!ok) {
-      Alert.alert(
-        "Notifications Disabled",
-        "Enable notifications to receive daily prayer reminders. You can change this anytime in Settings."
-      );
+      setPermissionError("You can enable reminders later in Settings.");
       return;
     }
+    setPermissionError(null);
 
     // Save pending reminder locally; we'll apply it after login once we have userId.
     const timeHHmm = formatHHmm(selectedTime);
@@ -54,23 +71,29 @@ export default function OnboardingReminder() {
       "pending_prayer_reminder",
       JSON.stringify({ enabled: true, time: timeHHmm })
     );
+    if (user?.id) {
+      void upsertUserSettingsOnboarding(user.id, {
+        reminder_enabled: true,
+        reminder_time: timeHHmm,
+      });
+    } else {
+      console.warn("Missing userId for reminder save");
+    }
 
     setModalVisible(true);
   };
   
   return (
     <SafeAreaView style={styles.container}>
+      <OnboardingHeader
+        progress={getOnboardingProgress("reminder")}
+        onBack={() => {
+          trackOnboardingAction("reminder", "back");
+          router.replace("/(auth)/onboarding/apple-health");
+        }}
+      />
       <View style={styles.contentContainer}>
-        {/* Clock Icon Container */}
-        <View style={styles.iconContainerWrapper}>
-          <View style={styles.iconContainer}>
-           <Image
-              source={require('@/assets/clock.png')}
-              style={styles.icon}
-            />
-          </View>
-        </View>
-
+        
         {/* Heading */}
         <View style={styles.headingFrame}>
           <Text style={styles.heading}>
@@ -114,24 +137,33 @@ export default function OnboardingReminder() {
       {/* Footer Container */}
       <View style={styles.footerContainer}>
         {/* Set Reminder Button */}
-        <TouchableOpacity
-          style={[buttons.primary, styles.buttonFullWidth]}
-          onPress={handleSetReminder}
-        >
-          <Text style={styles.continueButton}>Set Reminder & Continue</Text>
-        </TouchableOpacity>
+        <PrimaryButton title="Continue" onPress={handleSetReminder} />
+        {permissionError ? (
+          <Text style={styles.permissionError}>{permissionError}</Text>
+        ) : null}
         <ReminderConfirmationModal
           visible={modalVisible}
           time={formatTime(selectedTime)}
-          onClose={() => { setModalVisible(false); router.replace('/(auth)/login') }}
+          onClose={() => {
+            setModalVisible(false);
+            router.replace('/(auth)/onboarding/signup');
+          }}
         />
 
         {/* Skip Link */}
         <TouchableOpacity
           style={styles.skipButton}
-          onPress={() => router.replace('/(auth)/login')}
+          onPress={() => {
+            trackOnboardingAction("reminder", "skip");
+            if (user?.id) {
+              void upsertUserSettingsOnboarding(user.id, {
+                reminder_enabled: false,
+              });
+            }
+            router.replace('/(auth)/onboarding/signup');
+          }}
         >
-          <Text style={styles.skipText}>Skip for now</Text>
+          <Text style={styles.skipText}>Skip</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -142,7 +174,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FAF9F6',
-    justifyContent: 'center',
     alignItems: 'center',
   },
   contentContainer: {
@@ -219,13 +250,11 @@ const styles = StyleSheet.create({
   },
   footerContainer: {
     paddingHorizontal: 24,
-    paddingBottom: 48,
+    paddingBottom: 24,
     width: '100%',
     alignItems: 'center',
-    marginBottom: 48,
-  },
-  buttonFullWidth: {
-    width: '100%',
+    marginTop: "auto",
+    marginBottom: 0,
   },
   skipButton: {
     alignItems: 'center',
@@ -236,11 +265,18 @@ const styles = StyleSheet.create({
   skipText: {
     fontSize: 14,
     lineHeight: 20,
-    color: '#717182',
-    fontWeight: '400',
+    color: '#2F2F2F',
+    fontWeight: '600',
     fontFamily: 'Inter_400Regular',
     textAlign: 'center',
   },
-  continueButton: {},
+  permissionError: {
+    marginTop: 12,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#717182',
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center',
+  },
   icon: {}
 });

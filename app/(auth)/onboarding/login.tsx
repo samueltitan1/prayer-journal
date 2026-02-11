@@ -1,3 +1,17 @@
+import AuthCard from "@/components/AuthCard";
+import OrDivider from "@/components/OrDivider";
+import { useAuth } from "@/contexts/AuthProvider";
+import { useTheme } from "@/contexts/ThemeContext";
+import {
+  trackAuthResult,
+  trackOnboardingAction,
+  trackOnboardingStepViewed,
+  trackSignupMethodSelected,
+} from "@/lib/analytics/onboarding";
+import { signInWithGoogleToSupabase } from "@/lib/auth/googleNative";
+import { getSupabase } from "@/lib/supabaseClient";
+import { upsertUserSettingsOnboarding } from "@/lib/userSettings";
+import { buttons, fonts, spacing } from "@/theme/theme";
 import { Ionicons } from "@expo/vector-icons";
 import * as AppleAuthentication from "expo-apple-authentication";
 import { useRouter } from "expo-router";
@@ -14,21 +28,27 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import AuthCard from "../../components/AuthCard";
-import { useTheme } from "../../contexts/ThemeContext";
-import { getSupabase } from "../../lib/supabaseClient";
-import { buttons, fonts, spacing } from "../../theme/theme";
 
 export default function Login() {
   const router = useRouter();
+  const { user } = useAuth();
   const { colors } = useTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [appleLoading, setAppleLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    trackOnboardingStepViewed("login");
+    void upsertUserSettingsOnboarding(user?.id, {
+      onboarding_step: "login",
+      onboarding_last_seen_at: new Date().toISOString(),
+    });
+  }, [user?.id]);
 
   useEffect(() => {
     if (errorMessage) {
@@ -48,6 +68,7 @@ export default function Login() {
       setErrorMessage("Please enter your email and password.");
       return;
     }
+    trackSignupMethodSelected("email");
   
     const { error } = await getSupabase().auth.signInWithPassword({
       email: email.trim(),
@@ -55,6 +76,7 @@ export default function Login() {
     });
   
     if (error) {
+      trackAuthResult("email", "error", error.name || error.code || "auth_error");
       const msg = (error.message || "").toLowerCase();
   
       // Common for new accounts if email isn't confirmed yet
@@ -68,6 +90,8 @@ export default function Login() {
     }
   
     setErrorMessage(null);
+    trackAuthResult("email", "success");
+    trackOnboardingAction("login", "continue");
   
     // ✅ Correct route into the tabs group
     router.replace("/(tabs)/pray");
@@ -85,6 +109,7 @@ export default function Login() {
 
   const handleAppleSignIn = async () => {
     try {
+      trackSignupMethodSelected("apple");
       setErrorMessage(null);
       setAppleLoading(true);
   
@@ -114,23 +139,46 @@ export default function Login() {
       });
   
       if (error) {
+        trackAuthResult("apple", "error", error.name || error.code || "auth_error");
         setErrorMessage(error.message || "Apple sign-in failed. Please try again.");
         return;
       }
   
+      trackAuthResult("apple", "success");
+      trackOnboardingAction("login", "continue");
       router.replace("/(tabs)/pray");
     } catch (e: any) {
       // user cancels Apple sheet
       if (e?.code === "ERR_REQUEST_CANCELED") return;
+      trackAuthResult("apple", "error", e?.code || e?.name || "auth_error");
       setErrorMessage(e?.message ?? "Apple sign-in failed. Please try again.");
     } finally {
       setAppleLoading(false);
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    trackSignupMethodSelected("google");
+    setErrorMessage(null);
+    setGoogleLoading(true);
+    try {
+      const userId = await signInWithGoogleToSupabase();
+      if (!userId) return;
+      trackAuthResult("google", "success");
+      trackOnboardingAction("login", "continue");
+      router.replace("/(tabs)/pray");
+    } catch (err: any) {
+      trackAuthResult("google", "error", err?.code || err?.name || "auth_error");
+      setErrorMessage(err?.message ?? "Google sign-in failed. Please try again.");
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <Image source={require("../../assets/logo.png")} style={styles.logo} />
+      <Image source={require("@/assets/logo.png")} style={styles.logo} />
       <Text style={[styles.appTitle, { color: colors.textPrimary }]}>Prayer Journal</Text>
 
       <AuthCard style={{ backgroundColor: colors.card }}>
@@ -212,15 +260,18 @@ export default function Login() {
           <Text style={styles.continueButton}>SIGN IN</Text>
         </TouchableOpacity>
 
+        <OrDivider />
+
         {Platform.OS === "ios" && (
           <View style={{ marginTop: spacing.sm }}>
-            <AppleAuthentication.AppleAuthenticationButton
-              buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-              cornerRadius={24}
-              style={{ height: 48, width: "100%" }}
+            <TouchableOpacity
+              style={[styles.appleButton, { backgroundColor: "#000000" }]}
               onPress={handleAppleSignIn}
-            />
+              activeOpacity={0.85}
+            >
+              <Ionicons name="logo-apple" size={18} color="#FFFFFF" />
+              <Text style={styles.appleText}>Continue with Apple</Text>
+            </TouchableOpacity>
             {appleLoading && (
               <Text style={[styles.appleLoadingText, { color: colors.textSecondary }]}>
                 Signing in with Apple…
@@ -228,12 +279,29 @@ export default function Login() {
             )}
           </View>
         )}
+        <TouchableOpacity
+          style={[
+            styles.googleButton,
+            { backgroundColor: colors.card, borderColor: colors.textSecondary },
+          ]}
+          onPress={handleGoogleSignIn}
+        >
+          <Image source={require("@/assets/google-g.png")} style={styles.googleIcon} />
+          <Text style={[styles.googleText, { color: colors.textPrimary }]}>
+            Continue with Google
+          </Text>
+        </TouchableOpacity>
+        {googleLoading && (
+          <Text style={[styles.appleLoadingText, { color: colors.textSecondary }]}>
+            Signing in with Google…
+          </Text>
+        )}
 
         <Text style={[styles.footerText, { color: colors.textSecondary }]}>
           Don’t have an account?{" "}
           <Text
             style={[styles.link, { color: colors.accent }]}
-            onPress={() => router.replace("/(auth)/signup")}
+            onPress={() => router.replace("/(auth)/onboarding/welcome")}
           >
             Sign up
           </Text>
@@ -305,5 +373,39 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: "center",
     marginTop: 8,
+  },
+  googleButton: {
+    marginTop: spacing.md,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  googleText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+  },
+  googleIcon: {
+    width: 18,
+    height: 18,
+    resizeMode: "contain",
+  },
+  appleButton: {
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.12)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  appleText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: "#FFFFFF",
   },
 });

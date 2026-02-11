@@ -421,7 +421,7 @@ export default function SettingsModal({
       await AsyncStorage.removeItem("supabase_session");
 
       // Force navigation reset to login
-      router.replace("/(auth)/login");
+      router.replace("/(auth)/onboarding/login");
     } catch (err: any) {
       Alert.alert("Sign out failed", err?.message ?? "Please try again.");
     }
@@ -827,7 +827,7 @@ export default function SettingsModal({
 
           <TouchableOpacity
             style={styles.linkRow}
-            onPress={() => Linking.openURL("mailto:info@sinai.global")}
+            onPress={() => Linking.openURL("mailto:info@prayerjournal.app")}
           >
             <Ionicons
               name="help-circle-outline"
@@ -841,7 +841,7 @@ export default function SettingsModal({
 
           <TouchableOpacity
             style={styles.linkRow}
-            onPress={() => Linking.openURL("https://sinai.global/privacy")}
+            onPress={() => Linking.openURL("https://prayerjournal.app/privacy")}
           >
             <Ionicons
               name="shield-checkmark-outline"
@@ -855,7 +855,7 @@ export default function SettingsModal({
 
           <TouchableOpacity
             style={styles.linkRow}
-            onPress={() => Linking.openURL("https://sinai.global/terms")}
+            onPress={() => Linking.openURL("https://prayerjournal.app/terms")}
           >
             <Ionicons
               name="document-text-outline"

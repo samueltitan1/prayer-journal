@@ -15,9 +15,19 @@ export const fonts = {
     android: "PlayfairDisplay-Medium",
     default: "Playfair Display",
   }),
+  headingBold: Platform.select({
+    ios: "PlayfairDisplay-Bold",
+    android: "PlayfairDisplay-Bold",
+    default: "Playfair Display",
+  }),
   body: Platform.select({
     ios: "Inter-Regular",
     android: "Inter-Regular",
+    default: "Inter",
+  }),
+  bodyBold: Platform.select({
+    ios: "Inter-Bold",
+    android: "Inter-Bold",
     default: "Inter",
   }),
 };

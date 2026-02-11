@@ -24,6 +24,7 @@ export const supabase: SupabaseClient = createClient(
       storage: AsyncStorage,
       persistSession: true,
       autoRefreshToken: true,
+      flowType: "pkce",
     },
   }
 );
