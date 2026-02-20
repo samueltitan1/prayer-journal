@@ -9,7 +9,8 @@ import {
 } from "@/lib/analytics/onboarding";
 import { requestNotificationPermissions } from "@/lib/notifications";
 import { getOnboardingProgress } from "@/lib/onboardingProgress";
-import { upsertUserSettingsOnboarding } from '@/lib/userSettings';
+import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
+import { upsertUserSettingsOnboarding } from "@/lib/userSettings";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
@@ -28,7 +29,7 @@ export default function OnboardingReminder() {
 
   useEffect(() => {
     trackOnboardingStepViewed("reminder");
-    void upsertUserSettingsOnboarding(user?.id, {
+    void upsertOnboardingResponses(user?.id, {
       onboarding_step: "reminder",
       onboarding_last_seen_at: new Date().toISOString(),
     });

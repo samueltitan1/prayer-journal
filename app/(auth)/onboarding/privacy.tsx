@@ -1,17 +1,17 @@
-import React, { useEffect } from "react";
-import { StyleSheet, Text, View } from "react-native";
-import { useRouter } from "expo-router";
-import OnboardingShell from "@/components/onboarding/OnboardingShell";
 import OnboardingHeader from "@/components/onboarding/OnboardingHeader";
+import OnboardingShell from "@/components/onboarding/OnboardingShell";
 import PrimaryButton from "@/components/onboarding/PrimaryButton";
 import { useAuth } from "@/contexts/AuthProvider";
 import {
   trackOnboardingAction,
   trackOnboardingStepViewed,
 } from "@/lib/analytics/onboarding";
-import { colors, fonts, spacing } from "@/theme/theme";
 import { getOnboardingProgress, SURVEY_QUESTION_COUNT } from "@/lib/onboardingProgress";
-import { upsertUserSettingsOnboarding } from "@/lib/userSettings";
+import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
+import { colors, fonts, spacing } from "@/theme/theme";
+import { useRouter } from "expo-router";
+import React, { useEffect } from "react";
+import { Image, StyleSheet, Text, View } from "react-native";
 
 export default function OnboardingPrivacy() {
   const router = useRouter();
@@ -19,7 +19,7 @@ export default function OnboardingPrivacy() {
 
   useEffect(() => {
     trackOnboardingStepViewed("privacy");
-    void upsertUserSettingsOnboarding(user?.id, {
+    void upsertOnboardingResponses(user?.id, {
       onboarding_step: "privacy",
       onboarding_last_seen_at: new Date().toISOString(),
     });
@@ -36,14 +36,15 @@ export default function OnboardingPrivacy() {
       />
       <View style={styles.container}>
         <View style={styles.checkmarkCircle}>
-          <Text style={styles.checkmark}>✓</Text>
+          <Image
+          source={require("@/assets/encrypted.png")}style={styles.checkmarkImage}/>
         </View>
         <Text style={styles.title}>Thank You for Trusting Us</Text>
         <Text style={styles.subtitle}>
           Your privacy and security are our top priority. We'll{" "}
           <Text style={styles.emphasis}>never</Text> read your prayers or share your data.
-          Every prayer is encrypted and stored securely—accessible{" "}
-          <Text style={styles.emphasis}>only by you</Text>. You're in complete control.
+          Every prayer is stored securely and encrypted—accessible{" "}
+          <Text style={styles.emphasis}>only by you</Text>.
         </Text>
       </View>
 
@@ -65,12 +66,12 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.xl,
   },
   checkmarkCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 250,
+    height: 250,
+    borderRadius: 125,
     backgroundColor: "rgba(227, 198, 123, 0.2)",
     alignItems: "center",
     justifyContent: "center",
@@ -90,10 +91,11 @@ const styles = StyleSheet.create({
   subtitle: {
     marginTop: spacing.sm,
     fontFamily: fonts.body,
-    fontSize: 15,
+    fontSize: 14,
     color: colors.textSecondary,
     textAlign: "center",
     lineHeight: 22,
+    width: "100%",
   },
   emphasis: {
     fontFamily: fonts.heading,
@@ -101,5 +103,9 @@ const styles = StyleSheet.create({
   },
   footer: {
     paddingBottom: spacing.lg,
+  },
+  checkmarkImage: {
+    width: 175,
+    height: 175,
   },
 });

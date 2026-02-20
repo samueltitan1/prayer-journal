@@ -22,7 +22,7 @@ const PATH_LENGTH = 580;
 
 export default function LongTermResultsGraphRN({
   title = "Long-term results",
-  description = "80% of Prayer Journal users pray and reflect more consistently even after 6 months.",
+  description = "85% of Prayer Journal users are still praying consistently after 6 months.",
 }: LongTermResultsGraphRNProps) {
   const progress = useSharedValue(0);
 
@@ -45,8 +45,8 @@ export default function LongTermResultsGraphRN({
   const animatedEndPointProps = useAnimatedProps(() => {
     const p = Math.min(progress.value * 1.9, 1);
     return {
-      cx: interpolate(p, [0, 0.5, 1], [16, 162, 294.5]),
-      cy: interpolate(p, [0, 0.5, 1], [60, 48, 34]),
+      cx: interpolate(p, [0, 0.5, 1], [16, 145, 307.5]),
+      cy: interpolate(p, [0, 0.5, 1], [60, 48, 35.5]),
     };
   });
 // Chart geometry
@@ -54,31 +54,31 @@ const AXIS_Y = 180;
 
 // Gold = Prayer Journal (smooth, stable, gently rising)
 const GOLD_PATH =
-  "M0 60 C 70 55, 118 52, 162 48 S 238 40, 300 34 ";
+  "M-15 60 C 70 55, 118 52, 162 48 S 238 40, 350 34 ";
 
 // Black = Typical prayer life (volatile; peaks only TOUCH gold; never exceed it)
 // Reminder: smaller Y = higher on screen, so black peak Y must be >= gold at the same region.
 const BLACK_PATH =
-  "M0 60 C 70 55, 70 156, 90 114 S 124 15, 152 86 S 176 58, 196 47 S 235 150, 258 98 S 276 55, 300 100 L 300 100 ";
+  "M-15 60 C 70 55, 70 156, 90 114 S 124 15, 152 86 S 176 58, 196 47 S 235 150, 258 98 S 276 55, 350 150 L 350 150 ";
 
-const BLACK_FILL_PATH = `${BLACK_PATH} L 300 ${AXIS_Y} L 0 ${AXIS_Y} Z`;
-const GOLD_FILL_PATH = `${GOLD_PATH} L 300 ${AXIS_Y} L 0 ${AXIS_Y} Z ${BLACK_PATH} L 300 ${AXIS_Y} L 0 ${AXIS_Y} Z`;
+const BLACK_FILL_PATH = `${BLACK_PATH} L 350 ${AXIS_Y} L -15 ${AXIS_Y} Z`;
+const GOLD_FILL_PATH = `${GOLD_PATH} L 350 ${AXIS_Y} L -15 ${AXIS_Y} Z ${BLACK_PATH} L 350 ${AXIS_Y} L -15 ${AXIS_Y} Z`;
 
   return (
     <View style={styles.card}>
       <Text style={styles.title}>{title}</Text>
       <View style={styles.chartWrap}>
-        <Svg width="100%" height="180" viewBox="0 0 300 180">
+        <Svg width="100%" height={AXIS_Y} viewBox={`0 0 300 ${AXIS_Y}`}>
        {/* Dotted guide lines (Cal AI style) */}
         <Path
-          d="M0 60 L 300 60"
+          d="M-15 60 L 350 60"
           stroke="rgba(0,0,0,0.14)"
           strokeWidth={1}
           strokeDasharray="2 2"
           fill="none"
         />
         <Path
-          d="M0 110 L 300 110"
+          d="M-15 110 L 350 110"
           stroke="rgba(0,0,0,0.14)"
           strokeWidth={1}
           strokeDasharray="2 2"
@@ -87,7 +87,7 @@ const GOLD_FILL_PATH = `${GOLD_PATH} L 300 ${AXIS_Y} L 0 ${AXIS_Y} Z ${BLACK_PAT
 
         {/* X-axis (black) */}
         <Path
-          d={`M0 ${AXIS_Y} L 300 ${AXIS_Y}`}
+          d={`M-15 ${AXIS_Y} L 350 ${AXIS_Y}`}
           stroke="rgba(0,0,0,0.85)"
           strokeWidth={2}
           fill="none"
@@ -135,8 +135,8 @@ const GOLD_FILL_PATH = `${GOLD_PATH} L 300 ${AXIS_Y} L 0 ${AXIS_Y} Z ${BLACK_PAT
         />
 
         {/* Shared start point (same for both lines) */}
-        <Circle cx="4.5" cy="60" r="5" fill="#FFFFFF" stroke={colors.accentGold} strokeWidth={1.5} />
-        <Circle cx="4.5" cy="60" r="2" fill={colors.accentGold} />
+        <Circle cx="-7" cy="60" r="5" fill="#FFFFFF" stroke={colors.accentGold} strokeWidth={1.5} />
+        <Circle cx="-7" cy="60" r="2" fill={colors.accentGold} />
 
         {/* End point highlight for Prayer Journal */}
         <AnimatedCircle r="5" fill="#FFFFFF" stroke={colors.accentGold} strokeWidth={1.5} animatedProps={animatedEndPointProps} />

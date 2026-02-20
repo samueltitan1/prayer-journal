@@ -1,7 +1,8 @@
 import { capture } from "@/lib/posthog";
 
 // SQL migration (run once):
-// ALTER TABLE public.user_settings
+// ALTER TABLE public.onboarding_responses
+//   ADD COLUMN IF NOT EXISTS onboarding_step text,
 //   ADD COLUMN IF NOT EXISTS onboarding_last_seen_at timestamptz;
 
 export const trackOnboardingStart = () => {

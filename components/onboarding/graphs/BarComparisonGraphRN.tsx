@@ -1,7 +1,13 @@
 import { colors, fonts, spacing } from "@/theme/theme";
 import React, { useEffect } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from "react-native-reanimated";
 
 type BarComparisonGraphRNProps = {
   title?: string;
@@ -11,6 +17,7 @@ type BarComparisonGraphRNProps = {
 const BAR_HEIGHT = 160;
 
 export default function BarComparisonGraphRN({
+  title = "Answered prayers you notice",
   description = "Prayer Journal helps you remember and reflect more consistently.",
 }: BarComparisonGraphRNProps) {
   const withoutValue = useSharedValue(0);
@@ -21,8 +28,14 @@ export default function BarComparisonGraphRN({
   useEffect(() => {
     withoutValue.value = withTiming(0.2, { duration: 700, easing: Easing.out(Easing.cubic) });
     withValue.value = withTiming(1, { duration: 900, easing: Easing.out(Easing.cubic) });
-    labelOpacity.value = withTiming(1, { duration: 400, easing: Easing.out(Easing.quad), delay: 600 });
-    labelScale.value = withTiming(1, { duration: 400, easing: Easing.out(Easing.quad), delay: 600 });
+    labelOpacity.value = withDelay(
+      600,
+      withTiming(1, { duration: 400, easing: Easing.out(Easing.quad) })
+    );
+    labelScale.value = withDelay(
+      600,
+      withTiming(1, { duration: 400, easing: Easing.out(Easing.quad) })
+    );
   }, [labelOpacity, labelScale, withValue, withoutValue]);
 
   const withoutBarStyle = useAnimatedStyle(() => ({
@@ -40,12 +53,13 @@ export default function BarComparisonGraphRN({
 
   return (
     <View style={styles.card}>
+      <Text style={styles.title}>{title}</Text>
       <View style={styles.barRow}>
         <View style={styles.barBlock}>
           <Text style={styles.barLabelText}>Without{"\n"}Prayer Journal</Text>
           <View style={styles.barContainer}>
             <Animated.View style={[styles.barFill, styles.barMuted, withoutBarStyle]} />
-            <Animated.Text style={[styles.barValue, labelStyle]}>10%</Animated.Text>
+            <Animated.Text style={[styles.barValue, labelStyle]}>~10%</Animated.Text>
           </View>
         </View>
         <View style={styles.barBlock}>
@@ -53,7 +67,7 @@ export default function BarComparisonGraphRN({
           <View style={styles.barContainer}>
             <Animated.View style={[styles.barFill, withBarStyle]} />
             <Animated.Text style={[styles.barValue, styles.barValueLight, labelStyle]}>
-              8x
+              8x more
             </Animated.Text>
           </View>
         </View>
@@ -123,7 +137,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textSecondary,
     textAlign: "center",
-    width: "80%",
+    width: "100%",
     alignSelf: "center",
+  },
+  title: {
+    fontFamily: fonts.headingBold,
+    fontSize: 16,
+    color: colors.textPrimary,
+    textAlign: "center",
+    marginBottom: 35,
   },
 });

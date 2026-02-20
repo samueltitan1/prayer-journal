@@ -14,11 +14,10 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "@/contexts/AuthProvider";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { requestNotificationPermissions } from "@/lib/notifications";
-import { getOnboardingResponsesSnapshot } from "@/lib/onboardingResponses";
+import { getOnboardingResponsesSnapshot, upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { identifyUser, initPostHog, resetAnalytics } from "@/lib/posthog";
-import { getEntitlement } from "@/lib/subscriptions";
-import { getUserSettingsSnapshot } from "@/lib/userSettings";
 import { DevBuildGate } from "@/lib/runtime/requireDevBuild";
+import { getEntitlement } from "@/lib/subscriptions";
 
 function RootNavigator() {
   const auth = useAuth();
@@ -47,22 +46,35 @@ function RootNavigator() {
         setEntitled(null);
         return;
       }
-      const [settings, onboarding, entitlement] = await Promise.all([
-        getUserSettingsSnapshot(user.id),
+      const [onboarding, entitlement] = await Promise.all([
         getOnboardingResponsesSnapshot(user.id),
         getEntitlement(user.id),
       ]);
       if (cancelled) return;
       const completed = Boolean(onboarding?.onboarding_completed_at);
       setOnboardingComplete(completed);
-      setOnboardingStep(settings?.onboarding_step ?? null);
+      setOnboardingStep(onboarding?.onboarding_step ?? null);
       setEntitled(entitlement.active);
+      if (__DEV__) {
+        console.log("layout: snapshot", {
+          completed,
+          step: onboarding?.onboarding_step ?? null,
+          entitled: entitlement.active,
+        });
+      }
     };
     run();
     return () => {
       cancelled = true;
     };
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    if (onboardingComplete === true && entitled === false) {
+      void upsertOnboardingResponses(user.id, { onboarding_step: "paywall" });
+    }
+  }, [entitled, onboardingComplete, user?.id]);
 
   if (loading || (user?.id && (onboardingComplete === null || entitled === null))) {
     return (
@@ -79,12 +91,10 @@ function RootNavigator() {
     >
       {!user ? (
         <Stack.Screen name="(auth)" />
-      ) : onboardingComplete === false && onboardingStep === "preparing" ? (
-        <Stack.Screen name="(auth)/onboarding/preparing" />
-      ) : onboardingComplete === true && entitled === false ? (
-        <Stack.Screen name="(auth)/onboarding/paywall" />
       ) : onboardingComplete === false ? (
-        <Stack.Screen name="(auth)/onboarding" />
+        <Stack.Screen name="(auth)" />
+      ) : entitled === false ? (
+        <Stack.Screen name="(auth)" />
       ) : (
         <Stack.Screen name="(tabs)" />
       )}

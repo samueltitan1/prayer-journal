@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { AppState } from "react-native";
 
 // ---- Types ----
 type AuthContextType = {
@@ -94,6 +95,16 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       }
     });
 
+    // Keep refresh running only while app is active (RN best practice).
+    supabase.auth.startAutoRefresh();
+    const appStateSub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        supabase.auth.startAutoRefresh();
+      } else {
+        supabase.auth.stopAutoRefresh();
+      }
+    });
+
     // 2. Subscribe to auth state changes
     const {
       data: { subscription },
@@ -120,6 +131,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     return () => {
       isMounted = false;
       subscription.unsubscribe();
+      appStateSub.remove();
+      supabase.auth.stopAutoRefresh();
     };
   }, [supabase]);
 

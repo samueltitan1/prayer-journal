@@ -3,6 +3,8 @@ import { getSupabase } from "@/lib/supabaseClient";
 export type OnboardingResponsesPayload = {
   onboarding_started_at?: string;
   onboarding_completed_at?: string;
+  onboarding_step?: string | null;
+  onboarding_last_seen_at?: string;
   q1?: string;
   q2?: string;
   q3?: string;
@@ -16,6 +18,8 @@ export type OnboardingResponsesPayload = {
 export type OnboardingResponsesSnapshot = {
   onboarding_started_at?: string | null;
   onboarding_completed_at?: string | null;
+  onboarding_step?: string | null;
+  onboarding_last_seen_at?: string | null;
 };
 
 const ARRAY_KEYS = new Set(["q7", "q8"]);
@@ -52,7 +56,7 @@ export async function upsertOnboardingResponses(
   try {
     const { data, error } = await supabase
       .from("onboarding_responses")
-      .select("onboarding_started_at,onboarding_completed_at")
+      .select("onboarding_started_at,onboarding_completed_at,onboarding_step,onboarding_last_seen_at")
       .eq("user_id", userId)
       .maybeSingle();
     if (error) {
@@ -98,7 +102,7 @@ export async function getOnboardingResponsesSnapshot(
   try {
     const { data, error } = await getSupabase()
       .from("onboarding_responses")
-      .select("onboarding_completed_at,onboarding_started_at")
+      .select("onboarding_completed_at,onboarding_started_at,onboarding_step,onboarding_last_seen_at")
       .eq("user_id", userId)
       .maybeSingle();
     if (error) {

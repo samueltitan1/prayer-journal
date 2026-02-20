@@ -1,16 +1,15 @@
 import { getSupabase } from "@/lib/supabaseClient";
 
 export type OnboardingUserSettingsPayload = {
-  onboarding_step?: string;
-  onboarding_last_seen_at?: string;
   reminder_enabled?: boolean;
   reminder_time?: string;
   apple_health_connected?: boolean;
 };
 
 export type UserSettingsSnapshot = {
-  onboarding_step?: string | null;
-  onboarding_last_seen_at?: string | null;
+  reminder_enabled?: boolean | null;
+  reminder_time?: string | null;
+  apple_health_connected?: boolean | null;
 };
 
 const ARRAY_KEYS = new Set<string>();
@@ -47,7 +46,7 @@ export async function upsertUserSettingsOnboarding(
   try {
     const { data, error } = await supabase
       .from("user_settings")
-      .select("onboarding_step, onboarding_last_seen_at")
+      .select("reminder_enabled, reminder_time, apple_health_connected")
       .eq("user_id", userId)
       .maybeSingle();
     if (error) {
@@ -84,7 +83,7 @@ export async function getUserSettingsSnapshot(userId: string | null | undefined)
   try {
     const { data, error } = await getSupabase()
       .from("user_settings")
-      .select("onboarding_step, onboarding_last_seen_at")
+      .select("reminder_enabled, reminder_time, apple_health_connected")
       .eq("user_id", userId)
       .maybeSingle();
     if (error) {

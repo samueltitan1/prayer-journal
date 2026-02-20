@@ -1,10 +1,79 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Tabs } from "expo-router";
-import { Platform } from "react-native";
+import { getOnboardingResponsesSnapshot, upsertOnboardingResponses } from "@/lib/onboardingResponses";
+import { getSupabase } from "@/lib/supabaseClient";
+import { getEntitlement } from "@/lib/subscriptions";
+import { Tabs, useRouter } from "expo-router";
+import { Platform, View, ActivityIndicator } from "react-native";
+import { useEffect, useState } from "react";
 import { useTheme } from "../../contexts/ThemeContext";
 
 export default function TabsLayout() {
   const { colors } = useTheme();
+  const router = useRouter();
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const { data } = await getSupabase().auth.getSession();
+      const session = data.session;
+      if (!session?.user?.id) {
+        if (__DEV__) console.log("tabs guard: no session -> welcome");
+        router.replace("/(auth)/onboarding/welcome");
+        if (!cancelled) setChecking(false);
+        return;
+      }
+
+      const userId = session.user.id;
+      const onboarding = await getOnboardingResponsesSnapshot(userId);
+      const completed = Boolean(onboarding?.onboarding_completed_at);
+      const step = onboarding?.onboarding_step ?? null;
+
+      if (!completed) {
+        const allowed = new Set([
+          "welcome",
+          "survey",
+          "privacy",
+          "apple-health",
+          "reminder",
+          "signup",
+          "login",
+          "preparing",
+          "paywall",
+          "congratulations",
+        ]);
+        const next = step && allowed.has(step) ? step : "welcome";
+        if (__DEV__) console.log("tabs guard: onboarding incomplete ->", next);
+        router.replace(`/(auth)/onboarding/${next}`);
+        if (!cancelled) setChecking(false);
+        return;
+      }
+
+      const entitlement = await getEntitlement(userId);
+      if (!entitlement.active) {
+        if (__DEV__) console.log("tabs guard: no entitlement -> paywall");
+        await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
+        router.replace("/(auth)/onboarding/paywall");
+        if (!cancelled) setChecking(false);
+        return;
+      }
+
+      if (!cancelled) setChecking(false);
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  if (checking) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
 
   return (
     <Tabs

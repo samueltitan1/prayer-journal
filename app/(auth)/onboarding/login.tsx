@@ -10,7 +10,7 @@ import {
 } from "@/lib/analytics/onboarding";
 import { signInWithGoogleToSupabase } from "@/lib/auth/googleNative";
 import { getSupabase } from "@/lib/supabaseClient";
-import { upsertUserSettingsOnboarding } from "@/lib/userSettings";
+import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { buttons, fonts, spacing } from "@/theme/theme";
 import { Ionicons } from "@expo/vector-icons";
 import * as AppleAuthentication from "expo-apple-authentication";
@@ -28,6 +28,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import * as Linking from "expo-linking";
 
 export default function Login() {
   const router = useRouter();
@@ -44,7 +45,7 @@ export default function Login() {
 
   useEffect(() => {
     trackOnboardingStepViewed("login");
-    void upsertUserSettingsOnboarding(user?.id, {
+    void upsertOnboardingResponses(user?.id, {
       onboarding_step: "login",
       onboarding_last_seen_at: new Date().toISOString(),
     });
@@ -102,13 +103,17 @@ export default function Login() {
       Alert.alert("Enter your email", "Please type your email first.");
       return;
     }
-    const { error } = await getSupabase().auth.resetPasswordForEmail(email);
+    const redirectTo = Linking.createURL("reset-password");
+    const { error } = await getSupabase().auth.resetPasswordForEmail(email, {
+      redirectTo,
+    });
     if (error) Alert.alert("Error", error.message);
     else Alert.alert("Check your inbox", "We’ve sent you a reset link.");
   };
 
   const handleAppleSignIn = async () => {
     try {
+      console.log("Apple sign-in pressed (login)");
       trackSignupMethodSelected("apple");
       setErrorMessage(null);
       setAppleLoading(true);
@@ -137,19 +142,22 @@ export default function Login() {
         provider: "apple",
         token: credential.identityToken,
       });
-  
+
       if (error) {
+        console.log("Apple sign-in error (login)", error);
         trackAuthResult("apple", "error", error.name || error.code || "auth_error");
         setErrorMessage(error.message || "Apple sign-in failed. Please try again.");
         return;
       }
-  
+
+      console.log("Apple sign-in success (login)");
       trackAuthResult("apple", "success");
       trackOnboardingAction("login", "continue");
       router.replace("/(tabs)/pray");
     } catch (e: any) {
       // user cancels Apple sheet
       if (e?.code === "ERR_REQUEST_CANCELED") return;
+      console.log("Apple sign-in exception (login)", e);
       trackAuthResult("apple", "error", e?.code || e?.name || "auth_error");
       setErrorMessage(e?.message ?? "Apple sign-in failed. Please try again.");
     } finally {
@@ -158,16 +166,19 @@ export default function Login() {
   };
 
   const handleGoogleSignIn = async () => {
+    console.log("Google sign-in pressed (login)");
     trackSignupMethodSelected("google");
     setErrorMessage(null);
     setGoogleLoading(true);
     try {
       const userId = await signInWithGoogleToSupabase();
       if (!userId) return;
+      console.log("Google sign-in success (login)", userId);
       trackAuthResult("google", "success");
       trackOnboardingAction("login", "continue");
       router.replace("/(tabs)/pray");
     } catch (err: any) {
+      console.log("Google sign-in error (login)", err);
       trackAuthResult("google", "error", err?.code || err?.name || "auth_error");
       setErrorMessage(err?.message ?? "Google sign-in failed. Please try again.");
     } finally {

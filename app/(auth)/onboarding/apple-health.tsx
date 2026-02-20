@@ -8,6 +8,7 @@ import {
 } from "@/lib/analytics/onboarding";
 import { isHealthKitAvailable, requestHealthPermissions } from "@/lib/healthkit";
 import { getOnboardingProgress } from "@/lib/onboardingProgress";
+import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { upsertUserSettingsOnboarding } from "@/lib/userSettings";
 import { colors, fonts, spacing } from "@/theme/theme";
 import { useRouter } from "expo-router";
@@ -20,7 +21,7 @@ export default function OnboardingAppleHealth() {
 
   useEffect(() => {
     trackOnboardingStepViewed("apple-health");
-    void upsertUserSettingsOnboarding(user?.id, {
+    void upsertOnboardingResponses(user?.id, {
       onboarding_step: "apple-health",
       onboarding_last_seen_at: new Date().toISOString(),
     });
@@ -70,7 +71,7 @@ export default function OnboardingAppleHealth() {
     
         <Text style={styles.title}>Connect to Apple Health</Text>
         <Text style={styles.subtitle}>
-          Combine your spiritual health with your physical health. Enhance "Walk Mode" by syncing your Prayer Walk's with the Health app.
+          Combine your spiritual health with your physical health - Track your prayers and your steps. Enhance "Walk Mode" by syncing your Prayer Walk's with the Health app. 
         </Text>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
       </View>
@@ -109,7 +110,7 @@ const styles = StyleSheet.create({
   subtitle: {
     marginTop: spacing.sm,
     fontFamily: fonts.body,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.textSecondary,
     textAlign: "left",
   },

@@ -1,6 +1,6 @@
 import { getSupabase } from '@/lib/supabaseClient';
-import { getUserSettingsSnapshot } from '@/lib/userSettings';
-import { getOnboardingResponsesSnapshot } from '@/lib/onboardingResponses';
+import { getOnboardingResponsesSnapshot, upsertOnboardingResponses } from '@/lib/onboardingResponses';
+import { getEntitlement } from '@/lib/subscriptions';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
@@ -19,25 +19,47 @@ export default function SplashScreen() {
       setAuthResolved(true);
 
       if (!auth) {
+        if (__DEV__) console.log("boot: no session -> welcome");
         router.replace('/(auth)/onboarding/welcome');
         return;
       }
 
       const userId = data.session?.user?.id;
-      const [settings, onboarding] = await Promise.all([
-        getUserSettingsSnapshot(userId),
-        getOnboardingResponsesSnapshot(userId),
-      ]);
+      const onboarding = await getOnboardingResponsesSnapshot(userId);
       const completed = Boolean(onboarding?.onboarding_completed_at);
-      const step = settings?.onboarding_step ?? null;
-      if (completed === false && step === "paywall") {
+      const step = onboarding?.onboarding_step ?? null;
+      if (!completed) {
+        const allowed = new Set([
+          "welcome",
+          "survey",
+          "privacy",
+          "apple-health",
+          "reminder",
+          "signup",
+          "login",
+          "preparing",
+          "paywall",
+          "congratulations",
+        ]);
+        if (step && allowed.has(step)) {
+          if (__DEV__) console.log("boot: resume onboarding ->", step);
+          router.replace(`/(auth)/onboarding/${step}`);
+          return;
+        }
+        if (__DEV__) console.log("boot: onboarding incomplete -> welcome");
+        router.replace('/(auth)/onboarding/welcome');
+        return;
+      }
+
+      const entitlement = await getEntitlement(userId);
+      if (!entitlement.active) {
+        if (__DEV__) console.log("boot: onboarding complete but no entitlement -> paywall");
+        await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
         router.replace('/(auth)/onboarding/paywall');
         return;
       }
-      if (completed === false) {
-        router.replace('/(auth)/onboarding');
-        return;
-      }
+
+      if (__DEV__) console.log("boot: entitled -> tabs/journal");
       router.replace('/(tabs)/journal');
     }
 

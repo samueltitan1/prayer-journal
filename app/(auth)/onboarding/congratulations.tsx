@@ -9,7 +9,6 @@ import {
 } from "@/lib/analytics/onboarding";
 import { getOnboardingProgress } from "@/lib/onboardingProgress";
 import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
-import { upsertUserSettingsOnboarding } from "@/lib/userSettings";
 import { colors, fonts, spacing } from "@/theme/theme";
 import { useRouter } from "expo-router";
 import React, { useEffect } from "react";
@@ -21,7 +20,7 @@ export default function OnboardingCongratulations() {
 
   useEffect(() => {
     trackOnboardingStepViewed("congratulations");
-    void upsertUserSettingsOnboarding(user?.id, {
+    void upsertOnboardingResponses(user?.id, {
       onboarding_step: "congratulations",
       onboarding_last_seen_at: new Date().toISOString(),
     });
@@ -45,7 +44,7 @@ export default function OnboardingCongratulations() {
         progress={getOnboardingProgress("congratulations")}
         onBack={() => {
           trackOnboardingAction("congratulations", "back");
-          router.replace("/(auth)/onboarding/preparing");
+          router.replace("/(auth)/onboarding/signup");
         }}
       />
       <View style={styles.container}>

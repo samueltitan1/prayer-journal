@@ -20,8 +20,11 @@ export async function getEntitlement(userId: string | null | undefined) {
     }
 
     const end = data?.current_period_end ?? null;
-    const active =
-      data?.status === "active" && !!end && new Date(end).getTime() > Date.now();
+    const endMs = end ? new Date(end).getTime() : 0;
+    const activeByStatus =
+      data?.status === "active" || data?.status === "trialing";
+    const activeByEnd = !!end && endMs > Date.now();
+    const active = activeByStatus || activeByEnd;
     return { active, currentPeriodEnd: end };
   } catch (e) {
     console.warn("Failed to load subscription snapshot (exception)", e);

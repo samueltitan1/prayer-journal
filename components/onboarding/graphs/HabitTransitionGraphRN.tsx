@@ -23,8 +23,8 @@ const PATH_LENGTH = 500;
 const AXIS_Y = 210;
 
 export default function HabitTransitionGraphRN({
-  title = "Your habit transition",
-  description = "Based on Prayer Journal’s historical data, habits start to form after 7 days. With time, you can transform your prayer life.",
+  title = "How quickly is your habits builds",
+  description = "Habits begin to form in just 7 days. By day 30, prayer becomes part of who you are.",
 }: HabitTransitionGraphRNProps) {
   const progress = useSharedValue(0);
   const micro = useSharedValue(0);

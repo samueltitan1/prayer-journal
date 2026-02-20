@@ -5,6 +5,14 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.43.4";
 import OpenAI from "npm:openai";
 
+// SQL (run once) to enforce idempotency at the DB level:
+// create unique index if not exists reflections_weekly_unique
+//   on public.reflections (user_id, type, week_key)
+//   where week_key is not null;
+// create unique index if not exists reflections_monthly_unique
+//   on public.reflections (user_id, type, month_key)
+//   where month_key is not null;
+
 // ---------------------------------------------------------
 // TYPES
 // ---------------------------------------------------------
@@ -53,25 +61,6 @@ serve(async (req: Request): Promise<Response> => {
     // -----------------------------------------------------
     const today = new Date();
 
-    const startOfWeek = () => {
-      const d = new Date(today);
-      const day = d.getDay(); // Sunday = 0
-      d.setDate(d.getDate() - day);
-      d.setHours(0, 0, 0, 0);
-      return d;
-    };
-
-    const endOfWeek = () => {
-      const d = startOfWeek();
-      d.setDate(d.getDate() + 6);
-      d.setHours(23, 59, 59, 999);
-      return d;
-    };
-
-    const startOfMonth = () => new Date(today.getFullYear(), today.getMonth(), 1);
-    const endOfMonth = () =>
-      new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59, 999);
-
     let rangeStart: Date;
     let rangeEnd: Date;
     
@@ -93,50 +82,45 @@ serve(async (req: Request): Promise<Response> => {
       return `${y}-${m}`;
     };
 
+    const getLastCompletedWeekUTC = () => {
+      const now = new Date();
+      const dow = now.getUTCDay(); // 0=Sun ... 6=Sat
+      const daysSinceSaturday = dow === 6 ? 7 : dow + 1;
+      const end = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+      );
+      end.setUTCDate(end.getUTCDate() - daysSinceSaturday);
+      end.setUTCHours(23, 59, 59, 999);
+      const start = new Date(end);
+      start.setUTCDate(start.getUTCDate() - 6);
+      start.setUTCHours(0, 0, 0, 0);
+      return { start, end, weekKey: toDateKeyUTC(start) };
+    };
+
+    const getLastCompletedMonthUTC = () => {
+      const now = new Date();
+      const start = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1, 0, 0, 0, 0)
+      );
+      const end = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0, 23, 59, 59, 999)
+      );
+      return { start, end, monthKey: toMonthKeyUTC(start) };
+    };
+
     // -----------------------------------------------------
-    // DETERMINE RANGE + VALIDATION
+    // DETERMINE RANGE (LAST COMPLETED PERIOD)
     // -----------------------------------------------------
     if (type === "weekly") {
-      // If cron is running this, it SHOULD already be Sunday.
-      // Keep as a soft-skip rather than an error.
-      if (!isScheduledInvocation && today.getDay() !== 0) {
-        console.log("Weekly reflection skipped: not Sunday", today.toISOString());
-        return new Response(JSON.stringify({ skipped: true }), { status: 200 });
-      }
-
-      // ✅ Summarize the *previous* full week (Sun–Sat) that just ended.
-      // If today is Sunday, the week we want ends at Saturday 23:59:59.999.
-      const end = new Date(today);
-      end.setHours(0, 0, 0, 0); // today 00:00
-      end.setMilliseconds(end.getMilliseconds() - 1); // yesterday 23:59:59.999
-
-      const start = new Date(end);
-      start.setDate(start.getDate() - 6); // back to Sunday 00:00
-      start.setHours(0, 0, 0, 0);
-
+      const { start, end, weekKey: wk } = getLastCompletedWeekUTC();
       rangeStart = start;
       rangeEnd = end;
-      // Use the summarized period start date as the idempotency key
-      weekKey = toDateKeyUTC(rangeStart);    
+      weekKey = wk;
     } else {
-      // ✅ Only run on the 1st of the month
-      const isFirstDay = today.getDate() === 1;
-      if (!isScheduledInvocation && today.getDate() !== 1) {
-        return new Response(JSON.stringify({ skipped: true }), { status: 200 });
-      }
-
-      // ✅ Summarize the *previous* calendar month.
-      const prevMonthAnchor = new Date(today.getFullYear(), today.getMonth() - 1, 15);
-
-      const start = new Date(prevMonthAnchor.getFullYear(), prevMonthAnchor.getMonth(), 1);
-      start.setHours(0, 0, 0, 0);
-
-      const end = new Date(prevMonthAnchor.getFullYear(), prevMonthAnchor.getMonth() + 1, 0);
-      end.setHours(23, 59, 59, 999);
-
+      const { start, end, monthKey: mk } = getLastCompletedMonthUTC();
       rangeStart = start;
       rangeEnd = end;
-      monthKey = toMonthKeyUTC(rangeStart);
+      monthKey = mk;
     }
 
     const getCandidateUserIds = async (): Promise<string[]> => {
@@ -160,7 +144,9 @@ serve(async (req: Request): Promise<Response> => {
     };
 
     // Per-user reflection generator function
-    const generateReflectionForUser = async (uid: string): Promise<"inserted" | "skipped"> => {
+    const generateReflectionForUser = async (
+      uid: string
+    ): Promise<{ status: "inserted" | "skipped"; reason?: string }> => {
       // -----------------------------------------------------
       // PREVENT DUPLICATE REFLECTIONS (IDEMPOTENT BY PERIOD)
       // -----------------------------------------------------
@@ -172,7 +158,7 @@ serve(async (req: Request): Promise<Response> => {
       
       if (!dedupeVal) {
         console.error("Missing dedupe key for type", type);
-        return "skipped";
+        return { status: "skipped", reason: "missing_key" };
       }
 
       const { data: existing, error } = await supabase
@@ -192,7 +178,7 @@ serve(async (req: Request): Promise<Response> => {
       if (existing) {
         // Already generated for this period, skip
         console.log("Reflection already exists; skipping", { uid, type, [dedupeCol]: dedupeVal });
-        return "skipped";
+        return { status: "skipped", reason: "exists" };
       }
 
       // -----------------------------------------------------
@@ -208,7 +194,7 @@ serve(async (req: Request): Promise<Response> => {
 
       if (prayersError) {
         console.error("Error fetching prayers for user", uid, prayersError);
-        return "skipped";
+        return { status: "skipped", reason: "prayers_error" };
       }
 
       const transcripts = (prayers || [])
@@ -220,15 +206,15 @@ serve(async (req: Request): Promise<Response> => {
       // MINIMUM REQUIREMENTS
       // -----------------------------------------------------
       if (type === "weekly" && (prayers?.length ?? 0) < 2) {
-        return "skipped";
+        return { status: "skipped", reason: "insufficient_prayers" };
       }
 
       if (type === "monthly" && (prayers?.length ?? 0) < 5) {
-        return "skipped";
+        return { status: "skipped", reason: "insufficient_prayers" };
       }
 
       if (!transcripts || transcripts.trim().length < 20) {
-        return "skipped";
+        return { status: "skipped", reason: "insufficient_text" };
       }
 
       // -----------------------------------------------------
@@ -349,7 +335,7 @@ ${transcripts}
       const summary = completion.choices[0].message?.content?.trim() ?? null;
       if (!summary) {
         console.error("AI returned no content for user", uid);
-        return "skipped";
+        return { status: "skipped", reason: "ai_empty" };
       }
 
       const countWords = (s: string) => s.trim().split(/\s+/).filter(Boolean).length;
@@ -405,7 +391,7 @@ ${text}
         month_key: type === "monthly" ? monthKey : null,
       });
 
-      return "inserted";
+      return { status: "inserted" };
     };
 
     // ---- Batch Mode ----
@@ -417,7 +403,7 @@ ${text}
 
       for (const uid of candidates) {
         const r = await generateReflectionForUser(uid);
-        if (r === "inserted") inserted++;
+        if (r.status === "inserted") inserted++;
         else skipped++;
       }
 
@@ -448,7 +434,14 @@ ${text}
     if (user_id) {
       const result = await generateReflectionForUser(user_id);
       return new Response(
-        JSON.stringify({ mode: "single", result }),
+        JSON.stringify({
+          mode: "single",
+          result: result.status,
+          skipped: result.status === "skipped",
+          reason: result.reason,
+          week_key: weekKey ?? null,
+          month_key: monthKey ?? null,
+        }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
     }

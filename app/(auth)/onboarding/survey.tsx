@@ -14,7 +14,6 @@ import {
 } from "@/lib/analytics/onboarding";
 import { getOnboardingProgress, SURVEY_QUESTION_COUNT } from "@/lib/onboardingProgress";
 import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
-import { upsertUserSettingsOnboarding } from "@/lib/userSettings";
 import { colors, fonts, spacing } from "@/theme/theme";
 import { FontAwesome, FontAwesome5, Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -152,8 +151,8 @@ const QUESTIONS: SurveyQuestion[] = [
     id: 106,
     type: "info",
     infoKey: "sp2",
-    text: "Grow so much more with Prayer Journal",
-    subtext: "Prayer Journal makes it easy to search and reflect on prayers.",
+    text: "See how God is working in your life",
+    subtext: "Prayer Journal turns scattered prayers into a personal timeline of God's faithfulness.",
   },
   {
     id: 7,
@@ -174,9 +173,9 @@ const QUESTIONS: SurveyQuestion[] = [
     id: 107,
     type: "info",
     infoKey: "sp3",
-    text: "You have what it takes to transform your prayer life",
+    text: "Your prayer life is about to change forever",
     subtext:
-      "Based on Prayer Journal’s historical data, habits start to form after 7 days. With time, you can transform your prayer life.",
+      "Habits begin to form in just 7 days. By day 30, prayer becomes part of who you are.",
   },
 ];
 
@@ -255,7 +254,7 @@ export default function OnboardingSurvey() {
   useEffect(() => {
     if (!question) return;
     trackOnboardingStepViewed(currentStepName);
-    void upsertUserSettingsOnboarding(user?.id, {
+    void upsertOnboardingResponses(user?.id, {
       onboarding_step: currentStepName,
       onboarding_last_seen_at: new Date().toISOString(),
     });
@@ -424,23 +423,23 @@ export default function OnboardingSurvey() {
                 <>
                   <LongTermResultsGraphRN
                     title="Your prayer life"
-                    description="80% of Prayer Journal users pray and reflect more consistently even after 6 months"
+                    description="80% of Prayer Journal users are still praying consistently after 6 months"
                   />
                 </>
               ) : null}
               {question.infoKey === "sp2" ? (
                 <>
                   <BarComparisonGraphRN
-                    title="Comparison"
-                    description="Prayer Journal makes it easy to search and reflect on prayers"
+                    title="Answered prayers you notice"
+                    description="Prayer Journal turns scattered prayers into a personal timeline of God's faithfulness"
                   />
                 </>
               ) : null}
               {question.infoKey === "sp3" ? (
                 <>
                   <HabitTransitionGraphRN
-                    title="Your habit transition"
-                    description="Based on Prayer Journal’s historical data, habits start to form after 7 days. With time, you can transform your prayer life!"
+                    title="Your first 30 days"
+                    description="Habits begin to form in just 7 days. By day 30, prayer becomes part of who you are"
                   />
                 </>
               ) : null}

@@ -74,6 +74,45 @@ const formatDateKey = (d: Date) =>
     d.getDate()
   ).padStart(2, "0")}`;
 
+const toDateKeyUTC = (d: Date) => {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
+const toMonthKeyUTC = (d: Date) => {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+};
+
+const getLastCompletedWeekUTC = () => {
+  const now = new Date();
+  const dow = now.getUTCDay(); // 0=Sun ... 6=Sat
+  const daysSinceSaturday = dow === 6 ? 7 : dow + 1;
+  const end = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  );
+  end.setUTCDate(end.getUTCDate() - daysSinceSaturday);
+  end.setUTCHours(23, 59, 59, 999);
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - 6);
+  start.setUTCHours(0, 0, 0, 0);
+  return { start, end, weekKey: toDateKeyUTC(start) };
+};
+
+const getLastCompletedMonthUTC = () => {
+  const now = new Date();
+  const start = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1, 0, 0, 0, 0)
+  );
+  const end = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0, 23, 59, 59, 999)
+  );
+  return { start, end, monthKey: toMonthKeyUTC(start) };
+};
+
 const formatDuration = (s: number | null) =>
   !s ? "" : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
@@ -273,8 +312,7 @@ const [milestoneTimelineVisible, setMilestoneTimelineVisible] = useState(false);
 const [unlockedMilestones, setUnlockedMilestones] = useState<number[]>([]);
 
 const UNLOCKED_MILESTONES_KEY = "unlocked_milestones_v1";
-const LAST_WEEKLY_REFLECTION_RUN_KEY = "last_weekly_reflection_run_v1";
-const LAST_MONTHLY_REFLECTION_RUN_KEY = "last_monthly_reflection_run_v1";
+const LAST_REFLECTION_CHECK_AT_KEY = "last_reflection_check_at_v1";
 
 const loadUnlockedMilestones = async () => {
   try {
@@ -725,40 +763,66 @@ const bookmarkedPrayers = useMemo(() => {
 useEffect(() => {
   if (!userId) return;
 
-  const runOncePerDay = async () => {
-    const today = new Date().toISOString().slice(0, 10);
+  const shouldRunCheck = async (force: boolean) => {
+    if (force) return true;
+    const raw = await AsyncStorage.getItem(LAST_REFLECTION_CHECK_AT_KEY);
+    const last = raw ? Number(raw) : 0;
+    if (!last || Number.isNaN(last)) return true;
+    const hours = 12 * 60 * 60 * 1000;
+    return Date.now() - last > hours;
+  };
 
-    // Weekly
-    const lastWeekly = await AsyncStorage.getItem(
-      LAST_WEEKLY_REFLECTION_RUN_KEY
+  const markChecked = async () => {
+    await AsyncStorage.setItem(
+      LAST_REFLECTION_CHECK_AT_KEY,
+      String(Date.now())
     );
-    if (lastWeekly !== today) {
-      await AsyncStorage.setItem(
-        LAST_WEEKLY_REFLECTION_RUN_KEY,
-        today
-      );
-      getSupabase().functions.invoke("generate_reflection", {
-        body: { type: "weekly" },
-      });
+  };
+
+  const runLazyReflectionChecks = async (force: boolean) => {
+    if (!(await shouldRunCheck(force))) return;
+    await markChecked();
+
+    const { weekKey } = getLastCompletedWeekUTC();
+    const { monthKey } = getLastCompletedMonthUTC();
+
+    const { data: weeklyExisting, error: weeklyErr } = await getSupabase()
+      .from("reflections")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("type", "weekly")
+      .eq("week_key", weekKey)
+      .maybeSingle();
+
+    if (weeklyErr) {
+      console.warn("Weekly reflection check failed:", weeklyErr.message);
     }
 
-    // Monthly
-    const lastMonthly = await AsyncStorage.getItem(
-      LAST_MONTHLY_REFLECTION_RUN_KEY
-    );
-    if (lastMonthly !== today) {
-      await AsyncStorage.setItem(
-        LAST_MONTHLY_REFLECTION_RUN_KEY,
-        today
-      );
-      getSupabase().functions.invoke("generate_reflection", {
-        body: { type: "monthly" },
-      });
+    if (!weeklyExisting) {
+      const ok = await triggerReflection(userId, "weekly");
+      if (ok) setReflectionsRefreshNonce((n) => n + 1);
+    }
+
+    const { data: monthlyExisting, error: monthlyErr } = await getSupabase()
+      .from("reflections")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("type", "monthly")
+      .eq("month_key", monthKey)
+      .maybeSingle();
+
+    if (monthlyErr) {
+      console.warn("Monthly reflection check failed:", monthlyErr.message);
+    }
+
+    if (!monthlyExisting) {
+      const ok = await triggerReflection(userId, "monthly");
+      if (ok) setReflectionsRefreshNonce((n) => n + 1);
     }
   };
 
-  runOncePerDay();
-}, [userId]);
+  void runLazyReflectionChecks(reflectionsRefreshNonce > 0);
+}, [userId, reflectionsRefreshNonce]);
 
   // ---- Fetch reflections ----
   useEffect(() => {
@@ -1480,11 +1544,7 @@ const closeReflection = () => {
           <View style={styles.section}>
             <View style={styles.journeyHeaderRow}>
               <View style={{ flex: 1 }}>
-                <Text
-                  style={[styles.sectionTitle, { color: colors.textPrimary }]}
-                >
-                  Your Prayer Journey
-                </Text>
+        
                 <Text
                   style={[
                     styles.sectionSubtitle,
@@ -1560,9 +1620,6 @@ const closeReflection = () => {
 
           {/* Weekly reflection card (short) */}
           <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-              Weekly reflection
-            </Text>
             {loadingReflections ? (
               <ShimmerCard height={110} />
             ) : weeklyReflection ? (
@@ -1621,8 +1678,8 @@ const closeReflection = () => {
                 <Text
                   style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
                 >
-                  Weekly reflections are created on Sundays. 
-                  Add journal entries thoughout the week and your reflection will appear here automatically.
+                  Weekly reflections are created for the last completed week.
+                  Add journal entries throughout the week and your reflection will appear here automatically.
                 </Text>
               </View>
             )}
@@ -1756,9 +1813,6 @@ const closeReflection = () => {
 
           {/* Monthly reflection / score-card style */}
           <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
-              Monthly reflection
-            </Text>
             {loadingReflections ? (
               <ShimmerCard height={130} />
             ) : monthlyReflection ? (
@@ -1817,7 +1871,7 @@ const closeReflection = () => {
                 <Text
                   style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
                 >
-                  Monthly reflections are created on the first day of each month.
+                  Monthly reflections are created for the last completed month.
                   Keep praying - your reflection will appear here.
                 
                 </Text>
@@ -1920,7 +1974,7 @@ const styles = StyleSheet.create({
   searchBarWrap: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.xs -10,
   },
   searchBar: {
     flexDirection: "row",
@@ -2005,7 +2059,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontFamily: fonts.heading,
     fontSize: 18,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xs,
   },
   sectionSubtitle: { fontFamily: fonts.body, fontSize: 14 },
 

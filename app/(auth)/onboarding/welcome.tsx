@@ -7,7 +7,7 @@ import {
   trackOnboardingStart,
   trackOnboardingStepViewed,
 } from "@/lib/analytics/onboarding";
-import { upsertUserSettingsOnboarding } from "@/lib/userSettings";
+import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { colors, fonts, spacing } from "@/theme/theme";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef } from "react";
@@ -24,7 +24,7 @@ export default function OnboardingWelcome() {
       startedRef.current = true;
     }
     trackOnboardingStepViewed("welcome");
-    void upsertUserSettingsOnboarding(user?.id, {
+    void upsertOnboardingResponses(user?.id, {
       onboarding_step: "welcome",
       onboarding_last_seen_at: new Date().toISOString(),
     });

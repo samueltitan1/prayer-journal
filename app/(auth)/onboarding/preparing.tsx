@@ -2,7 +2,7 @@ import OnboardingShell from "@/components/onboarding/OnboardingShell";
 import ProgressBar from "@/components/onboarding/ProgressBar";
 import { useAuth } from "@/contexts/AuthProvider";
 import { trackOnboardingStepViewed } from "@/lib/analytics/onboarding";
-import { upsertUserSettingsOnboarding } from "@/lib/userSettings";
+import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { colors, fonts, spacing } from "@/theme/theme";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -27,7 +27,7 @@ export default function OnboardingPreparing() {
 
   useEffect(() => {
     trackOnboardingStepViewed("preparing");
-    void upsertUserSettingsOnboarding(user?.id, {
+    void upsertOnboardingResponses(user?.id, {
       onboarding_step: "preparing",
       onboarding_last_seen_at: new Date().toISOString(),
     });
@@ -60,7 +60,7 @@ export default function OnboardingPreparing() {
         duration: 350,
         useNativeDriver: true,
       }).start(() => {
-        router.replace("/(auth)/onboarding/signup");
+        router.replace("/(auth)/onboarding/congratulations");
       });
     }, DURATION_MS);
 

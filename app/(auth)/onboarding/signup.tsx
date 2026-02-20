@@ -10,9 +10,9 @@ import {
 } from "@/lib/analytics/onboarding";
 import { signInWithGoogleToSupabase } from "@/lib/auth/googleNative";
 import { getOnboardingProgress } from "@/lib/onboardingProgress";
+import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { persistOnboardingSurveyAnswers } from "@/lib/persistOnboardingSurvey";
 import { getSupabase } from "@/lib/supabaseClient";
-import { upsertUserSettingsOnboarding } from "@/lib/userSettings";
 import { buttons, colors, fonts, spacing } from "@/theme/theme";
 import { Ionicons } from "@expo/vector-icons";
 import * as AppleAuthentication from "expo-apple-authentication";
@@ -44,7 +44,7 @@ export default function SignUp() {
 
   useEffect(() => {
     trackOnboardingStepViewed("signup");
-    void upsertUserSettingsOnboarding(user?.id, {
+    void upsertOnboardingResponses(user?.id, {
       onboarding_step: "signup",
       onboarding_last_seen_at: new Date().toISOString(),
     });
@@ -64,7 +64,7 @@ export default function SignUp() {
       trackAuthResult("email", "success");
       const { data } = await getSupabase().auth.getSession();
       const userId = data.session?.user?.id;
-      void upsertUserSettingsOnboarding(userId, {
+      void upsertOnboardingResponses(userId, {
         onboarding_step: "preparing",
       });
       void persistOnboardingSurveyAnswers(userId);
@@ -75,6 +75,7 @@ export default function SignUp() {
 
   const handleAppleSignIn = async () => {
     try {
+      console.log("Apple sign-in pressed (signup)");
       trackSignupMethodSelected("apple");
       setErrorMessage(null);
       setAppleLoading(true);
@@ -105,15 +106,17 @@ export default function SignUp() {
       });
 
       if (error) {
+        console.log("Apple sign-in error (signup)", error);
         trackAuthResult("apple", "error", error.name || error.code || "auth_error");
         setErrorMessage(error.message || "Apple sign-in failed. Please try again.");
         return;
       }
+      console.log("Apple sign-in success (signup)");
       trackAuthResult("apple", "success");
 
       const { data } = await getSupabase().auth.getSession();
       const userId = data.session?.user?.id;
-      void upsertUserSettingsOnboarding(userId, {
+      void upsertOnboardingResponses(userId, {
         onboarding_step: "preparing",
       });
       void persistOnboardingSurveyAnswers(userId);
@@ -122,6 +125,7 @@ export default function SignUp() {
     } catch (e: any) {
       // user cancels Apple sheet
       if (e?.code === "ERR_REQUEST_CANCELED") return;
+      console.log("Apple sign-in exception (signup)", e);
       trackAuthResult("apple", "error", e?.code || e?.name || "auth_error");
       setErrorMessage(e?.message ?? "Apple sign-in failed. Please try again.");
     } finally {
@@ -130,20 +134,23 @@ export default function SignUp() {
   };
 
   const handleGoogleSignIn = async () => {
+    console.log("Google sign-in pressed (signup)");
     trackSignupMethodSelected("google");
     setErrorMessage(null);
     setGoogleLoading(true);
     try {
       const userId = await signInWithGoogleToSupabase();
       if (!userId) return;
+      console.log("Google sign-in success (signup)", userId);
       trackAuthResult("google", "success");
-      void upsertUserSettingsOnboarding(userId, {
+      void upsertOnboardingResponses(userId, {
         onboarding_step: "preparing",
       });
       void persistOnboardingSurveyAnswers(userId);
       trackOnboardingAction("signup", "continue");
       router.replace("/(auth)/onboarding/preparing");
     } catch (err: any) {
+      console.log("Google sign-in error (signup)", err);
       trackAuthResult("google", "error", err?.code || err?.name || "auth_error");
       setErrorMessage(err?.message ?? "Google sign-in failed. Please try again.");
     } finally {
@@ -246,7 +253,7 @@ export default function SignUp() {
               activeOpacity={0.85}
             >
               <Ionicons name="logo-apple" size={18} color="#FFFFFF" />
-              <Text style={styles.appleText}>Sign up with Apple</Text>
+              <Text style={styles.appleText}>Continue with Apple</Text>
             </TouchableOpacity>
             {appleLoading && (
               <Text style={[styles.appleLoadingText, { color: colors.textSecondary }]}>
@@ -257,7 +264,7 @@ export default function SignUp() {
         )}
         <TouchableOpacity style={styles.googleButton} onPress={handleGoogleSignIn}>
           <Image source={require("@/assets/google-g.png")} style={styles.googleIcon} />
-          <Text style={styles.googleText}>Sign up with Google</Text>
+          <Text style={styles.googleText}>Continue with Google</Text>
         </TouchableOpacity>
         {googleLoading && (
           <Text style={[styles.appleLoadingText, { color: colors.textSecondary }]}>

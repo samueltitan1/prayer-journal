@@ -5,11 +5,12 @@ export default function AuthLayout() {
   const auth = useAuth();
   const segments = useSegments();
   const isOnboardingRoute = segments.includes("onboarding");
+  const isResetPasswordRoute = segments.includes("reset-password");
 
   if (!auth || auth.loading) return null;
 
   // If user is logged in, only allow access to onboarding routes from within (auth)
-  if (auth.user && !isOnboardingRoute) {
+  if (auth.user && !isOnboardingRoute && !isResetPasswordRoute) {
     return <Redirect href="/(tabs)" />;
   }
 
@@ -17,6 +18,7 @@ export default function AuthLayout() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="onboarding" />
+      <Stack.Screen name="reset-password" />
     </Stack>
   );
 }
