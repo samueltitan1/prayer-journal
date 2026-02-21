@@ -14,10 +14,10 @@ index 26fb957..289a150 100644
        activities: self.activities,
        metadataAverageMETs: self.metadataAverageMETs,
 diff --git a/node_modules/@kingstinct/react-native-healthkit/ios/WorkoutsModule.swift b/node_modules/@kingstinct/react-native-healthkit/ios/WorkoutsModule.swift
-index f71136b..5e02b24 100644
+index f71136b..0fb4f31 100644
 --- a/node_modules/@kingstinct/react-native-healthkit/ios/WorkoutsModule.swift
 +++ b/node_modules/@kingstinct/react-native-healthkit/ios/WorkoutsModule.swift
-@@ -144,51 +144,19 @@ class WorkoutsModule: HybridWorkoutsModuleSpec {
+@@ -144,51 +144,18 @@ class WorkoutsModule: HybridWorkoutsModuleSpec {
        }
  
        // creating workout
@@ -74,7 +74,6 @@ index f71136b..5e02b24 100644
 +        workoutEvents: nil,
 +        totalEnergyBurned: totalEnergyBurned,
 +        totalDistance: totalDistance,
-+        totalFlightsClimbed: nil,
 +        totalSwimmingStrokeCount: nil,
 +        device: nil,
 +        metadata: metadataDeserialized
