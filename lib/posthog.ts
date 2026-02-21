@@ -86,6 +86,6 @@ export function resetAnalytics() {
 export function capture(event: string, props?: Record<string, unknown>) {
   if (!ANALYTICS_ENABLED || !client) return;
   try {
-    client.capture(event, redactProps(props));
+    client.capture(event, redactProps(props) as any);
   } catch {}
 }

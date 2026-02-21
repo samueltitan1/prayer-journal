@@ -1,0 +1,84 @@
+diff --git a/node_modules/@kingstinct/react-native-healthkit/ios/WorkoutProxy.swift b/node_modules/@kingstinct/react-native-healthkit/ios/WorkoutProxy.swift
+index 26fb957..289a150 100644
+--- a/node_modules/@kingstinct/react-native-healthkit/ios/WorkoutProxy.swift
++++ b/node_modules/@kingstinct/react-native-healthkit/ios/WorkoutProxy.swift
+@@ -214,6 +214,10 @@ class WorkoutProxy: HybridWorkoutProxySpec {
+     return WorkoutSample(
+       workoutActivityType: self.workoutActivityType,
+       duration: self.duration,
++      totalEnergyBurned: self.totalEnergyBurned,
++      totalDistance: self.totalDistance,
++      totalSwimmingStrokeCount: self.totalSwimmingStrokeCount,
++      totalFlightsClimbed: self.totalFlightsClimbed,
+       events: self.events,
+       activities: self.activities,
+       metadataAverageMETs: self.metadataAverageMETs,
+diff --git a/node_modules/@kingstinct/react-native-healthkit/ios/WorkoutsModule.swift b/node_modules/@kingstinct/react-native-healthkit/ios/WorkoutsModule.swift
+index f71136b..5e02b24 100644
+--- a/node_modules/@kingstinct/react-native-healthkit/ios/WorkoutsModule.swift
++++ b/node_modules/@kingstinct/react-native-healthkit/ios/WorkoutsModule.swift
+@@ -144,51 +144,19 @@ class WorkoutsModule: HybridWorkoutsModuleSpec {
+       }
+ 
+       // creating workout
+-      var workout: HKWorkout?
+-
+-      if totalSwimmingStrokeCount != nil {
+-        workout = HKWorkout.init(
+-          activityType: type,
+-          start: startDate,
+-          end: endDate,
+-          workoutEvents: nil,
+-          totalEnergyBurned: totalEnergyBurned,
+-          totalDistance: totalDistance,
+-          totalSwimmingStrokeCount: totalSwimmingStrokeCount,
+-          device: nil,
+-          metadata: metadataDeserialized
+-        )
+-      } else {
+-        if let totalFlightsClimbed = totalFlightsClimbed {
+-          workout = HKWorkout.init(
+-            activityType: type,
+-            start: startDate,
+-            end: endDate,
+-            workoutEvents: nil,
+-            totalEnergyBurned: totalEnergyBurned,
+-            totalDistance: totalDistance,
+-            totalFlightsClimbed: totalFlightsClimbed,
+-            device: nil,
+-            metadata: metadataDeserialized
+-          )
+-        }
+-      }
+-
+-      if workout == nil {
+-        workout = HKWorkout.init(
+-          activityType: type,
+-          start: startDate,
+-          end: endDate,
+-          workoutEvents: nil,
+-          totalEnergyBurned: totalEnergyBurned,
+-          totalDistance: totalDistance,
+-          metadata: metadataDeserialized
+-        )
+-      }
+-
+-      guard let workout = workout else {
+-        throw runtimeErrorWithPrefix("Failed to create workout")
+-      }
++      // Walking-only app: always use the newest HKWorkout initializer and pass nil for unsupported totals.
++      let workout = HKWorkout(
++        activityType: type,
++        start: startDate,
++        end: endDate,
++        workoutEvents: nil,
++        totalEnergyBurned: totalEnergyBurned,
++        totalDistance: totalDistance,
++        totalFlightsClimbed: nil,
++        totalSwimmingStrokeCount: nil,
++        device: nil,
++        metadata: metadataDeserialized
++      )
+       try await withCheckedThrowingContinuation({ continuation in
+         // saving workout, samples and route
+         store.save(workout) { (_: Bool, error: Error?) in
