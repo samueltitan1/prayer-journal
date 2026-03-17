@@ -13,5 +13,7 @@ export type Prayer = {
     entry_source?: "audio" | "text" | "ocr" | "walk" | null;
     location_name?: string | null; 
     walk_map_path?: string | null;
+    walk_distance_meters?: number | null;
+    walk_steps?: number | null;
     attachment_urls?: string[]; // or string[] | null
   };

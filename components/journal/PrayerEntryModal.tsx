@@ -68,6 +68,16 @@ const formatMsToClock = (ms?: number | null) => {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 };
 
+const formatDurationFromSeconds = (seconds?: number | null) => {
+  if (seconds == null) return "0:00";
+  return formatMsToClock(seconds * 1000);
+};
+
+const formatDistanceKm = (meters?: number | null) => {
+  if (meters == null || !Number.isFinite(meters)) return "—";
+  return `${(Math.max(0, meters) / 1000).toFixed(2)} km`;
+};
+
 // ---- Component --------------------------------------------------------
 
 const PrayerEntryModal: React.FC<Props> = ({
@@ -105,6 +115,10 @@ const PrayerEntryModal: React.FC<Props> = ({
   const prevPrayerIdRef = useRef<string | null>(null);
   const [allowBackdropClose, setAllowBackdropClose] = useState(false);
   const isWalkEntry = prayer?.entry_source === "walk";
+  const walkDurationLabel = formatDurationFromSeconds(prayer?.duration_seconds ?? null);
+  const walkStepsLabel =
+    typeof prayer?.walk_steps === "number" ? String(Math.max(0, Math.floor(prayer.walk_steps))) : "—";
+  const walkDistanceLabel = formatDistanceKm(prayer?.walk_distance_meters ?? null);
   
   useEffect(() => {
     setIsBookmarkedLocal(!!prayer?.is_bookmarked);
@@ -569,6 +583,28 @@ useEffect(() => {
                     console.log("walk:modal mapImage error", e?.nativeEvent);
                   }}
                 />
+                <View
+                  style={[
+                    styles.walkStatsRow,
+                    {
+                      borderColor: colors.textSecondary + "33",
+                      backgroundColor: colors.card,
+                    },
+                  ]}
+                >
+                  <View style={styles.walkStatItem}>
+                    <Text style={[styles.walkStatLabel, { color: colors.textSecondary }]}>Duration</Text>
+                    <Text style={[styles.walkStatValue, { color: colors.textPrimary }]}>{walkDurationLabel}</Text>
+                  </View>
+                  <View style={styles.walkStatItem}>
+                    <Text style={[styles.walkStatLabel, { color: colors.textSecondary }]}>Steps</Text>
+                    <Text style={[styles.walkStatValue, { color: colors.textPrimary }]}>{walkStepsLabel}</Text>
+                  </View>
+                  <View style={styles.walkStatItem}>
+                    <Text style={[styles.walkStatLabel, { color: colors.textSecondary }]}>Distance</Text>
+                    <Text style={[styles.walkStatValue, { color: colors.textPrimary }]}>{walkDistanceLabel}</Text>
+                  </View>
+                </View>
               </View>
             ) : (
               <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.md }}>
@@ -981,6 +1017,29 @@ const styles = StyleSheet.create({
   deleteBtn: {
     fontFamily: fonts.heading,
     fontSize: 15,
+  },
+  walkStatsRow: {
+    marginTop: spacing.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  walkStatItem: {
+    flex: 1,
+    alignItems: "center",
+  },
+  walkStatLabel: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+    marginBottom: 2,
+  },
+  walkStatValue: {
+    fontFamily: fonts.body,
+    fontSize: 13,
   },
   walkMapImage: {
     width: "100%",

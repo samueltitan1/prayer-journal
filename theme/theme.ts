@@ -6,7 +6,7 @@ export const colors = {
   backgroundDark: "#1A1A1A",
   textPrimary: "#2F2F2F",
   textSecondary: "#6B6B6B",
-  accentGold: "#E3C67B",
+  accentGold: "#C4A572",
 };
 
 export const fonts = {

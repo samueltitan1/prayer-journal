@@ -70,14 +70,15 @@ export const signInWithGoogleToSupabase = async (): Promise<string | null> => {
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
     }
 
-    const { GoogleSignin, statusCodes } = await loadGoogleModule();
+    const { GoogleSignin } = await loadGoogleModule();
     const userInfo = await GoogleSignin.signIn();
     const idToken =
     (userInfo as any)?.idToken ??
     (userInfo as any)?.user?.idToken ??
     (userInfo as any)?.data?.idToken;
     if (!idToken) {
-      throw new Error("Google Sign-In did not return an ID token.");
+      console.warn("Google sign-in returned no token");
+      return null;
     }
 
     const nonceInToken = decodeJwtPayload(idToken)?.nonce;
@@ -99,6 +100,14 @@ export const signInWithGoogleToSupabase = async (): Promise<string | null> => {
   } catch (err: any) {
     const { statusCodes } = (googleModule ?? {}) as any;
     if (statusCodes && err?.code === statusCodes.SIGN_IN_CANCELLED) {
+      if (__DEV__) console.log("User cancelled Google sign-in");
+      return null;
+    }
+    if (statusCodes && err?.code === statusCodes.IN_PROGRESS) {
+      return null;
+    }
+    if (statusCodes && err?.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+      console.warn("Google Play services not available");
       return null;
     }
     throw err;

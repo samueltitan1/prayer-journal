@@ -13,33 +13,43 @@ import * as ImagePicker from "expo-image-picker";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import * as LocalAuthentication from "expo-local-authentication";
 import * as Location from "expo-location";
+import { Pedometer } from "expo-sensors";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Animated,
   AppState,
-  Image,
   Modal,
+  Platform,
   StyleSheet,
   Switch,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
-import MapView, { Marker, Polyline } from "react-native-maps";
+import MapView, { Circle, Polyline } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useTabsChrome } from "../_layout";
 
 import "react-native-get-random-values";
 import { v4 as uuidv4 } from "uuid";
 
 import SecurityNoticeModal, { shouldShowSecurityNotice } from "@/components/SecurityNoticeModal";
-import SettingsModal from "../../../components/SettingsModal";
 import TranscriptEditor from "../../../components/TranscriptEditor";
 import { useTheme } from "../../../contexts/ThemeContext";
 import { isHealthKitAvailable, requestHealthPermissions, savePrayerWalkWorkout } from "../../../lib/healthkit";
-import { getDailyPrayerReminderStatus } from "../../../lib/notifications";
+import { cancelStreakFollowupNotification, getDailyPrayerReminderStatus } from "../../../lib/notifications";
+import {
+  appendPrayerWalkRoutePoints,
+  clearPrayerWalkRoutePoints,
+  getPrayerWalkTaskDiagnostics,
+  isPrayerWalkTaskManagerAvailable,
+  PRAYER_WALK_LOCATION_TASK,
+  readPrayerWalkRoutePoints,
+  type PrayerWalkRoutePoint,
+} from "../../../lib/prayerWalkLocationTask";
 import { capture } from "../../../lib/posthog";
 import { getSupabase } from "../../../lib/supabaseClient";
 import { upsertUserSettingsOnboarding } from "../../../lib/userSettings";
@@ -51,6 +61,15 @@ const MAX_PHOTOS_PER_PRAYER = 4;
 const WALK_MAP_WIDTH = 640;
 const WALK_MAP_HEIGHT = 400;
 const WALK_NOTICE_KEY = "walk_mode_notice_v1";
+const ACTIVE_WALK_SESSION_KEY = "@prayer_walk_active_session_v1";
+
+type ActiveWalkSession = {
+  active: true;
+  startedAt: number;
+  entrySource: "walk";
+  audioStarted: boolean;
+  trackingStarted: boolean;
+};
 
 const makePrayerId = () => uuidv4();
 
@@ -63,6 +82,7 @@ const IMAGE_MEDIA_TYPES: any = (ImagePicker as any)?.MediaType?.Images
 export default function PrayScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { openSettings, settingsRefreshNonce, setHeaderVisible } = useTabsChrome();
 
   const [prayState, setPrayState] = useState<PrayState>("idle");
   const [secondsLeft, setSecondsLeft] = useState(MAX_SECONDS_DEFAULT);
@@ -91,7 +111,6 @@ export default function PrayScreen() {
   }, []);
   const [dayCount, setDayCount] = useState<number>(0);
 
-  const [showSettings, setShowSettings] = useState(false);
   const [dailyReminderEnabled, setDailyReminderEnabled] = useState(false);
   const [biometricLockEnabled, setBiometricLockEnabled] = useState(false);
   const [biometricSupported, setBiometricSupported] = useState(false);
@@ -103,6 +122,7 @@ export default function PrayScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [offlineQueuedCount, setOfflineQueuedCount] = useState(0);
   const [isSyncingOffline, setIsSyncingOffline] = useState(false);
   const [syncBanner, setSyncBanner] = useState<string | null>(null);
@@ -145,12 +165,16 @@ export default function PrayScreen() {
   const [walkStartAt, setWalkStartAt] = useState<number | null>(null);
   const [walkCoords, setWalkCoords] = useState<Array<{ latitude: number; longitude: number; timestamp: number }>>([]);
   const walkCoordsRef = useRef<Array<{ latitude: number; longitude: number; timestamp: number }>>([]);
+  const [walkStepCount, setWalkStepCount] = useState<number | null>(null);
+  const walkPedometerSubRef = useRef<{ remove: () => void } | null>(null);
   const walkNoCoordsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const walkRecordingRef = useRef<Audio.Recording | null>(null);
   const walkLocationSubRef = useRef<Location.LocationSubscription | null>(null);
+  const walkLocationEventCountRef = useRef(0);
   const stopWalkInFlightRef = useRef(false);
   const [walkMapWarning, setWalkMapWarning] = useState(false);
   const [walkMapUri, setWalkMapUri] = useState<string | null>(null);
+  const [draftWalkDistanceMeters, setDraftWalkDistanceMeters] = useState<number | null>(null);
   const [mapSnapshotVisible, setMapSnapshotVisible] = useState(false);
   const [mapSnapshotCoords, setMapSnapshotCoords] = useState<Array<{ latitude: number; longitude: number }>>([]);
   const mapSnapshotResolveRef = useRef<null | ((uri: string | null, errorCode?: string) => void)>(null);
@@ -159,6 +183,82 @@ export default function PrayScreen() {
   const healthKitNoticeShownRef = useRef(false);
   const [appleHealthConnected, setAppleHealthConnected] = useState<boolean | null>(null);
   const healthKitOptInRef = useRef(false);
+  const lastAppStateRef = useRef(AppState.currentState);
+
+  const logWalk = useCallback((event: string, meta?: Record<string, unknown>) => {
+    if (!__DEV__) return;
+    if (meta) {
+      console.log(`[walk] ${event}`, meta);
+      return;
+    }
+    console.log(`[walk] ${event}`);
+  }, []);
+
+  const hasWalkRouteChanged = (
+    prev: PrayerWalkRoutePoint[],
+    next: PrayerWalkRoutePoint[]
+  ) => {
+    if (prev.length !== next.length) return true;
+    if (prev.length === 0) return false;
+    const prevLast = prev[prev.length - 1];
+    const nextLast = next[next.length - 1];
+    return (
+      prevLast.latitude !== nextLast.latitude ||
+      prevLast.longitude !== nextLast.longitude ||
+      prevLast.timestamp !== nextLast.timestamp
+    );
+  };
+
+  const hydrateWalkCoordsFromStorage = useCallback(
+    async (reason: string) => {
+      try {
+        const persisted = await readPrayerWalkRoutePoints();
+        if (!hasWalkRouteChanged(walkCoordsRef.current, persisted)) return persisted;
+        walkCoordsRef.current = persisted;
+        setWalkCoords(persisted);
+        logWalk("route_hydrated", { reason, point_count: persisted.length });
+        return persisted;
+      } catch {
+        logWalk("route_hydrate_failed", { reason });
+        return walkCoordsRef.current;
+      }
+    },
+    [logWalk]
+  );
+
+  const readActiveWalkSession = useCallback(async (): Promise<ActiveWalkSession | null> => {
+    try {
+      const raw = await AsyncStorage.getItem(ACTIVE_WALK_SESSION_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Partial<ActiveWalkSession>;
+      if (
+        parsed?.active === true &&
+        typeof parsed.startedAt === "number" &&
+        parsed.entrySource === "walk"
+      ) {
+        return {
+          active: true,
+          startedAt: parsed.startedAt,
+          entrySource: "walk",
+          audioStarted: parsed.audioStarted === true,
+          trackingStarted: parsed.trackingStarted === true,
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const writeActiveWalkSession = useCallback(async (session: ActiveWalkSession | null) => {
+    try {
+      if (!session) {
+        await AsyncStorage.removeItem(ACTIVE_WALK_SESSION_KEY);
+        return;
+      }
+      await AsyncStorage.setItem(ACTIVE_WALK_SESSION_KEY, JSON.stringify(session));
+    } catch {}
+  }, []);
 
   // Load user ID
   useEffect(() => {
@@ -334,11 +434,17 @@ useEffect(() => {
     };
 
     fetchSettings();
-  }, [userId, showSettings]);
+  }, [userId, settingsRefreshNonce]);
 
   useEffect(() => {
     isLockedRef.current = isLocked;
   }, [isLocked]);
+  useEffect(() => {
+    setHeaderVisible(!isLocked);
+    return () => {
+      setHeaderVisible(true);
+    };
+  }, [isLocked, setHeaderVisible]);
 
   useEffect(() => {
     if (!isWalking) return;
@@ -407,6 +513,7 @@ useEffect(() => {
 
   const stopHalo = () => {
     animationRef.current?.stop();
+    animationRef.current = null;
     haloOpacity.setValue(0);
     haloScale.setValue(1);
   };
@@ -495,7 +602,37 @@ useEffect(() => {
       capture("walk_route_unavailable", { reason: "permissions" });
       return { ok: false, services_enabled: true, has_location_permission: false };
     }
-    return { ok: true, services_enabled: true, has_location_permission: true };
+
+    // Best-effort background permission for lock-screen/background Prayer Walk.
+    // Don't hard-fail if denied; route tracking can still work while app is foregrounded.
+    let hasBackgroundLocationPermission = false;
+    if (Platform.OS === "ios" || Platform.OS === "android") {
+      try {
+        const bg = await Location.requestBackgroundPermissionsAsync();
+        hasBackgroundLocationPermission = bg.status === "granted";
+      } catch {
+        hasBackgroundLocationPermission = false;
+      }
+    }
+
+    return {
+      ok: true,
+      services_enabled: true,
+      has_location_permission: true,
+      has_background_location_permission: hasBackgroundLocationPermission,
+    };
+  };
+
+  const configureWalkRecordingAudioMode = async () => {
+    // Background walk recording needs both runtime audio mode and iOS background capability.
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      interruptionModeIOS: (Audio as any).InterruptionModeIOS?.DoNotMix ?? 1,
+      interruptionModeAndroid: (Audio as any).InterruptionModeAndroid?.DoNotMix ?? 1,
+      shouldDuckAndroid: true,
+    });
   };
 
   const computeZoomForSpan = (span: number) => {
@@ -547,6 +684,192 @@ useEffect(() => {
     }
     return total;
   };
+
+  const startWalkStepTracking = async () => {
+    setWalkStepCount(null);
+    try {
+      walkPedometerSubRef.current?.remove();
+    } catch {}
+    walkPedometerSubRef.current = null;
+
+    try {
+      const anyPedometer = Pedometer as any;
+      if (!anyPedometer || typeof anyPedometer.isAvailableAsync !== "function") return;
+      const available = await anyPedometer.isAvailableAsync();
+      if (!available || typeof anyPedometer.watchStepCount !== "function") return;
+
+      // iOS may require motion/activity permission before pedometer data is readable.
+      if (
+        typeof anyPedometer.getPermissionsAsync === "function" &&
+        typeof anyPedometer.requestPermissionsAsync === "function"
+      ) {
+        const current = await anyPedometer.getPermissionsAsync();
+        const granted = current?.granted === true;
+        if (!granted) {
+          const requested = await anyPedometer.requestPermissionsAsync();
+          if (requested?.granted !== true) {
+            setWalkStepCount(null);
+            return;
+          }
+        }
+      }
+
+      setWalkStepCount(0);
+      walkPedometerSubRef.current = anyPedometer.watchStepCount((result: { steps?: number }) => {
+        const next = typeof result?.steps === "number" ? result.steps : 0;
+        setWalkStepCount(next);
+      });
+    } catch {
+      setWalkStepCount(null);
+    }
+  };
+
+  const stopWalkStepTracking = () => {
+    try {
+      walkPedometerSubRef.current?.remove();
+    } catch {}
+    walkPedometerSubRef.current = null;
+  };
+
+  const getFinalWalkStepCount = async (
+    startedAtMs: number | null,
+    endedAtMs: number
+  ): Promise<number | null> => {
+    if (!startedAtMs || endedAtMs <= startedAtMs) return null;
+    try {
+      const anyPedometer = Pedometer as any;
+      if (!anyPedometer || typeof anyPedometer.isAvailableAsync !== "function") return null;
+      const available = await anyPedometer.isAvailableAsync();
+      if (!available || typeof anyPedometer.getStepCountAsync !== "function") return null;
+
+      if (
+        typeof anyPedometer.getPermissionsAsync === "function" &&
+        typeof anyPedometer.requestPermissionsAsync === "function"
+      ) {
+        const current = await anyPedometer.getPermissionsAsync();
+        const granted = current?.granted === true;
+        if (!granted) {
+          const requested = await anyPedometer.requestPermissionsAsync();
+          if (requested?.granted !== true) return null;
+        }
+      }
+
+      const res = await anyPedometer.getStepCountAsync(
+        new Date(startedAtMs),
+        new Date(endedAtMs)
+      );
+      const steps = typeof res?.steps === "number" ? Math.max(0, Math.floor(res.steps)) : null;
+      return steps;
+    } catch {
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      stopWalkStepTracking();
+      try {
+        walkLocationSubRef.current?.remove();
+      } catch {}
+      walkLocationSubRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!__DEV__) return;
+    const diagnostics = getPrayerWalkTaskDiagnostics();
+    if (!diagnostics.taskManagerAvailable) {
+      console.warn(
+        "Prayer Walk background location task unavailable: ExpoTaskManager native module missing in this build. Falling back to foreground route watcher."
+      );
+      console.log("[walk-task] diagnostics", diagnostics);
+      return;
+    }
+    console.log("[walk-task] diagnostics", diagnostics);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const recoverInterruptedWalk = async () => {
+      const session = await readActiveWalkSession();
+      if (!session || cancelled) return;
+
+      const points = await readPrayerWalkRoutePoints();
+      if (cancelled) return;
+
+      logWalk("interrupted_session_detected", {
+        started_at: session.startedAt,
+        audio_started: session.audioStarted,
+        tracking_started: session.trackingStarted,
+        point_count: points.length,
+      });
+
+      Alert.alert(
+        "Prayer Walk Interrupted",
+        "Your previous Prayer Walk was interrupted when the app restarted. Audio recording cannot be recovered after restart, but route data can be kept.",
+        [
+          {
+            text: "Discard",
+            style: "destructive",
+            onPress: () => {
+              void clearPrayerWalkRoutePoints();
+              void writeActiveWalkSession(null);
+            },
+          },
+          {
+            text: "Recover Route",
+            onPress: async () => {
+              const durationSeconds = Math.max(
+                0,
+                Math.round((Date.now() - session.startedAt) / 1000)
+              );
+              const distanceMeters = computeDistanceMeters(
+                points.map((p) => ({ latitude: p.latitude, longitude: p.longitude }))
+              );
+              let mapUri: string | null = null;
+              if (points.length > 0) {
+                try {
+                  mapUri = await takeRouteMapSnapshot(
+                    points.map((p) => ({ latitude: p.latitude, longitude: p.longitude }))
+                  );
+                } catch {}
+              }
+
+              if (cancelled) return;
+
+              setEditorMode("text");
+              setEntrySource("walk");
+              setDraftTranscript("");
+              setDraftAudioUri(null);
+              setDraftDuration(durationSeconds);
+              setKeepAudio(false);
+              setIsBookmarked(false);
+              setDraftBibleRef(null);
+              setDraftBibleVersion(null);
+              setDraftBibleProvider("manual");
+              setDraftLocationName(null);
+              setDraftPhotoUris([]);
+              setIsVerseEditorOpen(false);
+              setWalkMapUri(mapUri);
+              setDraftWalkDistanceMeters(distanceMeters);
+              setVerseDraftRef("");
+              setVerseDraftVersion("");
+              setShowEditModal(true);
+              setPrayState("idle");
+
+              await writeActiveWalkSession(null);
+            },
+          },
+        ]
+      );
+    };
+
+    void recoverInterruptedWalk();
+    return () => {
+      cancelled = true;
+    };
+  }, [logWalk, readActiveWalkSession, writeActiveWalkSession]);
   
   const takeRouteMapSnapshot = async (
     coords: Array<{ latitude: number; longitude: number }>
@@ -658,10 +981,25 @@ useEffect(() => {
     const locResult = await requestLocationPermission();
     if (!locResult.ok) return;
 
+    const walkStartedAt = Date.now();
     setIsProcessing(true);
     setWalkCoords([]);
-    setWalkStartAt(Date.now());
+    setWalkStartAt(walkStartedAt);
     setWalkElapsedSeconds(0);
+    setWalkStepCount(null);
+    setDraftWalkDistanceMeters(null);
+    walkLocationEventCountRef.current = 0;
+    logWalk("start_requested", {
+      user_id_present: !!userId,
+      apple_health_opt_in: healthKitOptInRef.current,
+    });
+    await writeActiveWalkSession({
+      active: true,
+      startedAt: walkStartedAt,
+      entrySource: "walk",
+      audioStarted: false,
+      trackingStarted: false,
+    });
 
     try {
       let initialPoint: { latitude: number; longitude: number; timestamp: number } | null = null;
@@ -675,12 +1013,18 @@ useEffect(() => {
           first.coords.longitude,
           first.timestamp
         );
+        logWalk("first_fix_acquired", {
+          latitude: first.coords.latitude,
+          longitude: first.coords.longitude,
+          timestamp: first.timestamp ?? Date.now(),
+        });
         initialPoint = {
           latitude: first.coords.latitude,
           longitude: first.coords.longitude,
           timestamp: first.timestamp ?? Date.now(),
         };
       } catch {
+        logWalk("first_fix_failed");
         Alert.alert(
           "Couldn’t get your location",
           "We couldn't get a GPS fix. Please check Location Services and try again."
@@ -696,6 +1040,8 @@ useEffect(() => {
         await activateKeepAwakeAsync();
       } catch {}
 
+      await configureWalkRecordingAudioMode();
+
       const recording = new Audio.Recording();
       await recording.prepareToRecordAsync({
         ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
@@ -707,56 +1053,120 @@ useEffect(() => {
         },
       });
       await recording.startAsync();
-      walkRecordingRef.current = recording;
-
-      const sub = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.High,
-          distanceInterval: 3,
-        },
-        (pos) => {
-          const next = {
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-            timestamp: pos.timestamp ?? Date.now(),
-          };
-        
-          console.log("walk:coord", next.latitude, next.longitude, next.timestamp);
-        
-          // Update ref FIRST so any timers read the latest points immediately
-          const prev = walkCoordsRef.current;
-          const last = prev[prev.length - 1];
-        
-          if (last && last.latitude === next.latitude && last.longitude === next.longitude) {
-            return;
-          }
-        
-          const updated = [...prev, next];
-          walkCoordsRef.current = updated;
-          setWalkCoords(updated);
+      logWalk("audio_recording_started");
+      recording.setOnRecordingStatusUpdate((status) => {
+        if (!__DEV__) return;
+        if (!status.isRecording || (status as any).isDoneRecording) {
+          console.log("[walk] recording_status", {
+            isRecording: status.isRecording,
+            isDoneRecording: (status as any).isDoneRecording ?? false,
+            durationMillis: status.durationMillis ?? 0,
+          });
         }
-      );
-      walkLocationSubRef.current = sub;
-      console.log("walk:watcherStarted");
+      });
+      walkRecordingRef.current = recording;
+      await writeActiveWalkSession({
+        active: true,
+        startedAt: walkStartedAt,
+        entrySource: "walk",
+        audioStarted: true,
+        trackingStarted: false,
+      });
+
+      await clearPrayerWalkRoutePoints();
+      walkCoordsRef.current = [];
+      setWalkCoords([]);
 
       if (initialPoint) {
-        const prev = walkCoordsRef.current;
-        const last = prev[prev.length - 1];
+        await appendPrayerWalkRoutePoints([initialPoint]);
+        walkCoordsRef.current = [initialPoint];
+        setWalkCoords([initialPoint]);
+      }
 
-        // If watcher already emitted a point, don't overwrite it.
-        // Also, if the watcher point is identical to initialPoint, keep just one.
-        const isSameAsLast =
-          !!last && last.latitude === initialPoint.latitude && last.longitude === initialPoint.longitude;
-
-        const next = prev.length === 0 ? [initialPoint] : isSameAsLast ? prev : [initialPoint, ...prev];
-        walkCoordsRef.current = next;
-        setWalkCoords(next);
+      if (isPrayerWalkTaskManagerAvailable) {
+        try {
+          const alreadyTracking = await Location.hasStartedLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
+          if (alreadyTracking) {
+            await Location.stopLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
+          }
+          await Location.startLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK, {
+            accuracy: Location.Accuracy.High,
+            distanceInterval: 3,
+            timeInterval: 3000,
+            deferredUpdatesDistance: 3,
+            deferredUpdatesInterval: 3000,
+            pausesUpdatesAutomatically: false,
+            activityType: Location.ActivityType.Fitness,
+            showsBackgroundLocationIndicator: true,
+            ...(Platform.OS === "android"
+              ? {
+                  foregroundService: {
+                    notificationTitle: "Prayer Walk in progress",
+                    notificationBody: "Tracking your walk route in the background.",
+                  },
+                }
+              : {}),
+          });
+        } catch (taskStartError: any) {
+          logWalk("location_task_start_failed", {
+            message: String(taskStartError?.message || taskStartError || "unknown"),
+            has_background_permission: locResult.has_background_location_permission ?? false,
+          });
+          throw taskStartError;
+        }
+        logWalk("location_task_started", {
+          task: PRAYER_WALK_LOCATION_TASK,
+        });
+        await writeActiveWalkSession({
+          active: true,
+          startedAt: walkStartedAt,
+          entrySource: "walk",
+          audioStarted: true,
+          trackingStarted: true,
+        });
+      } else {
+        // Fallback for dev clients that do not yet contain ExpoTaskManager native module.
+        const sub = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.High,
+            distanceInterval: 3,
+          },
+          (pos) => {
+            const next = {
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+              timestamp: pos.timestamp ?? Date.now(),
+            };
+            const prev = walkCoordsRef.current;
+            const last = prev[prev.length - 1];
+            if (last && last.latitude === next.latitude && last.longitude === next.longitude) return;
+            const updated = [...prev, next];
+            walkCoordsRef.current = updated;
+            setWalkCoords(updated);
+            void appendPrayerWalkRoutePoints([next]);
+          }
+        );
+        walkLocationSubRef.current = sub;
+        logWalk("location_fallback_watcher_started", {
+          reason: "task_manager_unavailable",
+        });
+        await writeActiveWalkSession({
+          active: true,
+          startedAt: walkStartedAt,
+          entrySource: "walk",
+          audioStarted: true,
+          trackingStarted: true,
+        });
       }
 
       setIsWalking(true);
+      await startWalkStepTracking();
+      await hydrateWalkCoordsFromStorage("walk_start");
+      logWalk("walk_started");
       capture("walk_started", {
         has_mic_permission: micOk,
         has_location_permission: locResult.has_location_permission,
+        has_background_location_permission: locResult.has_background_location_permission ?? false,
         services_enabled: locResult.services_enabled,
       });
       if (walkNoCoordsTimeoutRef.current) clearTimeout(walkNoCoordsTimeoutRef.current);
@@ -771,8 +1181,23 @@ useEffect(() => {
         }
       }, 30000);
     } catch {
+      logWalk("start_failed");
       Alert.alert("Error", "Could not start prayer walk.");
       walkRecordingRef.current = null;
+      try {
+        if (isPrayerWalkTaskManagerAvailable) {
+          const started = await Location.hasStartedLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
+          if (started) {
+            await Location.stopLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
+          }
+        } else {
+          walkLocationSubRef.current?.remove();
+          walkLocationSubRef.current = null;
+        }
+      } catch {}
+      await clearPrayerWalkRoutePoints();
+      await writeActiveWalkSession(null);
+      stopWalkStepTracking();
       capture("walk_route_unavailable", { reason: "unknown" });
       try {
         deactivateKeepAwake();
@@ -795,9 +1220,13 @@ useEffect(() => {
     if (!isWalking) return;
     if (stopWalkInFlightRef.current) return;
     stopWalkInFlightRef.current = true;
+    logWalk("stop_requested", {
+      point_count: walkCoordsRef.current.length,
+    });
 
     // Capture start time before we clear state
     const startedAt = walkStartAt;
+    const walkEndedAt = Date.now();
 
     // Stop walk UI/timer immediately (don't wait for transcription/map generation)
     setIsWalking(false);
@@ -805,13 +1234,26 @@ useEffect(() => {
     setWalkElapsedSeconds(0);
 
     setIsProcessing(true);
+    setIsTranscribing(true);
 
     // Stop tracking immediately
     try {
-      walkLocationSubRef.current?.remove();
+      if (isPrayerWalkTaskManagerAvailable) {
+        const started = await Location.hasStartedLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
+        if (started) {
+          await Location.stopLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
+        }
+      } else {
+        walkLocationSubRef.current?.remove();
+        walkLocationSubRef.current = null;
+      }
     } catch {}
-    walkLocationSubRef.current = null;
+    logWalk(
+      isPrayerWalkTaskManagerAvailable ? "location_task_stopped" : "location_fallback_watcher_stopped",
+      isPrayerWalkTaskManagerAvailable ? { task: PRAYER_WALK_LOCATION_TASK } : undefined
+    );
     if (walkNoCoordsTimeoutRef.current) clearTimeout(walkNoCoordsTimeoutRef.current);
+    stopWalkStepTracking();
 
     try {
       console.log("walk:tracking stopped");
@@ -822,7 +1264,17 @@ useEffect(() => {
       let transcript = "";
       let localAudioUri: string | null = null;
       if (recording) {
+        try {
+          const status = await recording.getStatusAsync();
+          logWalk("recording_status_before_stop", {
+            isRecording: status.isRecording,
+            durationMillis: status.durationMillis ?? 0,
+          });
+        } catch {
+          logWalk("recording_status_before_stop_failed");
+        }
         await recording.stopAndUnloadAsync();
+        logWalk("audio_recording_stopped");
         localAudioUri = recording.getURI();
         if (localAudioUri) {
           transcript = await transcribeAudioWithWhisper(localAudioUri);
@@ -832,7 +1284,10 @@ useEffect(() => {
         }
       }
 
-      let coordsSnapshot = walkCoordsRef.current.slice();
+      let coordsSnapshot = await readPrayerWalkRoutePoints();
+      if (!coordsSnapshot.length) {
+        coordsSnapshot = walkCoordsRef.current.slice();
+      }
       if (coordsSnapshot.length < 2) {
         try {
           const extra = await Location.getCurrentPositionAsync({
@@ -846,9 +1301,11 @@ useEffect(() => {
               timestamp: extra.timestamp ?? Date.now(),
             },
           ];
+          await appendPrayerWalkRoutePoints([coordsSnapshot[coordsSnapshot.length - 1]]);
         } catch {}
       }
       if (coordsSnapshot.length < 1) {
+        logWalk("no_route_points_captured");
         Alert.alert(
           "Route tracking limited",
           "We couldn’t collect a location point for your walk. Please ensure location services are enabled."
@@ -870,12 +1327,20 @@ useEffect(() => {
         console.log("walk:mapUri is null (map download failed or no writable directory)");
       }
       const durationSeconds = startedAt
-        ? Math.round((Date.now() - startedAt) / 1000)
+        ? Math.round((walkEndedAt - startedAt) / 1000)
         : null;
+      const distanceMeters = computeDistanceMeters(
+        coordsSnapshot.map((c) => ({ latitude: c.latitude, longitude: c.longitude }))
+      );
       capture("walk_stopped", {
         duration_seconds: durationSeconds ?? 0,
         point_count: coordsSnapshot.length,
       });
+      logWalk("walk_stopped", {
+        duration_seconds: durationSeconds ?? 0,
+        point_count: coordsSnapshot.length,
+      });
+      const finalSteps = await getFinalWalkStepCount(startedAt, walkEndedAt);
 
       if (startedAt && healthKitOptInRef.current) {
         try {
@@ -883,9 +1348,9 @@ useEffect(() => {
           if (available) {
             const ok = await requestHealthPermissions();
             if (ok) {
-              const distanceMeters = computeDistanceMeters(
-                coordsSnapshot.map((c) => ({ latitude: c.latitude, longitude: c.longitude }))
-              );
+              // NOTE: @kingstinct/react-native-healthkit currently exposes saveWorkoutSample
+              // (and startWatchApp), but not a full live HKWorkoutSession lifecycle API
+              // (start/observe/end). We keep the stable end-of-walk save flow here.
               await savePrayerWalkWorkout({
                 startDate: new Date(startedAt),
                 endDate: new Date(),
@@ -915,11 +1380,18 @@ useEffect(() => {
       setDraftPhotoUris([]);
       setIsVerseEditorOpen(false);
       setWalkMapUri(mapUri);
+      setDraftWalkDistanceMeters(distanceMeters);
+      setWalkStepCount(finalSteps);
       setVerseDraftRef("");
       setVerseDraftVersion("");
+      setIsTranscribing(false);
       setIsProcessing(false);
       setShowEditModal(true);
+      await writeActiveWalkSession(null);
+      await clearPrayerWalkRoutePoints();
     } catch {
+      logWalk("stop_failed");
+      setIsTranscribing(false);
       Alert.alert("Error", "Could not finalize prayer walk.");
     } finally {
       stopWalkInFlightRef.current = false;
@@ -927,7 +1399,10 @@ useEffect(() => {
         deactivateKeepAwake();
       } catch {}
       setWalkCoords([]);
+      stopWalkStepTracking();
+      setIsTranscribing(false);
       setIsProcessing(false);
+      logWalk("stop_finalized");
     }
   };
 
@@ -937,6 +1412,7 @@ useEffect(() => {
       const ok = await requestMicPermission();
       if (!ok) return;
       setWalkMapUri(null);
+      setDraftWalkDistanceMeters(null);
       // HARD reset audio session for iOS TestFlight reliability
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
@@ -976,6 +1452,7 @@ useEffect(() => {
 
     try {
       setIsProcessing(true);
+      setIsTranscribing(true);
       setPrayState("idle");
 
       await recording.stopAndUnloadAsync();
@@ -1019,15 +1496,18 @@ useEffect(() => {
       setDraftBibleVersion(null);
       setDraftBibleProvider("manual");
       setDraftPhotoUris([]);
+      setIsTranscribing(false);
       setShowEditModal(true);
       setDraftLocationName(null);
     } catch {
+      setIsTranscribing(false);
       Alert.alert("Error", "Failed to process prayer.");
     } finally {
       // Keep the screen awake while recording so the phone doesn't sleep mid-prayer.
       try {
         deactivateKeepAwake();
       } catch {}
+      setIsTranscribing(false);
       setIsProcessing(false);
     }
   };
@@ -1262,16 +1742,31 @@ useEffect(() => {
     if (!userId) return;
   
     const sub = AppState.addEventListener("change", (state) => {
+      const prevState = lastAppStateRef.current;
+      lastAppStateRef.current = state;
+      logWalk("app_state_changed", {
+        from: prevState,
+        to: state,
+        is_walking: isWalking,
+        location_task: PRAYER_WALK_LOCATION_TASK,
+        task_manager_available: isPrayerWalkTaskManagerAvailable,
+        has_fallback_watcher: !!walkLocationSubRef.current,
+        has_recording_ref: !!walkRecordingRef.current,
+      });
+
       // When app goes background/inactive, lock so it requires auth when returning.
       if (state === "background" || state === "inactive") {
-        if (isWalking) {
-          void stopWalk();
-        }
+        // Do not stop an active Prayer Walk on app background/lock.
+        // Audio/location background behavior is controlled by runtime modes + iOS capabilities.
         if (biometricLockEnabled) setIsLocked(true);
         return;
       }
   
       if (state === "active") {
+        if (isWalking) {
+          void hydrateWalkCoordsFromStorage("app_active");
+        }
+
         // IMPORTANT: do NOT force-lock on active.
         // iOS can bounce AppState during the Face ID sheet which causes re-prompt loops.
         if (biometricLockEnabled && isLockedRef.current) {
@@ -1283,7 +1778,15 @@ useEffect(() => {
     });
   
     return () => sub.remove();
-  }, [userId, trySyncOfflineQueue, biometricLockEnabled, unlockWithBiometrics, isWalking, stopWalk]);
+  }, [
+    userId,
+    trySyncOfflineQueue,
+    biometricLockEnabled,
+    unlockWithBiometrics,
+    isWalking,
+    logWalk,
+    hydrateWalkCoordsFromStorage,
+  ]);
 
   useEffect(() => {
     if (!userId) return;
@@ -1301,6 +1804,40 @@ useEffect(() => {
   useEffect(() => {
     walkCoordsRef.current = walkCoords;
   }, [walkCoords]);
+
+  useEffect(() => {
+    if (!isWalking) return;
+
+    let cancelled = false;
+    const syncFromStorage = async () => {
+      const points = await hydrateWalkCoordsFromStorage("walking_poll");
+      if (cancelled) return;
+      const count = points.length;
+      if (count <= walkLocationEventCountRef.current) return;
+      walkLocationEventCountRef.current = count;
+      if (count <= 3 || count % 20 === 0) {
+        const last = points[count - 1];
+        if (last) {
+          logWalk("location_callback", {
+            count,
+            latitude: last.latitude,
+            longitude: last.longitude,
+            timestamp: last.timestamp,
+          });
+        }
+      }
+    };
+
+    void syncFromStorage();
+    const interval = setInterval(() => {
+      void syncFromStorage();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isWalking, hydrateWalkCoordsFromStorage, logWalk]);
 
   
   
@@ -1392,29 +1929,49 @@ useEffect(() => {
         saveStart = Date.now();
         capture("prayer_save_started", { ...baseSaveProps, save_ms: 0 });
 
+        const walkDistanceMetersForSave =
+          entrySource === "walk" && typeof draftWalkDistanceMeters === "number"
+            ? Math.max(0, draftWalkDistanceMeters)
+            : null;
+        const walkStepsForSave =
+          entrySource === "walk" && typeof walkStepCount === "number"
+            ? Math.max(0, Math.floor(walkStepCount))
+            : null;
+        const prayerInsertPayload = {
+          id: prayerId,
+          user_id: userId,
+          prayed_at: prayedAtISO,
+          transcript_text: draftTranscript || null,
+          duration_seconds: draftDuration ?? null,
+          // Optimistic: upload audio after saving so the Save UI is instant.
+          audio_path: null,
+          entry_source: entrySource,
+          bible_reference: draftBibleRef,
+          bible_version: draftBibleVersion,
+          bible_provider: draftBibleProvider,
+          bible_added_at: draftBibleRef ? new Date().toISOString() : null,
+          location_name: draftLocationName,
+          walk_map_path: null,
+          walk_distance_meters: walkDistanceMetersForSave,
+          walk_steps: walkStepsForSave,
+        };
+        if (__DEV__ && entrySource === "walk") {
+          console.log("walk:prayer_insert_payload", {
+            id: prayerInsertPayload.id,
+            entry_source: prayerInsertPayload.entry_source,
+            duration_seconds: prayerInsertPayload.duration_seconds,
+            walk_distance_meters: prayerInsertPayload.walk_distance_meters,
+            walk_steps: prayerInsertPayload.walk_steps,
+          });
+        }
+
         const { error: insertError } = await getSupabase()
           .from("prayers")
-          .insert([
-            {
-              id: prayerId,
-              user_id: userId,
-              prayed_at: prayedAtISO,
-              transcript_text: draftTranscript || null,
-              duration_seconds: draftDuration ?? null,
-              // Optimistic: upload audio after saving so the Save UI is instant.
-              audio_path: null,
-              entry_source: entrySource,
-              bible_reference: draftBibleRef,
-              bible_version: draftBibleVersion,
-              bible_provider: draftBibleProvider,
-              bible_added_at: draftBibleRef ? new Date().toISOString() : null,
-              location_name: draftLocationName,
-              walk_map_path: null,
-            },
-          ]);
+          .insert([prayerInsertPayload]);
 
         if (insertError) throw insertError;
         insertSucceeded = true;
+        await cancelStreakFollowupNotification();
         capture("prayer_save_succeeded", {
           ...baseSaveProps,
           save_ms: Date.now() - saveStart,
@@ -1446,9 +2003,12 @@ useEffect(() => {
         setDraftPhotoUris([]);
         setDraftLocationName(null);
         setWalkMapUri(null);
+        setDraftWalkDistanceMeters(null);
+        setWalkStepCount(null);
         setIsVerseEditorOpen(false);
         setVerseDraftRef("");
         setVerseDraftVersion("");
+        void writeActiveWalkSession(null);
         setPrayState("saved");
 
         // Auto-dismiss Prayer Saved card after 3s
@@ -1663,14 +2223,22 @@ useEffect(() => {
     }
   }, [prayState]);
 
-  const handleDiscardDraft = () => {
+  const resetDraftEditorToIdle = () => {
+    // Explicitly reset halo, since discard can happen while prayState is already "idle"
+    // (no state transition => no guaranteed effect re-run).
+    stopHalo();
     setShowEditModal(false);
     setDraftAudioUri(null);
     setDraftTranscript("");
     setDraftDuration(null);
+    setRecording(null);
+    setSecondsLeft(MAX_SECONDS_DEFAULT);
     setPrayState("idle");
+    setIsProcessing(false);
+    setIsTranscribing(false);
     setIsBookmarked(false);
     setKeepAudio(true);
+    setEditorMode("audio");
     setEntrySource("audio");
     setDraftBibleRef(null);
     setDraftBibleVersion(null);
@@ -1678,9 +2246,18 @@ useEffect(() => {
     setDraftPhotoUris([]);
     setDraftLocationName(null);
     setWalkMapUri(null);
+    setDraftWalkDistanceMeters(null);
+    setWalkStepCount(null);
+    stopWalkStepTracking();
+    void clearPrayerWalkRoutePoints();
+    void writeActiveWalkSession(null);
     setIsVerseEditorOpen(false);
     setVerseDraftRef("");
     setVerseDraftVersion("");
+  };
+
+  const handleDiscardDraft = () => {
+    resetDraftEditorToIdle();
     try {
       deactivateKeepAwake();
     } catch {}
@@ -1702,6 +2279,10 @@ useEffect(() => {
     setPrayState("idle");
     setDraftLocationName(null);
     setWalkMapUri(null);
+    setDraftWalkDistanceMeters(null);
+    setWalkStepCount(null);
+    void clearPrayerWalkRoutePoints();
+    void writeActiveWalkSession(null);
     setIsVerseEditorOpen(false);
     setVerseDraftRef("");
     setVerseDraftVersion("");
@@ -2083,36 +2664,9 @@ useEffect(() => {
   }
   return (
     <SafeAreaView
+      edges={["left", "right", "bottom"]}
       style={[styles.container, { backgroundColor: colors.background }]}
     >
-      {/* Header */}
-      <View
-        style={[
-          styles.header,
-          { borderBottomColor: colors.textSecondary + "33" },
-        ]}
-      >
-        <View style={styles.leftHeader}>
-          <Image
-            source={require("../../../assets/Logo2.png")}
-            style={{ width: 44, height: 44, marginRight: 8 }}
-            resizeMode="contain"
-          />
-          <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
-            Prayer Journal
-          </Text>
-        </View>
-
-        {/* Settings */}
-        <TouchableOpacity onPress={() => setShowSettings(true)}>
-          <Ionicons
-            name="settings-outline"
-            size={22}
-            color={colors.textPrimary}
-          />
-        </TouchableOpacity>
-      </View>
-
       {/* Greeting */}
       <View style={styles.subHeader}>
         {/*<Text style={[styles.greeting, { color: colors.textPrimary }]}>
@@ -2180,11 +2734,11 @@ useEffect(() => {
             disabled={isProcessing}
           >
             {isProcessing ? (
-              <ActivityIndicator color="#000" />
+              <ActivityIndicator color="#FFFFFF" />
             ) : prayState === "recording" || isWalking ? (
-              <View style={[styles.stopSquare, { backgroundColor: "#000" }]} />
+              <View style={[styles.stopSquare, { backgroundColor: "#FFFFFF" }]} />
             ) : (
-              <Ionicons name="mic-outline" size={32} color="#000" />
+              <Ionicons name="mic-outline" size={32} color="#FFFFFF" />
             )}
           </TouchableOpacity>
 
@@ -2217,6 +2771,10 @@ useEffect(() => {
                 {isProcessing ? "Finalizing prayer walk…" : "Prayer walk in progress… tap to finish."}
               </Text>
             </View>
+          ) : isTranscribing ? (
+            <Text style={[styles.hint, { color: colors.textSecondary }]}>
+              Transcribing prayer...
+            </Text>
           ) : (
             <Text style={[styles.hint, { color: colors.textSecondary }]}>
               Tap and begin your prayer
@@ -2265,7 +2823,7 @@ useEffect(() => {
         {!dailyReminderEnabled && (
           <TouchableOpacity
             style={styles.reminderRow}
-            onPress={() => setShowSettings(true)}
+            onPress={openSettings}
           >
             <Ionicons
               name="notifications-outline"
@@ -2392,19 +2950,28 @@ useEffect(() => {
         }}
       />
 
-      {/* Settings Modal */}
-      <SettingsModal
-        visible={showSettings}
-        onClose={() => setShowSettings(false)}
-        userId={userId}
-      />
-
       {/* Transcript Edit Modal */}
       <TranscriptEditor
         visible={showEditModal}
         mode={editorMode}
         entrySource={entrySource}
         walkMapUri={walkMapUri}
+        walkStats={
+          entrySource === "walk"
+            ? {
+                durationLabel:
+                  typeof draftDuration === "number" && draftDuration >= 0
+                    ? `${Math.floor(draftDuration / 60)}:${String(draftDuration % 60).padStart(2, "0")}`
+                    : "0:00",
+                distanceLabel:
+                  typeof draftWalkDistanceMeters === "number"
+                    ? `${(Math.max(0, draftWalkDistanceMeters) / 1000).toFixed(2)} km`
+                    : "0.00 km",
+                stepsLabel:
+                  typeof walkStepCount === "number" ? String(walkStepCount) : "—",
+              }
+            : undefined
+        }
         transcript={draftTranscript}
         onChangeText={setDraftTranscript}
         onSave={handleSavePrayer}
@@ -2482,16 +3049,21 @@ useEffect(() => {
           >
             {mapSnapshotCoords.length >= 1 ? (
               <>
-                <Marker coordinate={mapSnapshotCoords[0]} anchor={{ x: 0.5, y: 0.5 }}>
-                  <View style={styles.startPin} />
-                </Marker>
+                <Circle
+                  center={mapSnapshotCoords[0]}
+                  radius={5}
+                  strokeWidth={2}
+                  strokeColor="#FFFFFF"
+                  fillColor="#2ECC71"
+                />
 
-                <Marker
-                  coordinate={mapSnapshotCoords[mapSnapshotCoords.length - 1]}
-                  anchor={{ x: 0.5, y: 0.5 }}
-                >
-                  <View style={styles.endPin} />
-                </Marker>
+                <Circle
+                  center={mapSnapshotCoords[mapSnapshotCoords.length - 1]}
+                  radius={5}
+                  strokeWidth={2}
+                  strokeColor="#FFFFFF"
+                  fillColor="#E45858"
+                />
                 {mapSnapshotCoords.length >= 2 ? (
                   <Polyline coordinates={mapSnapshotCoords} strokeWidth={4} strokeColor={colors.accent}/>
                 ) : null}
@@ -2523,21 +3095,6 @@ useEffect(() => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  leftHeader: { flexDirection: "row", alignItems: "center" },
-
-  headerTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 18,
-  },
 
   subHeader: {
     paddingHorizontal: spacing.lg,
@@ -2789,22 +3346,5 @@ const styles = StyleSheet.create({
   syncBannerText: {
     fontFamily: fonts.body,
     fontSize: 13,
-  },
-  startPin: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: "#22C55E", // green
-    borderWidth: 2,
-    borderColor: "#ffffff",
-  },
-  
-  endPin: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: "#EF4444", // red
-    borderWidth: 2,
-    borderColor: "#ffffff",
   },
 });

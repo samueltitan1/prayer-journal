@@ -7,6 +7,8 @@ import { capture } from "./posthog";
 
 const DAILY_KIND = "daily_prayer_reminder";
 const DAILY_NOTIFICATION_ID_KEY = "daily_prayer_notification_id_v1";
+const STREAK_FOLLOWUP_ID = "streak-followup";
+const STREAK_FOLLOWUP_KIND = "streak_followup";
 const NIGHTLY_KIND = "nightly_reflection_prompt";
 const REFLECTION_KIND = "reflection_ready";
 const INACTIVE_KIND = "inactive_nudge";
@@ -102,6 +104,12 @@ export async function scheduleDailyPrayerNotification(time: string) {
   });
 
   await AsyncStorage.setItem(DAILY_NOTIFICATION_ID_KEY, id);
+  const reminderDate = new Date();
+  reminderDate.setHours(hour, minute, 0, 0);
+  if (reminderDate.getTime() <= Date.now()) {
+    reminderDate.setDate(reminderDate.getDate() + 1);
+  }
+  await scheduleStreakFollowupNotification(reminderDate);
   return id;
 }
 
@@ -112,6 +120,54 @@ export async function cancelDailyPrayerNotification() {
   if (existingId) {
     await Notifications.cancelScheduledNotificationAsync(existingId);
     await AsyncStorage.removeItem(DAILY_NOTIFICATION_ID_KEY);
+  }
+  await cancelStreakFollowupNotification();
+}
+
+export async function scheduleStreakFollowupNotification(reminderDate: Date) {
+  if (Platform.OS === "web") return null;
+
+  try {
+    const triggerDate = new Date(reminderDate.getTime() + 30 * 60 * 1000);
+    if (triggerDate.getTime() <= Date.now()) {
+      return null;
+    }
+
+    try {
+      await Notifications.cancelScheduledNotificationAsync(STREAK_FOLLOWUP_ID);
+    } catch {
+      // noop
+    }
+    await cancelScheduledByKind(STREAK_FOLLOWUP_KIND);
+
+    const id = await Notifications.scheduleNotificationAsync({
+      identifier: STREAK_FOLLOWUP_ID,
+      content: {
+        title: "Don’t lose your streak 🙏",
+        body: "Take a moment to pray and keep your momentum going.",
+        sound: Platform.OS === "ios" ? "default" : undefined,
+        data: { kind: STREAK_FOLLOWUP_KIND },
+      },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: triggerDate },
+    } as any);
+
+    if (__DEV__) console.log("Streak follow-up scheduled");
+    return id;
+  } catch (e) {
+    console.warn("Failed to schedule streak follow-up notification", e);
+    return null;
+  }
+}
+
+export async function cancelStreakFollowupNotification() {
+  if (Platform.OS === "web") return;
+
+  try {
+    await Notifications.cancelScheduledNotificationAsync(STREAK_FOLLOWUP_ID);
+    await cancelScheduledByKind(STREAK_FOLLOWUP_KIND);
+    if (__DEV__) console.log("Streak follow-up cancelled");
+  } catch (e) {
+    console.warn("Failed to cancel streak follow-up notification", e);
   }
 }
 

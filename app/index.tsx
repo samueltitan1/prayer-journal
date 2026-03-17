@@ -1,6 +1,6 @@
-import { getSupabase } from '@/lib/supabaseClient';
 import { getOnboardingResponsesSnapshot, upsertOnboardingResponses } from '@/lib/onboardingResponses';
 import { getEntitlement } from '@/lib/subscriptions';
+import { getSupabase } from '@/lib/supabaseClient';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
@@ -25,9 +25,32 @@ export default function SplashScreen() {
       }
 
       const userId = data.session?.user?.id;
-      const onboarding = await getOnboardingResponsesSnapshot(userId);
+      if (!userId) {
+        console.error("boot: session present but missing userId");
+        router.replace('/(auth)/onboarding/welcome');
+        return;
+      }
+
+      // --- Onboarding snapshot ---
+      let onboarding: any = null;
+      try {
+        if (__DEV__) console.log("boot: fetching onboarding snapshot", userId);
+        onboarding = await getOnboardingResponsesSnapshot(userId);
+        if (__DEV__) console.log("boot: onboarding snapshot OK", {
+          hasSnapshot: Boolean(onboarding),
+          step: onboarding?.onboarding_step ?? null,
+          completedAt: onboarding?.onboarding_completed_at ?? null,
+        });
+      } catch (e) {
+        console.error("boot: onboarding snapshot FAILED", e);
+        // If onboarding fetch fails, keep user in onboarding flow (safe fallback)
+        router.replace('/(auth)/onboarding/welcome');
+        return;
+      }
+
       const completed = Boolean(onboarding?.onboarding_completed_at);
       const step = onboarding?.onboarding_step ?? null;
+
       if (!completed) {
         const allowed = new Set([
           "welcome",
@@ -35,12 +58,36 @@ export default function SplashScreen() {
           "privacy",
           "apple-health",
           "reminder",
-          "signup",
-          "login",
+          // NOTE: do NOT resume to auth screens once a session exists.
           "preparing",
           "paywall",
           "congratulations",
         ]);
+        if (step === "login" || step === "signup") {
+          if (__DEV__) console.log("boot: step is auth screen (login/signup) while authed -> entitlement check");
+          try {
+            const entitlement = await getEntitlement(userId);
+            if (__DEV__) console.log("boot: entitlement (auth-step) OK", entitlement);
+
+            if (entitlement.active) {
+              // Returning user: go straight to the app.
+              if (__DEV__) console.log("boot: entitled (auth-step) -> tabs/journal");
+              router.replace('/(tabs)/journal');
+              return;
+            }
+
+            // Not entitled: send to paywall.
+            if (__DEV__) console.log("boot: not entitled (auth-step) -> paywall");
+            await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
+            router.replace('/(auth)/onboarding/paywall');
+            return;
+          } catch (e) {
+            console.error("boot: entitlement (auth-step) FAILED", e);
+            // Safe fallback.
+            router.replace('/(auth)/onboarding/paywall');
+            return;
+          }
+        }
         if (step && allowed.has(step)) {
           if (__DEV__) console.log("boot: resume onboarding ->", step);
           router.replace(`/(auth)/onboarding/${step}`);
@@ -51,10 +98,21 @@ export default function SplashScreen() {
         return;
       }
 
-      const entitlement = await getEntitlement(userId);
-      if (!entitlement.active) {
-        if (__DEV__) console.log("boot: onboarding complete but no entitlement -> paywall");
-        await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
+      // --- Entitlement ---
+      try {
+        if (__DEV__) console.log("boot: checking entitlement", userId);
+        const entitlement = await getEntitlement(userId);
+        if (__DEV__) console.log("boot: entitlement OK", entitlement);
+
+        if (!entitlement.active) {
+          if (__DEV__) console.log("boot: onboarding complete but no entitlement -> paywall");
+          await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
+          router.replace('/(auth)/onboarding/paywall');
+          return;
+        }
+      } catch (e) {
+        console.error("boot: entitlement FAILED", e);
+        // If entitlement check fails, route to paywall (safe default) instead of crashing.
         router.replace('/(auth)/onboarding/paywall');
         return;
       }

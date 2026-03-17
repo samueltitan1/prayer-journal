@@ -6,7 +6,7 @@ import {
   useFonts,
 } from "@expo-google-fonts/playfair-display";
 import { Stack } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -16,6 +16,8 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { requestNotificationPermissions } from "@/lib/notifications";
 import { getOnboardingResponsesSnapshot, upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { identifyUser, initPostHog, resetAnalytics } from "@/lib/posthog";
+import "@/lib/prayerWalkLocationTask";
+import { refreshAppleSubscriptionIfNeeded } from "@/lib/refreshSubscription";
 import { DevBuildGate } from "@/lib/runtime/requireDevBuild";
 import { getEntitlement } from "@/lib/subscriptions";
 
@@ -24,59 +26,78 @@ function RootNavigator() {
   if (!auth) return null;
 
   const { user, loading } = auth;
+  const userId = user?.id ?? null;
   const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
   const [onboardingStep, setOnboardingStep] = useState<string | null>(null);
   const [entitled, setEntitled] = useState<boolean | null>(null);
+  const paywallUpsertedForUserRef = useRef<string | null>(null);
+  const lastSnapshotLogKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (loading) return;
-    if (user?.id) {
-      identifyUser(user.id);
+    if (userId) {
+      identifyUser(userId);
     } else {
       resetAnalytics();
     }
-  }, [loading, user]);
+  }, [loading, userId]);
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      if (!user?.id) {
+      if (!userId) {
         setOnboardingComplete(null);
         setOnboardingStep(null);
         setEntitled(null);
+        paywallUpsertedForUserRef.current = null;
+        lastSnapshotLogKeyRef.current = null;
         return;
       }
+      await refreshAppleSubscriptionIfNeeded(userId);
+      if (cancelled) return;
       const [onboarding, entitlement] = await Promise.all([
-        getOnboardingResponsesSnapshot(user.id),
-        getEntitlement(user.id),
+        getOnboardingResponsesSnapshot(userId),
+        getEntitlement(userId),
       ]);
       if (cancelled) return;
       const completed = Boolean(onboarding?.onboarding_completed_at);
+      const step = onboarding?.onboarding_step ?? null;
+      const entitlementActive = entitlement.active;
       setOnboardingComplete(completed);
-      setOnboardingStep(onboarding?.onboarding_step ?? null);
+      setOnboardingStep(step);
       setEntitled(entitlement.active);
       if (__DEV__) {
-        console.log("layout: snapshot", {
-          completed,
-          step: onboarding?.onboarding_step ?? null,
-          entitled: entitlement.active,
-        });
+        const snapshotLogKey = `${userId}:${String(completed)}:${String(step)}:${String(
+          entitlementActive
+        )}`;
+        if (lastSnapshotLogKeyRef.current !== snapshotLogKey) {
+          lastSnapshotLogKeyRef.current = snapshotLogKey;
+          console.log("layout: snapshot", {
+            completed,
+            step,
+            entitled: entitlementActive,
+          });
+        }
       }
     };
     run();
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [userId]);
 
   useEffect(() => {
-    if (!user?.id) return;
-    if (onboardingComplete === true && entitled === false) {
-      void upsertOnboardingResponses(user.id, { onboarding_step: "paywall" });
+    if (!userId) {
+      paywallUpsertedForUserRef.current = null;
+      return;
     }
-  }, [entitled, onboardingComplete, user?.id]);
+    if (onboardingComplete === true && entitled === false && paywallUpsertedForUserRef.current !== userId) {
+      paywallUpsertedForUserRef.current = userId;
+      void upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
+    }
+  }, [entitled, onboardingComplete, userId]);
 
-  if (loading || (user?.id && (onboardingComplete === null || entitled === null))) {
+  if (loading || (userId && (onboardingComplete === null || entitled === null))) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
         <ActivityIndicator />
@@ -86,17 +107,23 @@ function RootNavigator() {
 
   return (
     <Stack
-      key={user ? "authenticated" : "unauthenticated"}
+      key={userId ? "authenticated" : "unauthenticated"}
       screenOptions={{ headerShown: false }}
     >
-      {!user ? (
+      {/*
+        Keep `index` registered at the root so the app shell remains complete.
+      */}
+      <Stack.Screen name="index" />
+ 
+      {!userId ? (
         <Stack.Screen name="(auth)" />
       ) : onboardingComplete === false ? (
         <Stack.Screen name="(auth)" />
       ) : entitled === false ? (
         <Stack.Screen name="(auth)" />
       ) : (
-        <Stack.Screen name="(tabs)" />
+        // Ensure tabs mounts to an existing route (you do NOT have app/(tabs)/index.tsx)
+        <Stack.Screen name="(tabs)"/>
       )}
     </Stack>
   );

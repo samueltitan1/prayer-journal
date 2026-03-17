@@ -3,10 +3,11 @@ import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { BlurView } from "expo-blur";
 import * as LocalAuthentication from "expo-local-authentication";
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
+  AppState,
   Dimensions,
   Linking,
   Modal,
@@ -43,8 +44,20 @@ interface SettingsModalProps {
   userId: string | null;
 }
 
+type SubscriptionRow = {
+  plan: string | null;
+  status: string | null;
+  provider: string | null;
+  current_period_end: string | null;
+};
+
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.82;
+const DAILY_REMINDER_COLUMN_CANDIDATES = [
+  "daily_reminder_enabled",
+  "reminder_enabled",
+] as const;
+const BIOMETRIC_LOCK_ENABLED_KEY = "@biometric_lock_enabled";
 
 export default function SettingsModal({
   visible,
@@ -63,12 +76,18 @@ export default function SettingsModal({
   const [nightlyReflectionEnabled, setNightlyReflectionEnabled] = useState(true);
   const [deleteAudioAfterTranscription, setDeleteAudioAfterTranscription] =
     useState(false);
-  const [subscriptionPlan, setSubscriptionPlan] = useState("Core Plan");
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [subscriptionRow, setSubscriptionRow] = useState<SubscriptionRow | null>(null);
+  const [loadingSubscription, setLoadingSubscription] = useState(false);
   const [version, setVersion] = useState("v1.0.0");
   const [hasReflectiveSummary, setHasReflectiveSummary] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [biometricLockEnabled, setBiometricLockEnabled] = useState(false);
-  const [biometricSupported, setBiometricSupported] = useState(false);
+  const [biometricHasHardware, setBiometricHasHardware] = useState(false);
+  const [biometricEnrolled, setBiometricEnrolled] = useState(false);
+  const dailyReminderColumnRef = useRef<(typeof DAILY_REMINDER_COLUMN_CANDIDATES)[number]>(
+    "daily_reminder_enabled"
+  );
   // ==========================
   // Toast
   // ==========================
@@ -91,6 +110,34 @@ export default function SettingsModal({
         useNativeDriver: true,
       }),
     ]).start(() => setToastMessage(null));
+  };
+
+  const refreshBiometricAvailability = async () => {
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = hasHardware
+        ? await LocalAuthentication.isEnrolledAsync()
+        : false;
+      setBiometricHasHardware(Boolean(hasHardware));
+      setBiometricEnrolled(Boolean(isEnrolled));
+      const supported = Boolean(hasHardware && isEnrolled);
+
+      if (!supported) {
+        setBiometricLockEnabled(false);
+        await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "false");
+        return { hasHardware: Boolean(hasHardware), isEnrolled: Boolean(isEnrolled) };
+      }
+
+      const stored = await AsyncStorage.getItem(BIOMETRIC_LOCK_ENABLED_KEY);
+      setBiometricLockEnabled(stored === "true");
+      return { hasHardware: true, isEnrolled: true };
+    } catch {
+      setBiometricHasHardware(false);
+      setBiometricEnrolled(false);
+      setBiometricLockEnabled(false);
+      await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "false");
+      return { hasHardware: false, isEnrolled: false };
+    }
   };
 
   // ==========================
@@ -172,17 +219,12 @@ export default function SettingsModal({
     if (!visible || !userId) return;
 
     setLoadingSettings(true);
+    setLoadingSubscription(true);
+    setUserEmail(null);
+    setSubscriptionRow(null);
     fadeInBackdrop();
     openSheet();
-    (async () => {
-      try {
-        const hasHardware = await LocalAuthentication.hasHardwareAsync();
-        const enrolled = await LocalAuthentication.isEnrolledAsync();
-        setBiometricSupported(Boolean(hasHardware && enrolled));
-      } catch {
-        setBiometricSupported(false);
-      }
-    })();
+    void refreshBiometricAvailability();
     const loadSettings = async () => {
       const { data, error } = await getSupabase()
         .from("user_settings")
@@ -193,13 +235,19 @@ export default function SettingsModal({
         .maybeSingle();
 
       if (!error && data) {
-        setDailyReminderEnabled(data.daily_reminder_enabled ?? false);
+        const reminderColumn = DAILY_REMINDER_COLUMN_CANDIDATES.find(
+          (key) => typeof (data as any)?.[key] === "boolean"
+        );
+        if (reminderColumn) {
+          dailyReminderColumnRef.current = reminderColumn;
+        }
+        setDailyReminderEnabled(
+          (data as any)?.[dailyReminderColumnRef.current] ?? false
+        );
         setReminderTime(data.reminder_time ?? "08:00");
         setDeleteAudioAfterTranscription(
           data.delete_audio_after_transcription ?? false
         );
-        setBiometricLockEnabled(data.biometric_lock_enabled ?? false);
-        setSubscriptionPlan(data.subscription_plan ?? "Core Plan");
         setVersion(data.version ?? "1.0.0");
         setHasReflectiveSummary(data.has_reflective_summary ?? false);
 
@@ -212,6 +260,42 @@ export default function SettingsModal({
     };
 
     loadSettings();
+
+    const loadAccountAndSubscription = async () => {
+      try {
+        const { data: userData } = await getSupabase().auth.getUser();
+        setUserEmail(userData?.user?.email ?? null);
+      } catch {
+        setUserEmail(null);
+      }
+
+      try {
+        const { data, error } = await getSupabase()
+          .from("subscriptions")
+          .select("plan,status,provider,current_period_end,created_at")
+          .eq("user_id", userId)
+          .order("current_period_end", { ascending: false, nullsFirst: false })
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (error || !data) {
+          setSubscriptionRow(null);
+        } else {
+          setSubscriptionRow({
+            plan: data.plan ?? null,
+            status: data.status ?? null,
+            provider: data.provider ?? null,
+            current_period_end: data.current_period_end ?? null,
+          });
+        }
+      } catch {
+        setSubscriptionRow(null);
+      } finally {
+        setLoadingSubscription(false);
+      }
+    };
+    loadAccountAndSubscription();
 
     // Nightly reflection toggle and schedule (local-only)
     (async () => {
@@ -237,6 +321,39 @@ export default function SettingsModal({
       }
     })();
   }, [visible, userId]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        void refreshBiometricAvailability();
+      }
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, [visible]);
+
+  const normalizedProvider = (subscriptionRow?.provider ?? "").toLowerCase();
+  const providerLabel =
+    normalizedProvider === "apple"
+      ? "Apple"
+      : normalizedProvider === "stripe"
+      ? "Stripe"
+      : "—";
+  const canManageSubscription = normalizedProvider === "apple";
+  const planLabel = subscriptionRow?.plan ?? "—";
+  const statusLabel = subscriptionRow?.status ?? "Subscription unavailable";
+  const renewalLabel = (() => {
+    if (!subscriptionRow?.current_period_end) return "—";
+    const date = new Date(subscriptionRow.current_period_end);
+    if (Number.isNaN(date.getTime())) return "—";
+    return date.toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  })();
   const handleNightlyReflectionToggle = async () => {
     const next = !nightlyReflectionEnabled;
     setNightlyReflectionEnabled(next);
@@ -268,22 +385,44 @@ export default function SettingsModal({
   // ==========================
   const updateSetting = async (key: string, value: any) => {
     if (!userId) return;
-  
-    const { error } = await getSupabase()
-      .from("user_settings")
-      .upsert(
-        {
-          user_id: userId,
-          [key]: value,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id" }
-      );
-  
-    if (error) {
-      console.log("updateSetting error:", key, value, error);
-      throw error;
+
+    const attempt = async (actualKey: string) =>
+      getSupabase()
+        .from("user_settings")
+        .upsert(
+          {
+            user_id: userId,
+            [actualKey]: value,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id" }
+        );
+
+    let actualKey = key;
+    if (key === "daily_reminder_enabled") {
+      actualKey = dailyReminderColumnRef.current;
     }
+
+    const { error } = await attempt(actualKey);
+    if (!error) {
+      return;
+    }
+
+    // Compatibility fallback for legacy schema that still uses reminder_enabled.
+    if (
+      key === "daily_reminder_enabled" &&
+      error?.code === "PGRST204" &&
+      actualKey !== "reminder_enabled"
+    ) {
+      const retry = await attempt("reminder_enabled");
+      if (!retry.error) {
+        dailyReminderColumnRef.current = "reminder_enabled";
+        return;
+      }
+    }
+
+    console.log("updateSetting error:", key, value, error);
+    throw error;
   };
 
   // ==========================
@@ -301,30 +440,38 @@ export default function SettingsModal({
     setDailyReminderEnabled(next);
     setShowTimePicker(next);
   
-    if (next) {
-      const ok = await requestNotificationPermissions();
-      if (!ok) {
-        Alert.alert(
-          "Notifications Disabled",
-          "Enable notifications to receive reminders."
-        );
-        setDailyReminderEnabled(false);
-        setShowTimePicker(false);
-        return;
+    try {
+      if (next) {
+        const ok = await requestNotificationPermissions();
+        if (!ok) {
+          Alert.alert(
+            "Notifications Disabled",
+            "Enable notifications to receive reminders."
+          );
+          setDailyReminderEnabled(false);
+          setShowTimePicker(false);
+          return;
+        }
+
+        // Persist both values together (with schema-compatible reminder column).
+        await updateSetting("daily_reminder_enabled", true);
+        await updateSetting("reminder_time", reminderTime);
+
+        await scheduleDailyPrayerNotification(reminderTime);
+        capture("daily_reminder_toggled", { enabled: true, time: reminderTime });
+        showToast(`Reminder set for ${reminderTime}`);
+      } else {
+        await updateSetting("daily_reminder_enabled", false);
+        await cancelDailyPrayerNotification();
+        capture("daily_reminder_toggled", { enabled: false });
+        showToast("Daily reminder turned off");
       }
-  
-      // ✅ PERSIST BOTH VALUES TOGETHER
-      await updateSetting("daily_reminder_enabled", true);
-      await updateSetting("reminder_time", reminderTime);
-  
-      await scheduleDailyPrayerNotification(reminderTime);
-      capture("daily_reminder_toggled", { enabled: true, time: reminderTime });
-      showToast(`Reminder set for ${reminderTime}`);
-    } else {
-      await updateSetting("daily_reminder_enabled", false);
-      await cancelDailyPrayerNotification();
-      capture("daily_reminder_toggled", { enabled: false });
-      showToast("Daily reminder turned off");
+    } catch {
+      Alert.alert("Couldn’t update reminder setting", "Please try again.");
+      // Roll back optimistic state change.
+      setDailyReminderEnabled(!next);
+      if (!next) setShowTimePicker(true);
+      return;
     }
   };
 
@@ -372,16 +519,35 @@ export default function SettingsModal({
   const handleBiometricToggle = async (value: boolean) => {
     if (value) {
       try {
-        const hasHardware = await LocalAuthentication.hasHardwareAsync();
-        const enrolled = await LocalAuthentication.isEnrolledAsync();
-  
-        if (!hasHardware || !enrolled) {
+        const availability = await refreshBiometricAvailability();
+
+        const promptToOpenSettings = () => {
           Alert.alert(
-            "Biometric Lock Unavailable",
-            "Face ID / Touch ID isn’t set up on this device yet. Please enable it in your device settings and try again."
+            "Face ID / Touch ID Not Set Up",
+            "Set up Face ID or Touch ID in your iPhone settings, then return here to enable app lock.",
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Open Settings",
+                onPress: () => {
+                  void Linking.openSettings();
+                },
+              },
+            ]
           );
+        };
+  
+        if (!availability.hasHardware) {
+          promptToOpenSettings();
           setBiometricLockEnabled(false);
-          await updateSetting("biometric_lock_enabled", false);
+          await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "false");
+          return;
+        }
+
+        if (!availability.isEnrolled) {
+          promptToOpenSettings();
+          setBiometricLockEnabled(false);
+          await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "false");
           return;
         }
   
@@ -393,23 +559,27 @@ export default function SettingsModal({
   
         if (!auth.success) {
           setBiometricLockEnabled(false);
-          await updateSetting("biometric_lock_enabled", false);
+          await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "false");
           return;
         }
+        setBiometricLockEnabled(true);
+        await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "true");
+        showToast("Face ID / Touch ID lock enabled");
+        return;
       } catch {
         Alert.alert(
-          "Biometric Lock Error",
+          "Face ID / Touch ID Error",
           "We couldn’t enable Face ID / Touch ID lock right now. Please try again."
         );
         setBiometricLockEnabled(false);
-        await updateSetting("biometric_lock_enabled", false);
+        await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "false");
         return;
       }
     }
   
-    setBiometricLockEnabled(value);
-    await updateSetting("biometric_lock_enabled", value);
-    showToast(value ? "Face ID / Touch ID lock enabled" : "Face ID / Touch ID lock disabled");
+    setBiometricLockEnabled(false);
+    await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "false");
+    showToast("Face ID / Touch ID lock disabled");
   };
 
   const handleSignOut = async () => {
@@ -713,7 +883,7 @@ export default function SettingsModal({
           <View
             style={[
               styles.settingRow,
-              { backgroundColor: colors.card, opacity: biometricSupported ? 1 : 0.5 },
+              { backgroundColor: colors.card },
             ]}
           >
             <Ionicons name="lock-closed-outline" size={20} color={colors.textPrimary} />
@@ -728,7 +898,7 @@ export default function SettingsModal({
             <Switch
               value={biometricLockEnabled}
               onValueChange={handleBiometricToggle}
-              disabled={!biometricSupported || loadingSettings}
+              disabled={loadingSettings}
               trackColor={{ false: "#777", true: colors.accent }}
               thumbColor={biometricLockEnabled ? "#fff" : "#ccc"}
             />
@@ -791,31 +961,73 @@ export default function SettingsModal({
               { backgroundColor: colors.card },
             ]}
           >
-            <View>
-              <Text
-                style={[styles.settingLabel, { color: colors.textPrimary }]}
-              >
-                {subscriptionPlan}
-              </Text>
-              <Text
-                style={[styles.settingSub, { color: colors.textSecondary }]}
-              >
-                £4.99/month
-              </Text>
+            <View style={{ flex: 1, marginRight: spacing.md }}>
+              <View style={styles.subscriptionRow}>
+                <Text style={[styles.subscriptionKey, { color: colors.textSecondary }]}>
+                  Account:
+                </Text>
+                <Text
+                  style={[styles.subscriptionValue, { color: colors.textSecondary }]}
+                  numberOfLines={2}
+                >
+                  {userEmail ?? "—"}
+                </Text>
+              </View>
+
+              <View style={styles.subscriptionRow}>
+                <Text style={[styles.subscriptionKey, { color: colors.textSecondary }]}>
+                  Plan:
+                </Text>
+                <Text style={[styles.subscriptionValue, { color: colors.textSecondary }]}>
+                  {loadingSubscription ? "—" : planLabel}
+                </Text>
+              </View>
+
+              <View style={styles.subscriptionRow}>
+                <Text style={[styles.subscriptionKey, { color: colors.textSecondary }]}>
+                  Status:
+                </Text>
+                <Text style={[styles.subscriptionValue, { color: colors.textSecondary }]}>
+                  {loadingSubscription ? "Subscription unavailable" : statusLabel}
+                </Text>
+              </View>
+
+              <View style={styles.subscriptionRow}>
+                <Text style={[styles.subscriptionKey, { color: colors.textSecondary }]}>
+                  Billing via:
+                </Text>
+                <Text style={[styles.subscriptionValue, { color: colors.textSecondary }]}>
+                  {loadingSubscription ? "—" : providerLabel}
+                </Text>
+              </View>
+
+              <View style={[styles.subscriptionRow, { marginBottom: 0 }]}>
+                <Text style={[styles.subscriptionKey, { color: colors.textSecondary }]}>
+                  Renews:
+                </Text>
+                <Text style={[styles.subscriptionValue, { color: colors.textSecondary }]}>
+                  {loadingSubscription ? "—" : renewalLabel}
+                </Text>
+              </View>
             </View>
 
-            <TouchableOpacity
-              style={[
-                styles.manageBtn,
-                { backgroundColor: colors.accent + "22" },
-              ]}
-            >
-              <Text
-                style={[styles.manageText, { color: colors.accent }]}
+            {canManageSubscription ? (
+              <TouchableOpacity
+                style={[
+                  styles.manageBtn,
+                  { backgroundColor: colors.accent + "22" },
+                ]}
+                onPress={() =>
+                  Linking.openURL("https://apps.apple.com/account/subscriptions")
+                }
               >
-                Manage Subscription
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={[styles.manageText, { color: colors.accent }]}
+                >
+                  Manage Subscription
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {/* SUPPORT & LEGAL */}
@@ -985,6 +1197,19 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   manageText: { fontFamily: fonts.body, fontSize: 13 },
+  subscriptionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: spacing.sm,
+  },
+  subscriptionKey: { fontFamily: fonts.heading, fontSize: 13, marginRight: spacing.sm },
+  subscriptionValue: {
+    flex: 1,
+    fontFamily: fonts.body,
+    fontSize: 13,
+    textAlign: "right",
+  },
   linkRow: {
     flexDirection: "row",
     alignItems: "center",

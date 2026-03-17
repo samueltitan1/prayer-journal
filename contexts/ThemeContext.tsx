@@ -32,14 +32,14 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
           card: "#1E1E1E",
           textPrimary: "#FFFFFF",
           textSecondary: "#BBBBBB",
-          accent: "#F8E38A",
+          accent: "#C4A572",
         }
       : {
           background: "#FFFFFF",
           card: "#FAFAFA",
           textPrimary: "#111111",
           textSecondary: "#666666",
-          accent: "#F8E38A",
+          accent: "#C4A572",
         };
 
   const applyTheme = (t: ThemeType) => {

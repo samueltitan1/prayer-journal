@@ -9,13 +9,14 @@ import {
   trackSignupMethodSelected,
 } from "@/lib/analytics/onboarding";
 import { signInWithGoogleToSupabase } from "@/lib/auth/googleNative";
-import { getSupabase } from "@/lib/supabaseClient";
 import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
+import { getSupabase } from "@/lib/supabaseClient";
 import { buttons, fonts, spacing } from "@/theme/theme";
 import { Ionicons } from "@expo/vector-icons";
 import * as AppleAuthentication from "expo-apple-authentication";
+import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
@@ -28,7 +29,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import * as Linking from "expo-linking";
 
 export default function Login() {
   const router = useRouter();
@@ -93,9 +93,9 @@ export default function Login() {
     setErrorMessage(null);
     trackAuthResult("email", "success");
     trackOnboardingAction("login", "continue");
-  
-    // ✅ Correct route into the tabs group
-    router.replace("/(tabs)/pray");
+
+    // Root layout will route to the correct destination after auth state updates.
+    return;
   };
 
   const handleForgotPassword = async () => {
@@ -153,10 +153,15 @@ export default function Login() {
       console.log("Apple sign-in success (login)");
       trackAuthResult("apple", "success");
       trackOnboardingAction("login", "continue");
-      router.replace("/(tabs)/pray");
+
+      // Root layout will route to the correct destination after auth state updates.
+      return;
     } catch (e: any) {
       // user cancels Apple sheet
-      if (e?.code === "ERR_REQUEST_CANCELED") return;
+      if (e?.code === "ERR_REQUEST_CANCELED" || e?.code === "ERR_CANCELED") {
+        if (__DEV__) console.log("User cancelled Apple sign-in");
+        return;
+      }
       console.log("Apple sign-in exception (login)", e);
       trackAuthResult("apple", "error", e?.code || e?.name || "auth_error");
       setErrorMessage(e?.message ?? "Apple sign-in failed. Please try again.");
@@ -176,7 +181,9 @@ export default function Login() {
       console.log("Google sign-in success (login)", userId);
       trackAuthResult("google", "success");
       trackOnboardingAction("login", "continue");
-      router.replace("/(tabs)/pray");
+
+      // Root layout will route to the correct destination after auth state updates.
+      return;
     } catch (err: any) {
       console.log("Google sign-in error (login)", err);
       trackAuthResult("google", "error", err?.code || err?.name || "auth_error");
@@ -372,7 +379,11 @@ const styles = StyleSheet.create({
   link: {
     fontFamily: fonts.body,
   },
-  continueButton: {},
+  continueButton: { 
+    color: "#FFFFFF",
+    fontFamily: fonts.body,
+    fontSize: 14,
+  },
   errorText: {
     fontFamily: fonts.body,
     fontSize: 13,

@@ -1,6 +1,8 @@
 import Constants from "expo-constants";
 import { Platform } from "react-native";
 import type { QuantitySampleForSaving, QuantityTypeIdentifier } from "@kingstinct/react-native-healthkit";
+// Current package usage is end-of-walk HealthKit writes via saveWorkoutSample.
+// Live HKWorkoutSession lifecycle (start/observe/end) is not exposed by this wrapper in this project.
 // Local build commands (manual):
 // npx expo prebuild --clean
 // npx pod-install

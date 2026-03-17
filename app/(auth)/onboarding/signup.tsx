@@ -17,7 +17,7 @@ import { buttons, colors, fonts, spacing } from "@/theme/theme";
 import { Ionicons } from "@expo/vector-icons";
 import * as AppleAuthentication from "expo-apple-authentication";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Image,
@@ -124,7 +124,10 @@ export default function SignUp() {
       router.replace("/(auth)/onboarding/preparing");
     } catch (e: any) {
       // user cancels Apple sheet
-      if (e?.code === "ERR_REQUEST_CANCELED") return;
+      if (e?.code === "ERR_REQUEST_CANCELED" || e?.code === "ERR_CANCELED") {
+        if (__DEV__) console.log("User cancelled Apple sign-in");
+        return;
+      }
       console.log("Apple sign-in exception (signup)", e);
       trackAuthResult("apple", "error", e?.code || e?.name || "auth_error");
       setErrorMessage(e?.message ?? "Apple sign-in failed. Please try again.");
@@ -237,10 +240,20 @@ export default function SignUp() {
   
         {/* Button */}
         <TouchableOpacity
-          style={[buttons.primary, { marginTop: spacing.lg }]}
+          style={[
+            buttons.primary,
+            {
+              marginTop: spacing.lg,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+            },
+          ]}
           onPress={handleSignUp}
         >
-          <Text style={styles.continueButton}>CREATE AN ACCOUNT</Text>
+          <Ionicons name="mail-outline" size={18} color="#FFFFFF" />
+          <Text style={styles.continueButton}>Continue with email</Text>
         </TouchableOpacity>
 
         <OrDivider textColor={colors.textSecondary} lineColor={colors.textSecondary} />
@@ -357,7 +370,10 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     fontFamily: fonts.body,
   },
-  continueButton: {
+  continueButton: { 
+    color: "#FFFFFF",
+    fontFamily: fonts.body,
+    fontSize: 14,
   },
   appleLoadingText: {
     fontFamily: fonts.body,
@@ -401,5 +417,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#FFFFFF",
   },
+  
 
 });

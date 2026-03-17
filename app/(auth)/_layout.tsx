@@ -11,7 +11,7 @@ export default function AuthLayout() {
 
   // If user is logged in, only allow access to onboarding routes from within (auth)
   if (auth.user && !isOnboardingRoute && !isResetPasswordRoute) {
-    return <Redirect href="/(tabs)" />;
+    return <Redirect href="/(tabs)/journal" />;
   }
 
   // Always mount onboarding stack inside (auth)

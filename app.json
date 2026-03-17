@@ -20,7 +20,13 @@
         "UIKeyboardDismissModeOnDrag": "YES",
         "UIKeyboardWillShowNotification": true,
         "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": [
+          "audio",
+          "location"
+        ],
         "NSMicrophoneUsageDescription": "Allow microphone access to record prayers.",
+        "NSLocationWhenInUseUsageDescription": "Allow location access to map your Prayer Walk route.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Allow background location so Prayer Walk can keep tracking while your phone is locked.",
         "NSHealthShareUsageDescription": "We use Apple Health to enhance Prayer Walk insights (steps/distance) and show patterns over time.",
         "NSHealthUpdateUsageDescription": "We write activity data (like walking distance) to Apple Health when you choose to connect it.",
         "CFBundleURLTypes": [

@@ -1,7 +1,6 @@
 // components/TranscriptEditor.tsx
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React from "react";
 import {
   ActivityIndicator,
   Image,
@@ -25,6 +24,11 @@ interface TranscriptEditorProps {
   mode: "audio" | "text";
   entrySource?: "audio" | "text" | "ocr" | "walk";
   walkMapUri?: string | null;
+  walkStats?: {
+    durationLabel: string;
+    distanceLabel: string;
+    stepsLabel: string;
+  };
   transcript: string;
   onChangeText: (text: string) => void;
   onSave: (opts?: { isBookmarked?: boolean; keepAudio?: boolean }) => void;
@@ -60,6 +64,7 @@ export default function TranscriptEditor({
   transcript,
   entrySource,
   walkMapUri,
+  walkStats,
   onChangeText,
   onSave,
   onDiscard,
@@ -125,14 +130,40 @@ export default function TranscriptEditor({
             </Text>
 
             {entrySource === "walk" && walkMapUri ? (
-              <Image
-                source={{ uri: walkMapUri }}
-                style={styles.walkMapImage}
-                resizeMode="cover"
-                onLoadStart={() => console.log("walk:mapImage load start")}
-                onLoadEnd={() => console.log("walk:mapImage load end")}
-                onError={(e) => console.log("walk:mapImage error", e?.nativeEvent)}
-              />
+              <>
+                <Image
+                  source={{ uri: walkMapUri }}
+                  style={styles.walkMapImage}
+                  resizeMode="cover"
+                  onLoadStart={() => console.log("walk:mapImage load start")}
+                  onLoadEnd={() => console.log("walk:mapImage load end")}
+                  onError={(e) => console.log("walk:mapImage error", e?.nativeEvent)}
+                />
+                {walkStats ? (
+                  <View
+                    style={[
+                      styles.walkStatsRow,
+                      {
+                        borderColor: colors.textSecondary + "33",
+                        backgroundColor: colors.background,
+                      },
+                    ]}
+                  >
+                    <View style={styles.walkStatItem}>
+                      <Text style={[styles.walkStatLabel, { color: colors.textSecondary }]}>Duration</Text>
+                      <Text style={[styles.walkStatValue, { color: colors.textPrimary }]}>{walkStats.durationLabel}</Text>
+                    </View>
+                    <View style={styles.walkStatItem}>
+                      <Text style={[styles.walkStatLabel, { color: colors.textSecondary }]}>Steps</Text>
+                      <Text style={[styles.walkStatValue, { color: colors.textPrimary }]}>{walkStats.stepsLabel}</Text>
+                    </View>
+                    <View style={styles.walkStatItem}>
+                      <Text style={[styles.walkStatLabel, { color: colors.textSecondary }]}>Distance</Text>
+                      <Text style={[styles.walkStatValue, { color: colors.textPrimary }]}>{walkStats.distanceLabel}</Text>
+                    </View>
+                  </View>
+                ) : null}
+              </>
             ) : null}
 
             {mode === "audio" && (
@@ -460,9 +491,9 @@ export default function TranscriptEditor({
                 disabled={loading}
               >
                 {loading ? (
-                  <ActivityIndicator color="#000" />
+                  <ActivityIndicator color="#FFFFFF" />
                 ) : (
-                  <Text style={[styles.btnText, { color: "#000" }]}>
+                  <Text style={[styles.btnText, { color: "#FFFFFF" }]}>
                     Save Prayer
                   </Text>
                 )}
@@ -505,6 +536,27 @@ const styles = StyleSheet.create({
     height: 200,
     borderRadius: 16,
     marginBottom: spacing.md,
+  },
+  walkStatsRow: {
+    flexDirection: "row",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  walkStatItem: {
+    flex: 1,
+    alignItems: "center",
+  },
+  walkStatLabel: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+  },
+  walkStatValue: {
+    marginTop: 2,
+    fontFamily: fonts.body,
+    fontSize: 13,
   },
   input: {
     borderWidth: StyleSheet.hairlineWidth,

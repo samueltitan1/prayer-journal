@@ -1,5 +1,6 @@
 // app/(tabs)/journal/index.tsx
 
+import { useTabsChrome } from "../_layout";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
@@ -16,7 +17,6 @@ import {
   Image,
   LayoutAnimation,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -34,10 +34,8 @@ import PrayerDayModal from "@/components/journal/PrayerDayOverlay";
 import PrayerEntryModal from "@/components/journal/PrayerEntryModal";
 import ReflectionModal from "@/components/journal/ReflectionModal";
 import ShimmerCard from "@/components/ShimmerCard";
-import { useAuth } from "@/contexts/AuthProvider";
 import { Prayer } from "@/types/Prayer";
 import { Portal, PortalProvider } from "@gorhom/portal";
-import SettingsModal from "../../../components/SettingsModal";
 import { useTheme } from "../../../contexts/ThemeContext";
 import {
   scheduleInactiveNudgeIfNeeded,
@@ -57,6 +55,12 @@ type Reflection = {
   verse_text: string | null;
   verse_reference: string | null;
   created_at: string;
+};
+
+type TriggerReflectionResult = {
+  ok: boolean;
+  skipped?: boolean;
+  reflectionId?: string;
 };
 
 // Enable LayoutAnimation on Android
@@ -219,10 +223,11 @@ const fetchBookmarkedPrayerIds = async (userId: string) => {
 const triggerReflection = async (
   userId: string,
   type: "weekly" | "monthly"
-): Promise<boolean> => {
+): Promise<TriggerReflectionResult> => {
   try {
-    // 🔍 DEBUG — confirms exactly what we send to the Edge Function
-    console.log("Invoking generate_reflection with:", { userId, type });
+    if (__DEV__) {
+      console.log("Invoking generate_reflection with:", { userId, type });
+    }
     // Use the configured Supabase client so this works consistently in Expo Go + TestFlight.
     const { data, error } = await getSupabase().functions.invoke(
       "generate_reflection",
@@ -235,24 +240,68 @@ const triggerReflection = async (
       console.warn(`Reflection invoke error (${type}) name:`, anyErr?.name);
       console.warn(`Reflection invoke error (${type}) context:`, anyErr?.context);
       console.warn(`Reflection invoke error (${type}) details:`, anyErr?.details);
-      return false;
+      return { ok: false };
     }
 
-    console.log(`Reflection result (${type}):`, data);
-    return true;
+    if (__DEV__) {
+      console.log(`Reflection result (${type}):`, data);
+    }
+
+    const payload = (data ?? {}) as Record<string, any>;
+    const skipped = payload.skipped === true || payload.result === "skipped";
+    if (skipped) {
+      return { ok: false, skipped: true };
+    }
+
+    const reflectionId =
+      typeof payload.id === "string"
+        ? payload.id
+        : typeof payload.reflection_id === "string"
+          ? payload.reflection_id
+          : typeof payload?.reflection?.id === "string"
+            ? payload.reflection.id
+            : undefined;
+    const inserted = payload.result === "inserted" || payload.inserted === true;
+    if (inserted || reflectionId) {
+      return { ok: true, reflectionId };
+    }
+
+    return { ok: false };
   } catch (err) {
     console.warn(`Error calling ${type} reflection:`, err);
-    return false;
+    return { ok: false };
   }
 };
 // ---- Screen ----------------------------------------------------------
 
 export default function JournalScreen() {
   const router = useRouter();
-  const auth = useAuth() as any;
-  const user = (auth?.user ?? null) as any; // temporary TS fix
   const { colors } = useTheme();
-  const userId = user?.id ?? null;
+  const { setHeaderVisible } = useTabsChrome();
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const bootstrapUser = async () => {
+      const { data } = await getSupabase().auth.getUser();
+      if (!mounted) return;
+      setUserId(data?.user?.id ?? null);
+    };
+    void bootstrapUser();
+
+    const {
+      data: { subscription },
+    } = getSupabase().auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      setUserId(session?.user?.id ?? null);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
   
 
   const [refreshKey] = useState(0); // kept but unused externally (safe)
@@ -268,7 +317,6 @@ export default function JournalScreen() {
   const [monthlyReflection, setMonthlyReflection] = useState<Reflection | null>(
     null
   );
-  const [showSettings, setShowSettings] = useState(false);
 
   // Selected date for modal
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
@@ -298,11 +346,20 @@ export default function JournalScreen() {
   const [showReflectionBadge, setShowReflectionBadge] = useState<"weekly" | "monthly" | null>(null);
   const [loadingReflections, setLoadingReflections] = useState(true);
   const [reflectionsRefreshNonce, setReflectionsRefreshNonce] = useState(0);
+  const [reflectionCheckNonce, setReflectionCheckNonce] = useState(0);
+  const reflectionCheckInFlight = useRef(false);
+  const reflectionCheckForceNextRef = useRef(false);
 
   const runTriggerReflection = async (t: "weekly" | "monthly") => {
     if (!userId) return;
-    const ok = await triggerReflection(userId, t);
-    if (ok) setReflectionsRefreshNonce((n) => n + 1); // forces refetch
+    reflectionCheckForceNextRef.current = true;
+    const result = await triggerReflection(userId, t);
+    if (!result.ok) {
+      reflectionCheckForceNextRef.current = false;
+      return;
+    }
+    setReflectionsRefreshNonce((n) => n + 1); // forces refetch
+    setReflectionCheckNonce((n) => n + 1); // runs one forced lazy check
   };
 
 // Milestone state
@@ -520,7 +577,7 @@ const bookmarkedPrayers = useMemo(() => {
       // 2) Fetch prayers once (select only what Journal needs)
       const { data, error } = await getSupabase()
       .from("prayers")
-      .select("id,user_id,prayed_at,transcript_text,duration_seconds,audio_path,bible_reference,bible_version,location_name,entry_source,walk_map_path")
+      .select("id,user_id,prayed_at,transcript_text,duration_seconds,audio_path,bible_reference,bible_version,location_name,entry_source,walk_map_path,walk_distance_meters,walk_steps")
         .eq("user_id", userId)
         .order("prayed_at", { ascending: false });
     
@@ -780,49 +837,67 @@ useEffect(() => {
   };
 
   const runLazyReflectionChecks = async (force: boolean) => {
-    if (!(await shouldRunCheck(force))) return;
-    await markChecked();
+    if (reflectionCheckInFlight.current) return;
+    reflectionCheckInFlight.current = true;
 
-    const { weekKey } = getLastCompletedWeekUTC();
-    const { monthKey } = getLastCompletedMonthUTC();
+    try {
+      if (!(await shouldRunCheck(force))) return;
+      await markChecked();
 
-    const { data: weeklyExisting, error: weeklyErr } = await getSupabase()
-      .from("reflections")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("type", "weekly")
-      .eq("week_key", weekKey)
-      .maybeSingle();
+      const { weekKey } = getLastCompletedWeekUTC();
+      const { monthKey } = getLastCompletedMonthUTC();
+      let generatedAny = false;
 
-    if (weeklyErr) {
-      console.warn("Weekly reflection check failed:", weeklyErr.message);
-    }
+      const { data: weeklyExisting, error: weeklyErr } = await getSupabase()
+        .from("reflections")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("type", "weekly")
+        .eq("week_key", weekKey)
+        .maybeSingle();
 
-    if (!weeklyExisting) {
-      const ok = await triggerReflection(userId, "weekly");
-      if (ok) setReflectionsRefreshNonce((n) => n + 1);
-    }
+      if (weeklyErr) {
+        console.warn("Weekly reflection check failed:", weeklyErr.message);
+      }
 
-    const { data: monthlyExisting, error: monthlyErr } = await getSupabase()
-      .from("reflections")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("type", "monthly")
-      .eq("month_key", monthKey)
-      .maybeSingle();
+      if (!weeklyExisting) {
+        const result = await triggerReflection(userId, "weekly");
+        if (result.ok) generatedAny = true;
+      }
 
-    if (monthlyErr) {
-      console.warn("Monthly reflection check failed:", monthlyErr.message);
-    }
+      const { data: monthlyExisting, error: monthlyErr } = await getSupabase()
+        .from("reflections")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("type", "monthly")
+        .eq("month_key", monthKey)
+        .maybeSingle();
 
-    if (!monthlyExisting) {
-      const ok = await triggerReflection(userId, "monthly");
-      if (ok) setReflectionsRefreshNonce((n) => n + 1);
+      if (monthlyErr) {
+        console.warn("Monthly reflection check failed:", monthlyErr.message);
+      }
+
+      if (!monthlyExisting) {
+        const result = await triggerReflection(userId, "monthly");
+        if (result.ok) generatedAny = true;
+      }
+
+      if (generatedAny) {
+        setReflectionsRefreshNonce((n) => n + 1);
+      }
+    } finally {
+      reflectionCheckInFlight.current = false;
     }
   };
 
-  void runLazyReflectionChecks(reflectionsRefreshNonce > 0);
-}, [userId, reflectionsRefreshNonce]);
+  const force = reflectionCheckForceNextRef.current;
+  reflectionCheckForceNextRef.current = false;
+  void runLazyReflectionChecks(force);
+}, [userId, reflectionCheckNonce]);
+
+  useEffect(() => {
+    setHeaderVisible(true);
+  }, [setHeaderVisible]);
 
   // ---- Fetch reflections ----
   useEffect(() => {
@@ -1330,35 +1405,9 @@ const closeReflection = () => {
 
   return (
     <PortalProvider>
-      <SafeAreaView
+      <View
         style={[styles.container, { backgroundColor: colors.background }]}
       >
-        {/* Header */}
-        <View
-          style={[
-            styles.header,
-            { borderBottomColor: colors.textSecondary + "20" },
-          ]}
-        >
-          <View style={styles.leftHeader}>
-            <Image
-              source={require("../../../assets/Logo2.png")}
-              style={{ width: 44, height: 44, marginRight: 8 }}
-              resizeMode="contain"
-            />
-            <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>
-              Prayer Journal
-            </Text>
-          </View>
-          <TouchableOpacity onPress={() => setShowSettings(true)}>
-            <Ionicons
-              name="settings-outline"
-              size={22}
-              color={colors.textPrimary}
-            />
-          </TouchableOpacity>
-        </View>
-
         {/* Search bar */}
         <View
           style={[styles.searchBarWrap, { backgroundColor: colors.background }]}
@@ -1882,7 +1931,7 @@ const closeReflection = () => {
 
         </ScrollView>
 
-      </SafeAreaView>
+      </View>
       {/* Modals */}
       <PrayerDayModal
         visible={dayModalVisible}
@@ -1931,13 +1980,6 @@ const closeReflection = () => {
         }}
       />
       <Portal>
-        <SettingsModal
-          visible={showSettings}
-          onClose={() => setShowSettings(false)}
-          userId={userId}
-        />
-      </Portal>
-      <Portal>
         <MilestoneTimelineModal
           visible={milestoneTimelineVisible}
           currentStreak={currentStreak}
@@ -1958,19 +2000,6 @@ const closeReflection = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  leftHeader: { flexDirection: "row", alignItems: "center" },
-  headerTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 18,
-  },
   searchBarWrap: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,

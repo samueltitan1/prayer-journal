@@ -10,7 +10,7 @@ import {
 import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { colors, fonts, spacing } from "@/theme/theme";
 import { useRouter } from "expo-router";
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 
 export default function OnboardingWelcome() {
@@ -34,7 +34,7 @@ export default function OnboardingWelcome() {
     <OnboardingShell showBack={false}>
       <View style={styles.container}>
         <Image
-          source={require("@/assets/LOGO1.png")}
+          source={require("@/assets/Crucifix.png")}
           style={styles.logo}
           resizeMode="contain"
         />
@@ -110,6 +110,6 @@ const styles = StyleSheet.create({
   linkText: {
     fontFamily: fonts.body,
     fontSize: 13,
-    color: colors.textPrimary,
+    color: colors.accentGold,
   },
 });

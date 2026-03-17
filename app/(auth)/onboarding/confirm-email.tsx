@@ -58,7 +58,7 @@ export default function ConfirmEmailScreen() {
             textDecorationLine: "underline",
             color: colors.accent,
           }}
-          onPress={() => router.replace("/(auth)/login")}
+          onPress={() => router.replace("/(auth)/onboarding/login")}
         >
           Sign in
         </Text>
