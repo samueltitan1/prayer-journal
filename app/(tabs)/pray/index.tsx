@@ -62,6 +62,18 @@ const WALK_MAP_WIDTH = 640;
 const WALK_MAP_HEIGHT = 400;
 const WALK_NOTICE_KEY = "walk_mode_notice_v1";
 const ACTIVE_WALK_SESSION_KEY = "@prayer_walk_active_session_v1";
+const MIN_TRANSCRIBE_DURATION_SECONDS = 1;
+const MIN_TRANSCRIBE_FILE_BYTES = 4096;
+const MIN_METERING_SAMPLES = 6;
+const SILENCE_AVG_DB_THRESHOLD = -52;
+const SILENCE_PEAK_DB_THRESHOLD = -40;
+const SHORT_HALLUCINATION_PHRASES = new Set([
+  "thank you",
+  "thanks for watching",
+  "thanks for listening",
+  "bye",
+  "goodbye",
+]);
 
 type ActiveWalkSession = {
   active: true;
@@ -169,6 +181,8 @@ export default function PrayScreen() {
   const walkPedometerSubRef = useRef<{ remove: () => void } | null>(null);
   const walkNoCoordsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const walkRecordingRef = useRef<Audio.Recording | null>(null);
+  const prayerMeteringSamplesRef = useRef<number[]>([]);
+  const walkMeteringSamplesRef = useRef<number[]>([]);
   const walkLocationSubRef = useRef<Location.LocationSubscription | null>(null);
   const walkLocationEventCountRef = useRef(0);
   const stopWalkInFlightRef = useRef(false);
@@ -1043,8 +1057,10 @@ useEffect(() => {
       await configureWalkRecordingAudioMode();
 
       const recording = new Audio.Recording();
+      walkMeteringSamplesRef.current = [];
       await recording.prepareToRecordAsync({
         ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        isMeteringEnabled: true,
         ios: {
           ...Audio.RecordingOptionsPresets.HIGH_QUALITY.ios,
           audioQuality: Audio.IOSAudioQuality.MAX,
@@ -1055,6 +1071,10 @@ useEffect(() => {
       await recording.startAsync();
       logWalk("audio_recording_started");
       recording.setOnRecordingStatusUpdate((status) => {
+        const metering = (status as { metering?: number }).metering;
+        if (typeof metering === "number" && Number.isFinite(metering)) {
+          walkMeteringSamplesRef.current.push(metering);
+        }
         if (!__DEV__) return;
         if (!status.isRecording || (status as any).isDoneRecording) {
           console.log("[walk] recording_status", {
@@ -1263,9 +1283,13 @@ useEffect(() => {
 
       let transcript = "";
       let localAudioUri: string | null = null;
+      let recordingDurationSeconds = startedAt ? Math.max(0, Math.round((walkEndedAt - startedAt) / 1000)) : null;
       if (recording) {
         try {
           const status = await recording.getStatusAsync();
+          if (typeof status.durationMillis === "number") {
+            recordingDurationSeconds = Math.max(0, Math.round(status.durationMillis / 1000));
+          }
           logWalk("recording_status_before_stop", {
             isRecording: status.isRecording,
             durationMillis: status.durationMillis ?? 0,
@@ -1277,7 +1301,18 @@ useEffect(() => {
         logWalk("audio_recording_stopped");
         localAudioUri = recording.getURI();
         if (localAudioUri) {
-          transcript = await transcribeAudioWithWhisper(localAudioUri);
+          const gate = await shouldTranscribeAudio({
+            uri: localAudioUri,
+            durationSeconds: recordingDurationSeconds,
+            meteringSamples: walkMeteringSamplesRef.current,
+          });
+          if (gate.shouldTranscribe) {
+            transcript = await transcribeAudioWithWhisper(localAudioUri, {
+              lowSpeechInput: gate.lowSpeech,
+            });
+          } else {
+            logWalk("transcription_skipped_silence", { reason: gate.reason });
+          }
           try {
             await FileSystem.deleteAsync(localAudioUri, { idempotent: true });
           } catch {}
@@ -1395,6 +1430,7 @@ useEffect(() => {
       Alert.alert("Error", "Could not finalize prayer walk.");
     } finally {
       stopWalkInFlightRef.current = false;
+      walkMeteringSamplesRef.current = [];
       try {
         deactivateKeepAwake();
       } catch {}
@@ -1424,9 +1460,11 @@ useEffect(() => {
       } catch {}
       
       const recording = new Audio.Recording();
+      prayerMeteringSamplesRef.current = [];
 
       await recording.prepareToRecordAsync({
         ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        isMeteringEnabled: true,
         ios: {
           ...Audio.RecordingOptionsPresets.HIGH_QUALITY.ios,
           audioQuality: Audio.IOSAudioQuality.MAX,
@@ -1437,6 +1475,12 @@ useEffect(() => {
       });
 
       await recording.startAsync();
+      recording.setOnRecordingStatusUpdate((status) => {
+        const metering = (status as { metering?: number }).metering;
+        if (typeof metering === "number" && Number.isFinite(metering)) {
+          prayerMeteringSamplesRef.current.push(metering);
+        }
+      });
 
       setRecording(recording);
       setSecondsLeft(MAX_SECONDS_DEFAULT);
@@ -1483,7 +1527,14 @@ useEffect(() => {
         return;
       }
 
-      const transcript = await transcribeAudioWithWhisper(uri);
+      const gate = await shouldTranscribeAudio({
+        uri,
+        durationSeconds,
+        meteringSamples: prayerMeteringSamplesRef.current,
+      });
+      const transcript = gate.shouldTranscribe
+        ? await transcribeAudioWithWhisper(uri, { lowSpeechInput: gate.lowSpeech })
+        : "";
 
       setDraftAudioUri(uri);
       setDraftDuration(durationSeconds);
@@ -1504,6 +1555,7 @@ useEffect(() => {
       Alert.alert("Error", "Failed to process prayer.");
     } finally {
       // Keep the screen awake while recording so the phone doesn't sleep mid-prayer.
+      prayerMeteringSamplesRef.current = [];
       try {
         deactivateKeepAwake();
       } catch {}
@@ -1545,7 +1597,75 @@ useEffect(() => {
     void startRecordingWithSecurityNotice();
   };
 
-  const transcribeAudioWithWhisper = async (uri: string) => {
+  const getMeteringStats = (samples: number[]) => {
+    if (!samples.length) {
+      return { avgDb: null as number | null, peakDb: null as number | null };
+    }
+    const avgDb = samples.reduce((sum, value) => sum + value, 0) / samples.length;
+    const peakDb = Math.max(...samples);
+    return { avgDb, peakDb };
+  };
+
+  const shouldTranscribeAudio = async ({
+    uri,
+    durationSeconds,
+    meteringSamples,
+  }: {
+    uri: string;
+    durationSeconds: number | null;
+    meteringSamples: number[];
+  }) => {
+    if (durationSeconds === null || durationSeconds < MIN_TRANSCRIBE_DURATION_SECONDS) {
+      return { shouldTranscribe: false, lowSpeech: true, reason: "too_short" };
+    }
+
+    let fileSizeBytes: number | null = null;
+    try {
+      const fileInfo = await FileSystem.getInfoAsync(uri);
+      if (fileInfo.exists && typeof (fileInfo as any).size === "number") {
+        fileSizeBytes = Number((fileInfo as any).size);
+      }
+    } catch {}
+
+    if (typeof fileSizeBytes === "number" && fileSizeBytes < MIN_TRANSCRIBE_FILE_BYTES) {
+      return { shouldTranscribe: false, lowSpeech: true, reason: "tiny_file" };
+    }
+
+    if (meteringSamples.length >= MIN_METERING_SAMPLES) {
+      const { avgDb, peakDb } = getMeteringStats(meteringSamples);
+      if (
+        typeof avgDb === "number" &&
+        typeof peakDb === "number" &&
+        avgDb < SILENCE_AVG_DB_THRESHOLD &&
+        peakDb < SILENCE_PEAK_DB_THRESHOLD
+      ) {
+        return { shouldTranscribe: false, lowSpeech: true, reason: "near_silence" };
+      }
+    }
+
+    return { shouldTranscribe: true, lowSpeech: false, reason: "speech_detected" };
+  };
+
+  const applyTranscriptGuards = (rawText: string, lowSpeechInput: boolean) => {
+    const text = rawText.trim();
+    if (!text) return "";
+
+    const normalized = text.toLowerCase();
+    if (SHORT_HALLUCINATION_PHRASES.has(normalized)) {
+      return "";
+    }
+
+    if (lowSpeechInput && text.length <= 20) {
+      return "";
+    }
+
+    return text;
+  };
+
+  const transcribeAudioWithWhisper = async (
+    uri: string,
+    options?: { lowSpeechInput?: boolean }
+  ) => {
     try {
       const formData = new FormData();
       formData.append("file", {
@@ -1563,7 +1683,7 @@ useEffect(() => {
         return "";
       }
 
-      return data.text || "";
+      return applyTranscriptGuards(data.text || "", options?.lowSpeechInput === true);
     } catch (e) {
       console.error("Transcription exception", e);
       return "";

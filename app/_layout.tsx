@@ -5,8 +5,10 @@ import {
   PlayfairDisplay_700Bold,
   useFonts,
 } from "@expo-google-fonts/playfair-display";
-import { Stack } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import * as Notifications from "expo-notifications";
+import * as Linking from "expo-linking";
+import { Stack, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -130,6 +132,7 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
+  const router = useRouter();
   const [fontsLoaded] = useFonts({
     PlayfairDisplay_500Medium,
     PlayfairDisplay_700Bold,
@@ -137,10 +140,53 @@ export default function RootLayout() {
     Inter_700Bold,
   });
 
+  const navigateFromDeepLink = useCallback((url: string | null) => {
+    if (!url) return;
+    const parsed = Linking.parse(url);
+    const path = (parsed.path ?? "").replace(/^\/+/, "");
+    if (path === "pray") {
+      router.replace("/(tabs)/pray");
+    }
+  }, [router]);
+
   useEffect(() => {
     requestNotificationPermissions();
     initPostHog();
   }, []);
+
+  useEffect(() => {
+    Linking.getInitialURL().then((url) => {
+      navigateFromDeepLink(url);
+    });
+
+    const sub = Linking.addEventListener("url", (event) => {
+      navigateFromDeepLink(event.url);
+    });
+
+    return () => {
+      sub.remove();
+    };
+  }, [navigateFromDeepLink]);
+
+  useEffect(() => {
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      const url = response?.notification?.request?.content?.data?.url;
+      if (typeof url === "string") {
+        navigateFromDeepLink(url);
+      }
+    });
+
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const url = response.notification.request.content.data?.url;
+      if (typeof url === "string") {
+        navigateFromDeepLink(url);
+      }
+    });
+
+    return () => {
+      sub.remove();
+    };
+  }, [navigateFromDeepLink]);
 
   if (!fontsLoaded) {
     return (

@@ -2,12 +2,12 @@
   "expo": {
     "name": "Prayer Journal",
     "slug": "prayer-journal",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
-    "icon": "./assets/logo.png",
+    "icon": "./assets/applogo.png",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/logo.png",
+      "image": "./assets/Splashlogo.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -58,6 +58,7 @@
     },
     "scheme": "prayer-journal",
     "plugins": [
+      "./plugins/withPrayerJournalWidget.js",
       "expo-router",
       "expo-font",
       "expo-apple-authentication",

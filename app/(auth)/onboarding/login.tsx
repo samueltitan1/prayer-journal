@@ -14,7 +14,6 @@ import { getSupabase } from "@/lib/supabaseClient";
 import { buttons, fonts, spacing } from "@/theme/theme";
 import { Ionicons } from "@expo/vector-icons";
 import * as AppleAuthentication from "expo-apple-authentication";
-import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -103,7 +102,7 @@ export default function Login() {
       Alert.alert("Enter your email", "Please type your email first.");
       return;
     }
-    const redirectTo = Linking.createURL("reset-password");
+    const redirectTo = "https://www.prayerjournal.app/reset-password";
     const { error } = await getSupabase().auth.resetPasswordForEmail(email, {
       redirectTo,
     });

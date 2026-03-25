@@ -707,7 +707,7 @@ export default function SettingsModal({
               <Text
                 style={[styles.settingLabel, { color: colors.textPrimary }]}
               >
-                Dark Mode
+                Night Mode
               </Text>
               <Text
                 style={[styles.settingSub, { color: colors.textSecondary }]}

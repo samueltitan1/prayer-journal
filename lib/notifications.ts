@@ -12,8 +12,80 @@ const STREAK_FOLLOWUP_KIND = "streak_followup";
 const NIGHTLY_KIND = "nightly_reflection_prompt";
 const REFLECTION_KIND = "reflection_ready";
 const INACTIVE_KIND = "inactive_nudge";
+const PRAY_DEEP_LINK = "prayer-journal://pray";
 const REFLECTION_NOTIFY_TIME_LOCAL = "09:00";
 const INACTIVE_NUDGE_STORAGE_PREFIX = "inactive_nudge_last_date_v1";
+
+const EXAMEN_QUESTIONS: string[] = [
+  "Where did you see God today?",
+  "What moment today are you most grateful for?",
+  "Where did you feel God's presence — and where did you feel distant from Him?",
+  "What prayer from this week has God already answered?",
+  "Who did God place on your heart today?",
+  "What are you carrying tonight that you need to hand over to God?",
+  "Where did you experience peace today? Where did you lose it?",
+  "What did today teach you about who God is?",
+  "Is there something you need to confess or release before you sleep?",
+  "What is God asking of you right now that you've been avoiding?",
+];
+
+const BIBLE_VERSES: Array<{ text: string; reference: string }> = [
+  {
+    text: "Do not be anxious about anything, but in every situation, by prayer and petition, present your requests to God.",
+    reference: "Philippians 4:6",
+  },
+  { text: "Call to me and I will answer you.", reference: "Jeremiah 33:3" },
+  {
+    text: "The prayer of a righteous person is powerful and effective.",
+    reference: "James 5:16",
+  },
+  { text: "Be still and know that I am God.", reference: "Psalm 46:10" },
+  {
+    text: "Come near to God and he will come near to you.",
+    reference: "James 4:8",
+  },
+  {
+    text: "Ask and it will be given to you; seek and you will find.",
+    reference: "Matthew 7:7",
+  },
+  {
+    text: "Pray continually, give thanks in all circumstances.",
+    reference: "1 Thessalonians 5:17–18",
+  },
+  {
+    text: "Cast all your anxiety on him because he cares for you.",
+    reference: "1 Peter 5:7",
+  },
+  {
+    text: "I lift up my eyes to the mountains — where does my help come from?",
+    reference: "Psalm 121:1",
+  },
+  {
+    text: "Let us approach God's throne of grace with confidence.",
+    reference: "Hebrews 4:16",
+  },
+];
+
+function getDayOfYear(date: Date) {
+  const start = new Date(date.getFullYear(), 0, 0);
+  const diff =
+    date.getTime() -
+    start.getTime() +
+    (start.getTimezoneOffset() - date.getTimezoneOffset()) * 60 * 1000;
+  return Math.floor(diff / (1000 * 60 * 60 * 24));
+}
+
+function getNightlyReflectionBody(date: Date): string {
+  const dayOfYear = getDayOfYear(date) || 1;
+  const index = Math.floor(dayOfYear / 2);
+
+  if (dayOfYear % 2 === 0) {
+    const verse = BIBLE_VERSES[index % BIBLE_VERSES.length];
+    return `${verse.text} — ${verse.reference}`;
+  }
+
+  return EXAMEN_QUESTIONS[index % EXAMEN_QUESTIONS.length];
+}
 
 async function cancelScheduledByKind(kind: string) {
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
@@ -219,12 +291,13 @@ export async function scheduleNightlyReflectionPrompt() {
   // Ensure we don't duplicate an older version
   await cancelScheduledByKind(NIGHTLY_KIND);
 
+  const body = getNightlyReflectionBody(new Date());
   return Notifications.scheduleNotificationAsync({
     content: {
       title: "Evening Examen",
-      body: "Where did you see God today? Where did you resist God? What are you grateful for?",
+      body,
       sound: Platform.OS === "ios" ? "default" : undefined,
-      data: { kind: NIGHTLY_KIND },
+      data: { kind: NIGHTLY_KIND, url: PRAY_DEEP_LINK },
     },
     trigger: {
       type: Notifications.SchedulableTriggerInputTypes.CALENDAR,

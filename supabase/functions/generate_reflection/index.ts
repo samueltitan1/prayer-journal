@@ -24,21 +24,23 @@ interface ReflectionRequest {
 serve(async (req: Request): Promise<Response> => {
   try {
     const url = new URL(req.url);
+    const isScheduledInvocation = req.headers.get("x-supabase-scheduled") === "true";
+    const authHeader = req.headers.get("Authorization") ?? "";
 
     // 1) Try query param first (Cron calls will use ?type=weekly)
     let type = (url.searchParams.get("type") ?? "") as any;
     let user_id: string | undefined = undefined;
-    
-    // 2) If not present, try JSON body
-    if (!type) {
-      try {
-        const body = (await req.json()) as Partial<ReflectionRequest>;
-        type = body.type as any;
-        user_id = body.user_id;
-      } catch {
-        // no body
-      }
+
+    // 2) Parse JSON body when available
+    let body: Partial<ReflectionRequest> = {};
+    try {
+      body = (await req.json()) as Partial<ReflectionRequest>;
+    } catch {
+      body = {};
     }
+
+    if (!type && body.type) type = body.type as any;
+    user_id = body.user_id;
     
     if (!["weekly", "monthly"].includes(type)) {
       return new Response(JSON.stringify({ error: "Missing or invalid type" }), {
@@ -47,14 +49,48 @@ serve(async (req: Request): Promise<Response> => {
       });
     }
     
-    const isScheduledInvocation = req.headers.get("x-supabase-scheduled") === "true";
-    // Decide execution mode: batch if user_id is not present
-    const isBatchMode = !user_id && isScheduledInvocation;
+    // Non-scheduled invocations must be authenticated and scoped to caller user.
+    if (!isScheduledInvocation) {
+      if (!authHeader.startsWith("Bearer ")) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
+
+    if (!isScheduledInvocation) {
+      const authed = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_ANON_KEY")!,
+        { global: { headers: { Authorization: authHeader } } }
+      );
+      const {
+        data: { user },
+        error: authError,
+      } = await authed.auth.getUser();
+      if (authError || !user?.id) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (user_id && user_id !== user.id) {
+        return new Response(JSON.stringify({ error: "Forbidden: user mismatch" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      user_id = user.id;
+    }
+
+    // Decide execution mode: batch only for scheduled invocation with no user_id.
+    const isBatchMode = !user_id && isScheduledInvocation;
     
     // -----------------------------------------------------
     // DATE HELPERS

@@ -14,7 +14,7 @@ import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { getSupabase } from "@/lib/supabaseClient";
 import { colors, fonts, spacing } from "@/theme/theme";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import {
   ErrorCode,
@@ -240,7 +240,7 @@ export default function OnboardingPaywall() {
         <Text style={styles.title}>We want you to try Prayer Journal for free</Text>
         <Text style={styles.subtitle}>No commitment - Cancel anytime</Text>
         <Image
-            source={require("@/assets/silvermockup.png")}
+            source={require("@/assets/Paywall.png")}
             style={styles.image}
             resizeMode="contain"
           />
