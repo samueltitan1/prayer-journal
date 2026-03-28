@@ -57,6 +57,11 @@
       "favicon": "./assets/favicon.png"
     },
     "scheme": "prayer-journal",
+    "autolinking": {
+      "exclude": [
+        "react-native-widget-extension"
+      ]
+    },
     "plugins": [
       "./plugins/withPrayerJournalWidget.js",
       "expo-router",

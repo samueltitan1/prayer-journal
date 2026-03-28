@@ -1,4 +1,5 @@
 import { colors, fonts } from "@/theme/theme";
+import * as Haptics from "expo-haptics";
 import React from "react";
 import { StyleProp, StyleSheet, Text, TextStyle, TouchableOpacity, ViewStyle } from "react-native";
 
@@ -17,10 +18,15 @@ export default function PrimaryButton({
   style,
   textStyle,
 }: PrimaryButtonProps) {
+  const handlePress = () => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onPress?.();
+  };
+
   return (
     <TouchableOpacity
       style={[styles.button, disabled && styles.disabled, style]}
-      onPress={onPress}
+      onPress={handlePress}
       activeOpacity={0.85}
       disabled={disabled}
     >

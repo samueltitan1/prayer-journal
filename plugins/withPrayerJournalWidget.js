@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
-const plist = require("@expo/plist");
+const plistModule = require("@expo/plist");
+const plist = plistModule.default ?? plistModule;
 const {
   withDangerousMod,
   withEntitlementsPlist,
@@ -24,6 +25,71 @@ const PODFILE_MARKER = "# >>> Inserted by withPrayerJournalWidget";
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function ensurePlistFile(plistPath, contents) {
+  if (fs.existsSync(plistPath)) return;
+  ensureDir(path.dirname(plistPath));
+  fs.writeFileSync(plistPath, plist.build(contents));
+}
+
+function findProjectName(iosRoot) {
+  const xcodeProj = fs
+    .readdirSync(iosRoot)
+    .find((entry) => entry.endsWith(".xcodeproj"));
+  return xcodeProj ? path.basename(xcodeProj, ".xcodeproj") : null;
+}
+
+function ensureExpectedInfoPlists(iosRoot, appBundleIdentifier) {
+  const projectName = findProjectName(iosRoot);
+  if (!projectName) return;
+
+  const appInfoPlistPath = path.join(iosRoot, projectName, "Info.plist");
+  ensurePlistFile(appInfoPlistPath, {
+    CFBundleDevelopmentRegion: "$(DEVELOPMENT_LANGUAGE)",
+    CFBundleDisplayName: projectName,
+    CFBundleExecutable: "$(EXECUTABLE_NAME)",
+    CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)",
+    CFBundleInfoDictionaryVersion: "6.0",
+    CFBundleName: "$(PRODUCT_NAME)",
+    CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)",
+    CFBundleShortVersionString: "$(MARKETING_VERSION)",
+    CFBundleVersion: "$(CURRENT_PROJECT_VERSION)",
+    LSRequiresIPhoneOS: true,
+    UIApplicationSceneManifest: {},
+    UILaunchStoryboardName: "SplashScreen",
+    UIRequiredDeviceCapabilities: ["arm64"],
+    UISupportedInterfaceOrientations: ["UIInterfaceOrientationPortrait"],
+  });
+
+  const widgetInfoPlistPath = path.join(iosRoot, IOS_WIDGET_DIR, "Info.plist");
+  ensurePlistFile(widgetInfoPlistPath, {
+    CFBundleDevelopmentRegion: "$(DEVELOPMENT_LANGUAGE)",
+    CFBundleDisplayName: TARGET_NAME,
+    CFBundleExecutable: "$(EXECUTABLE_NAME)",
+    CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)",
+    CFBundleInfoDictionaryVersion: "6.0",
+    CFBundleName: "$(PRODUCT_NAME)",
+    CFBundlePackageType: "XPC!",
+    CFBundleShortVersionString: "$(MARKETING_VERSION)",
+    CFBundleVersion: "$(CURRENT_PROJECT_VERSION)",
+    NSExtension: {
+      NSExtensionPointIdentifier: "com.apple.widgetkit-extension",
+    },
+    MinimumOSVersion: DEPLOYMENT_TARGET,
+    NSUserActivityTypes: [`${appBundleIdentifier}.${TARGET_NAME}`],
+  });
+}
+
+function withInfoPlistGuards(config) {
+  return withDangerousMod(config, [
+    "ios",
+    async (modConfig) => {
+      const iosRoot = modConfig.modRequest.platformProjectRoot;
+      ensureExpectedInfoPlists(iosRoot, modConfig.ios.bundleIdentifier);
+      return modConfig;
+    },
+  ]);
 }
 
 function copyFolderRecursive(sourceDir, targetDir) {
@@ -118,46 +184,55 @@ function withWidgetFileCopy(config) {
 function withWidgetTarget(config) {
   return withXcodeProject(config, (modConfig) => {
     const project = modConfig.modResults;
+    const widgetBundleIdentifier = `${modConfig.ios.bundleIdentifier}.${TARGET_NAME}`;
     const targetAlreadyExists = hasNativeTarget(project, TARGET_NAME);
-    if (targetAlreadyExists) {
-      return modConfig;
+
+    if (!targetAlreadyExists) {
+      const targetUuid = project.generateUuid();
+      const groupName = "Embed Foundation Extensions";
+      const widgetTargetPath = path.join(modConfig.modRequest.platformProjectRoot, TARGET_NAME);
+      ensureDir(widgetTargetPath);
+      const widgetFiles = collectWidgetFiles(widgetTargetPath);
+      const xCConfigurationList = addXCConfigurationList(project, {
+        targetName: TARGET_NAME,
+        currentProjectVersion: modConfig.ios.buildNumber || "1",
+        bundleIdentifier: widgetBundleIdentifier,
+        deploymentTarget: DEPLOYMENT_TARGET,
+        marketingVersion: modConfig.version,
+      });
+      const productFile = addProductFile(project, {
+        targetName: TARGET_NAME,
+        groupName,
+      });
+      const target = addToPbxNativeTargetSection(project, {
+        targetName: TARGET_NAME,
+        targetUuid,
+        productFile,
+        xCConfigurationList,
+      });
+      addToPbxProjectSection(project, target);
+      addTargetDependency(project, target);
+      addBuildPhases(project, {
+        targetUuid,
+        groupName,
+        productFile,
+        widgetFiles,
+      });
+      addPbxGroup(project, {
+        targetName: TARGET_NAME,
+        widgetFiles,
+      });
     }
 
-    const targetUuid = project.generateUuid();
-    const groupName = "Embed Foundation Extensions";
-    const bundleIdentifier = `${modConfig.ios.bundleIdentifier}.${TARGET_NAME}`;
-    const widgetTargetPath = path.join(modConfig.modRequest.platformProjectRoot, TARGET_NAME);
-    ensureDir(widgetTargetPath);
-    const widgetFiles = collectWidgetFiles(widgetTargetPath);
-    const xCConfigurationList = addXCConfigurationList(project, {
-      targetName: TARGET_NAME,
-      currentProjectVersion: modConfig.ios.buildNumber || "1",
-      bundleIdentifier,
-      deploymentTarget: DEPLOYMENT_TARGET,
-      marketingVersion: modConfig.version,
-    });
-    const productFile = addProductFile(project, {
-      targetName: TARGET_NAME,
-      groupName,
-    });
-    const target = addToPbxNativeTargetSection(project, {
-      targetName: TARGET_NAME,
-      targetUuid,
-      productFile,
-      xCConfigurationList,
-    });
-    addToPbxProjectSection(project, target);
-    addTargetDependency(project, target);
-    addBuildPhases(project, {
-      targetUuid,
-      groupName,
-      productFile,
-      widgetFiles,
-    });
-    addPbxGroup(project, {
-      targetName: TARGET_NAME,
-      widgetFiles,
-    });
+    const configs = project.pbxXCBuildConfigurationSection();
+    for (const value of Object.values(configs)) {
+      if (!value || typeof value !== "object" || !value.buildSettings) continue;
+      const bundleId = String(value.buildSettings.PRODUCT_BUNDLE_IDENTIFIER || "").replace(/"/g, "");
+      if (bundleId !== widgetBundleIdentifier) continue;
+
+      value.buildSettings.INFOPLIST_FILE = `${IOS_WIDGET_DIR}/Info.plist`;
+      value.buildSettings.GENERATE_INFOPLIST_FILE = "NO";
+    }
 
     return modConfig;
   });
@@ -248,6 +323,7 @@ module.exports = function withPrayerJournalWidget(config) {
   config = withEasAppExtensionConfig(config);
   config = withMainAppGroupEntitlement(config);
   config = withWidgetFileCopy(config);
+  config = withInfoPlistGuards(config);
   config = withWidgetTarget(config);
   config = withWidgetPodTarget(config);
   return config;

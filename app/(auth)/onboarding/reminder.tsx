@@ -13,6 +13,7 @@ import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { upsertUserSettingsOnboarding } from "@/lib/userSettings";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as Haptics from "expo-haptics";
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -114,6 +115,7 @@ export default function OnboardingReminder() {
           <TouchableOpacity
             style={styles.timePickerButton}
             onPress={() => {
+              void Haptics.selectionAsync();
               if (Platform.OS === 'android') {
                 setShowPicker(true);
               }
@@ -155,6 +157,7 @@ export default function OnboardingReminder() {
         <TouchableOpacity
           style={styles.skipButton}
           onPress={() => {
+            void Haptics.selectionAsync();
             trackOnboardingAction("reminder", "skip");
             if (user?.id) {
               void upsertUserSettingsOnboarding(user.id, {

@@ -16,6 +16,7 @@ import { getSupabase } from "@/lib/supabaseClient";
 import { buttons, colors, fonts, spacing } from "@/theme/theme";
 import { Ionicons } from "@expo/vector-icons";
 import * as AppleAuthentication from "expo-apple-authentication";
+import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -226,7 +227,10 @@ export default function SignUp() {
               placeholderTextColor={colors.textSecondary}
             />
             <TouchableOpacity
-              onPress={() => setShowPassword((prev) => !prev)}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                setShowPassword((prev) => !prev);
+              }}
               style={styles.iconWrapper}
             >
               <Ionicons
@@ -250,7 +254,10 @@ export default function SignUp() {
               gap: 8,
             },
           ]}
-          onPress={handleSignUp}
+          onPress={() => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            void handleSignUp();
+          }}
         >
           <Ionicons name="mail-outline" size={18} color="#FFFFFF" />
           <Text style={styles.continueButton}>Continue with email</Text>
@@ -262,7 +269,10 @@ export default function SignUp() {
           <View style={{ marginTop: spacing.sm }}>
             <TouchableOpacity
               style={[styles.appleButton, { backgroundColor: "#000000" }]}
-              onPress={handleAppleSignIn}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                void handleAppleSignIn();
+              }}
               activeOpacity={0.85}
             >
               <Ionicons name="logo-apple" size={18} color="#FFFFFF" />
@@ -275,7 +285,13 @@ export default function SignUp() {
             )}
           </View>
         )}
-        <TouchableOpacity style={styles.googleButton} onPress={handleGoogleSignIn}>
+        <TouchableOpacity
+          style={styles.googleButton}
+          onPress={() => {
+            void Haptics.selectionAsync();
+            void handleGoogleSignIn();
+          }}
+        >
           <Image source={require("@/assets/google-g.png")} style={styles.googleIcon} />
           <Text style={styles.googleText}>Continue with Google</Text>
         </TouchableOpacity>
@@ -289,7 +305,10 @@ export default function SignUp() {
           Already have an account?{" "}
           <Text
             style={[styles.link, { color: colors.accentGold }]}
-            onPress={() => router.replace("/(auth)/onboarding/login")}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              router.replace("/(auth)/onboarding/login");
+            }}
           >
             Sign in
           </Text>

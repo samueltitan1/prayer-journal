@@ -14,6 +14,7 @@ import { getSupabase } from "@/lib/supabaseClient";
 import { buttons, fonts, spacing } from "@/theme/theme";
 import { Ionicons } from "@expo/vector-icons";
 import * as AppleAuthentication from "expo-apple-authentication";
+import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -244,7 +245,10 @@ export default function Login() {
               placeholderTextColor={colors.textSecondary}
             />
             <TouchableOpacity
-              onPress={() => setShowPassword((prev) => !prev)}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                setShowPassword((prev) => !prev);
+              }}
               style={styles.iconWrapper}
             >
               <Ionicons
@@ -265,14 +269,23 @@ export default function Login() {
         )}
 
         {/* Forgot password */}
-        <Text style={[styles.forgot, { color: colors.textSecondary }]} onPress={handleForgotPassword}>
+        <Text
+          style={[styles.forgot, { color: colors.textSecondary }]}
+          onPress={() => {
+            void Haptics.selectionAsync();
+            void handleForgotPassword();
+          }}
+        >
           Forgot password?
         </Text>
 
         {/* Sign in button */}
         <TouchableOpacity
           style={[buttons.primary, { marginTop: spacing.sm }]}
-          onPress={handleLogin}
+          onPress={() => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            void handleLogin();
+          }}
         >
           <Text style={styles.continueButton}>SIGN IN</Text>
         </TouchableOpacity>
@@ -283,7 +296,10 @@ export default function Login() {
           <View style={{ marginTop: spacing.sm }}>
             <TouchableOpacity
               style={[styles.appleButton, { backgroundColor: "#000000" }]}
-              onPress={handleAppleSignIn}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                void handleAppleSignIn();
+              }}
               activeOpacity={0.85}
             >
               <Ionicons name="logo-apple" size={18} color="#FFFFFF" />
@@ -301,7 +317,10 @@ export default function Login() {
             styles.googleButton,
             { backgroundColor: colors.card, borderColor: colors.textSecondary },
           ]}
-          onPress={handleGoogleSignIn}
+          onPress={() => {
+            void Haptics.selectionAsync();
+            void handleGoogleSignIn();
+          }}
         >
           <Image source={require("@/assets/google-g.png")} style={styles.googleIcon} />
           <Text style={[styles.googleText, { color: colors.textPrimary }]}>
@@ -318,7 +337,10 @@ export default function Login() {
           Don’t have an account?{" "}
           <Text
             style={[styles.link, { color: colors.accent }]}
-            onPress={() => router.replace("/(auth)/onboarding/welcome")}
+            onPress={() => {
+              void Haptics.selectionAsync();
+              router.replace("/(auth)/onboarding/welcome");
+            }}
           >
             Sign up
           </Text>

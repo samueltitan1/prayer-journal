@@ -1,6 +1,7 @@
 import React from "react";
 import { StyleSheet, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import ProgressBar from "@/components/onboarding/ProgressBar";
 import { colors, spacing } from "@/theme/theme";
 
@@ -15,11 +16,16 @@ export default function OnboardingHeader({
   onBack,
   showBack = true,
 }: OnboardingHeaderProps) {
+  const handleBackPress = () => {
+    void Haptics.selectionAsync();
+    onBack?.();
+  };
+
   return (
     <View style={styles.headerRow}>
       {showBack ? (
         <TouchableOpacity
-          onPress={onBack}
+          onPress={handleBackPress}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           style={styles.backButton}
         >
