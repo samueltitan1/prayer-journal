@@ -22,6 +22,7 @@ const IOS_WIDGET_DIR = "PrayerJournalWidget";
 const APP_GROUP = "group.app.prayerjournal.widget";
 const DEPLOYMENT_TARGET = "16.0";
 const PODFILE_MARKER = "# >>> Inserted by withPrayerJournalWidget";
+const EXCLUDED_AUTOLINK_MODULE = "react-native-widget-extension";
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -247,8 +248,17 @@ function withWidgetPodTarget(config) {
         return modConfig;
       }
 
-      const podfile = fs.readFileSync(podfilePath, "utf8");
+      let podfile = fs.readFileSync(podfilePath, "utf8");
+
+      // Ensure Expo autolinking excludes the widget extension module for app target.
+      // We use this package only for config-plugin helpers; app target should not link it.
+      const excludedCall = `use_expo_modules!(exclude: ['${EXCLUDED_AUTOLINK_MODULE}'])`;
+      if (podfile.includes("use_expo_modules!") && !podfile.includes(excludedCall)) {
+        podfile = podfile.replace("use_expo_modules!", excludedCall);
+      }
+
       if (podfile.includes(`target '${TARGET_NAME}' do`)) {
+        fs.writeFileSync(podfilePath, podfile);
         return modConfig;
       }
 
