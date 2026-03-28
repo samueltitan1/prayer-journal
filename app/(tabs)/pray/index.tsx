@@ -393,7 +393,7 @@ useEffect(() => {
     const fetchSettings = async () => {
       const { data, error } = await getSupabase()
         .from("user_settings")
-        .select("daily_reminder_enabled, reminder_time, biometric_lock_enabled")
+        .select("daily_reminder_enabled, reminder_time")
         .eq("user_id", userId)
         .order("updated_at", { ascending: false })
         .limit(1)
@@ -408,8 +408,6 @@ useEffect(() => {
 
       const dbDailyEnabled = data?.daily_reminder_enabled ?? false;
       const dbReminderTime = (data as any)?.reminder_time ?? null;
-
-      setBiometricLockEnabled(data?.biometric_lock_enabled ?? false);
 
       // If DB says OFF but a reminder is actually scheduled on-device,
       // treat it as enabled and backfill the DB so the CTA doesn't show.
@@ -2231,45 +2229,6 @@ useEffect(() => {
         showSyncBanner("We’ll retry uploading your prayer when you’re online.");
         console.log("Saved offline (queued):", e?.message || e);
       }
-      try {
-        if (biometricSupported && !biometricLockEnabled) {
-          const prompted = await AsyncStorage.getItem("biometric_lock_prompted");
-          if (!prompted) {
-            await AsyncStorage.setItem("biometric_lock_prompted", "true");
-      
-            Alert.alert(
-              "Lock Prayer Journal?",
-              "Want to protect your prayers with Face ID / Touch ID?",
-              [
-                { text: "Not now", style: "cancel" },
-                {
-                  text: "Enable",
-                  onPress: async () => {
-                    try {
-                      const auth = await LocalAuthentication.authenticateAsync({
-                        promptMessage: "Enable Face ID / Touch ID",
-                        fallbackLabel: "Use Passcode",
-                      });
-                      if (!auth.success) return;
-      
-                      setBiometricLockEnabled(true);
-                      await getSupabase().from("user_settings").upsert({
-                        user_id: userId,
-                        biometric_lock_enabled: true,
-                      });
-                    } catch {
-                      // ignore
-                    }
-                  },
-                },
-              ]
-            );
-          }
-        }
-      } catch {
-        // ignore
-      }
-
       // Show Day X complete toast only once per calendar day, if not showing milestone modal
       try {
         const todayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD

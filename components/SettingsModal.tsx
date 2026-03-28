@@ -2,7 +2,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { BlurView } from "expo-blur";
-import * as LocalAuthentication from "expo-local-authentication";
 import { useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -21,6 +20,12 @@ import {
   View,
 } from "react-native";
 
+import {
+  getBiometricAvailability,
+  getBiometricLockEnabled as getBiometricLockEnabledStorage,
+  promptBiometricAuth,
+  setBiometricLockEnabled as setBiometricLockEnabledStorage,
+} from "../lib/biometricLock";
 import {
   cancelDailyPrayerNotification,
   cancelNightlyReflectionPrompt,
@@ -57,7 +62,6 @@ const DAILY_REMINDER_COLUMN_CANDIDATES = [
   "daily_reminder_enabled",
   "reminder_enabled",
 ] as const;
-const BIOMETRIC_LOCK_ENABLED_KEY = "@biometric_lock_enabled";
 
 export default function SettingsModal({
   visible,
@@ -114,28 +118,25 @@ export default function SettingsModal({
 
   const refreshBiometricAvailability = async () => {
     try {
-      const hasHardware = await LocalAuthentication.hasHardwareAsync();
-      const isEnrolled = hasHardware
-        ? await LocalAuthentication.isEnrolledAsync()
-        : false;
-      setBiometricHasHardware(Boolean(hasHardware));
-      setBiometricEnrolled(Boolean(isEnrolled));
-      const supported = Boolean(hasHardware && isEnrolled);
+      const availability = await getBiometricAvailability();
+      setBiometricHasHardware(availability.hasHardware);
+      setBiometricEnrolled(availability.isEnrolled);
+      const supported = availability.supported;
 
       if (!supported) {
         setBiometricLockEnabled(false);
-        await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "false");
-        return { hasHardware: Boolean(hasHardware), isEnrolled: Boolean(isEnrolled) };
+        await setBiometricLockEnabledStorage(false);
+        return { hasHardware: availability.hasHardware, isEnrolled: availability.isEnrolled };
       }
 
-      const stored = await AsyncStorage.getItem(BIOMETRIC_LOCK_ENABLED_KEY);
-      setBiometricLockEnabled(stored === "true");
+      const stored = await getBiometricLockEnabledStorage();
+      setBiometricLockEnabled(stored);
       return { hasHardware: true, isEnrolled: true };
     } catch {
       setBiometricHasHardware(false);
       setBiometricEnrolled(false);
       setBiometricLockEnabled(false);
-      await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "false");
+      await setBiometricLockEnabledStorage(false);
       return { hasHardware: false, isEnrolled: false };
     }
   };
@@ -540,30 +541,27 @@ export default function SettingsModal({
         if (!availability.hasHardware) {
           promptToOpenSettings();
           setBiometricLockEnabled(false);
-          await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "false");
+          await setBiometricLockEnabledStorage(false);
           return;
         }
 
         if (!availability.isEnrolled) {
           promptToOpenSettings();
           setBiometricLockEnabled(false);
-          await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "false");
+          await setBiometricLockEnabledStorage(false);
           return;
         }
   
         // Verify now so user knows it works
-        const auth = await LocalAuthentication.authenticateAsync({
-          promptMessage: "Enable Face ID / Touch ID",
-          fallbackLabel: "Use Passcode",
-        });
+        const auth = await promptBiometricAuth("Enable Face ID / Touch ID");
   
         if (!auth.success) {
           setBiometricLockEnabled(false);
-          await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "false");
+          await setBiometricLockEnabledStorage(false);
           return;
         }
         setBiometricLockEnabled(true);
-        await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "true");
+        await setBiometricLockEnabledStorage(true);
         showToast("Face ID / Touch ID lock enabled");
         return;
       } catch {
@@ -572,13 +570,13 @@ export default function SettingsModal({
           "We couldn’t enable Face ID / Touch ID lock right now. Please try again."
         );
         setBiometricLockEnabled(false);
-        await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "false");
+        await setBiometricLockEnabledStorage(false);
         return;
       }
     }
   
     setBiometricLockEnabled(false);
-    await AsyncStorage.setItem(BIOMETRIC_LOCK_ENABLED_KEY, "false");
+    await setBiometricLockEnabledStorage(false);
     showToast("Face ID / Touch ID lock disabled");
   };
 

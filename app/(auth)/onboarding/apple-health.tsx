@@ -58,7 +58,7 @@ export default function OnboardingAppleHealth() {
         progress={getOnboardingProgress("apple-health")}
         onBack={() => {
           trackOnboardingAction("apple-health", "back");
-          router.replace("/(auth)/onboarding/privacy");
+          router.replace("/(auth)/onboarding/biometric-setup");
         }}
       />
       <View style={styles.container}>

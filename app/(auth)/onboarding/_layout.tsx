@@ -12,6 +12,7 @@ export default function OnboardingLayout() {
       <Stack.Screen name="welcome" />
       <Stack.Screen name="survey" />
       <Stack.Screen name="privacy" />
+      <Stack.Screen name="biometric-setup" />
       <Stack.Screen name="apple-health" />
       <Stack.Screen name="login" />
       <Stack.Screen name="reminder" />

@@ -53,7 +53,7 @@ export default function OnboardingPrivacy() {
           title="Continue"
           onPress={() => {
             trackOnboardingAction("privacy", "continue");
-            router.replace("/(auth)/onboarding/apple-health");
+            router.replace("/(auth)/onboarding/biometric-setup");
           }}
         />
       </View>

@@ -9,17 +9,22 @@ import * as Notifications from "expo-notifications";
 import * as Linking from "expo-linking";
 import { Stack, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, AppState, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AuthProvider, useAuth } from "@/contexts/AuthProvider";
+import {
+  getBiometricLockEnabled,
+  hasSeenBiometricOnboarding,
+  promptBiometricAuth,
+} from "@/lib/biometricLock";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { requestNotificationPermissions } from "@/lib/notifications";
 import { getOnboardingResponsesSnapshot, upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { identifyUser, initPostHog, resetAnalytics } from "@/lib/posthog";
 import "@/lib/prayerWalkLocationTask";
-import { refreshAppleSubscriptionIfNeeded } from "@/lib/refreshSubscription";
+import { refreshSubscriptionIfNeeded } from "@/lib/refreshSubscription";
 import { DevBuildGate } from "@/lib/runtime/requireDevBuild";
 import { getEntitlement } from "@/lib/subscriptions";
 
@@ -27,11 +32,12 @@ function RootNavigator() {
   const auth = useAuth();
   if (!auth) return null;
 
+  const router = useRouter();
   const { user, loading } = auth;
   const userId = user?.id ?? null;
   const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
-  const [onboardingStep, setOnboardingStep] = useState<string | null>(null);
   const [entitled, setEntitled] = useState<boolean | null>(null);
+  const [biometricOnboardingSeen, setBiometricOnboardingSeen] = useState<boolean | null>(null);
   const paywallUpsertedForUserRef = useRef<string | null>(null);
   const lastSnapshotLogKeyRef = useRef<string | null>(null);
 
@@ -49,13 +55,16 @@ function RootNavigator() {
     const run = async () => {
       if (!userId) {
         setOnboardingComplete(null);
-        setOnboardingStep(null);
         setEntitled(null);
+        setBiometricOnboardingSeen(null);
         paywallUpsertedForUserRef.current = null;
         lastSnapshotLogKeyRef.current = null;
         return;
       }
-      await refreshAppleSubscriptionIfNeeded(userId);
+      const seen = await hasSeenBiometricOnboarding();
+      if (cancelled) return;
+      setBiometricOnboardingSeen(seen);
+      await refreshSubscriptionIfNeeded(userId);
       if (cancelled) return;
       const [onboarding, entitlement] = await Promise.all([
         getOnboardingResponsesSnapshot(userId),
@@ -66,7 +75,6 @@ function RootNavigator() {
       const step = onboarding?.onboarding_step ?? null;
       const entitlementActive = entitlement.active;
       setOnboardingComplete(completed);
-      setOnboardingStep(step);
       setEntitled(entitlement.active);
       if (__DEV__) {
         const snapshotLogKey = `${userId}:${String(completed)}:${String(step)}:${String(
@@ -89,6 +97,17 @@ function RootNavigator() {
   }, [userId]);
 
   useEffect(() => {
+    if (!userId) return;
+    if (onboardingComplete !== true) return;
+    if (biometricOnboardingSeen !== false) return;
+    void upsertOnboardingResponses(userId, {
+      onboarding_step: "biometric-setup",
+      onboarding_last_seen_at: new Date().toISOString(),
+    });
+    router.replace("/(auth)/onboarding/biometric-setup");
+  }, [biometricOnboardingSeen, onboardingComplete, router, userId]);
+
+  useEffect(() => {
     if (!userId) {
       paywallUpsertedForUserRef.current = null;
       return;
@@ -99,7 +118,10 @@ function RootNavigator() {
     }
   }, [entitled, onboardingComplete, userId]);
 
-  if (loading || (userId && (onboardingComplete === null || entitled === null))) {
+  if (
+    loading ||
+    (userId && (onboardingComplete === null || entitled === null || biometricOnboardingSeen === null))
+  ) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
         <ActivityIndicator />
@@ -121,6 +143,8 @@ function RootNavigator() {
         <Stack.Screen name="(auth)" />
       ) : onboardingComplete === false ? (
         <Stack.Screen name="(auth)" />
+      ) : biometricOnboardingSeen === false ? (
+        <Stack.Screen name="(auth)" />
       ) : entitled === false ? (
         <Stack.Screen name="(auth)" />
       ) : (
@@ -128,6 +152,97 @@ function RootNavigator() {
         <Stack.Screen name="(tabs)"/>
       )}
     </Stack>
+  );
+}
+
+function BiometricLockGate({ children }: { children: any }) {
+  const auth = useAuth();
+  if (!auth) return children;
+  const { user, loading } = auth;
+  const userId = user?.id ?? null;
+
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [checking, setChecking] = useState(true);
+  const unlockingRef = useRef(false);
+  const appStateRef = useRef(AppState.currentState);
+
+  const unlock = useCallback(async () => {
+    if (!biometricEnabled) return;
+    if (unlockingRef.current) return;
+    unlockingRef.current = true;
+    try {
+      const result = await promptBiometricAuth("Unlock Prayer Journal");
+      if (result.success) setLocked(false);
+    } finally {
+      unlockingRef.current = false;
+    }
+  }, [biometricEnabled]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!userId || loading) {
+        setBiometricEnabled(false);
+        setLocked(false);
+        setChecking(false);
+        return;
+      }
+      const enabled = await getBiometricLockEnabled();
+      if (cancelled) return;
+      setBiometricEnabled(enabled);
+      if (!enabled) {
+        setLocked(false);
+        setChecking(false);
+        return;
+      }
+      setLocked(true);
+      setChecking(false);
+      await unlock();
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, unlock, userId]);
+
+  useEffect(() => {
+    if (!userId || !biometricEnabled) return;
+    const sub = AppState.addEventListener("change", (nextState) => {
+      const prevState = appStateRef.current;
+      appStateRef.current = nextState;
+      if (nextState === "background" || nextState === "inactive") {
+        setLocked(true);
+        return;
+      }
+      if (nextState === "active" && prevState !== "active" && locked) {
+        void unlock();
+      }
+    });
+    return () => sub.remove();
+  }, [biometricEnabled, locked, unlock, userId]);
+
+  if (checking) {
+    return (
+      <View style={styles.lockWrap}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ flex: 1 }}>
+      {children}
+      {locked && biometricEnabled ? (
+        <View style={styles.lockOverlay}>
+          <Text style={styles.lockTitle}>App Locked</Text>
+          <Text style={styles.lockBody}>Unlock with Face ID / Touch ID to continue.</Text>
+          <TouchableOpacity style={styles.lockButton} onPress={() => void unlock()}>
+            <Text style={styles.lockButtonText}>Unlock</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -202,7 +317,9 @@ export default function RootLayout() {
         <ThemeProvider>
           <AuthProvider>
             <SafeAreaProvider>
-              <RootNavigator />
+              <BiometricLockGate>
+                <RootNavigator />
+              </BiometricLockGate>
             </SafeAreaProvider>
           </AuthProvider>
         </ThemeProvider>
@@ -210,3 +327,40 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
+
+const styles = StyleSheet.create({
+  lockWrap: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  lockOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+  },
+  lockTitle: {
+    fontSize: 24,
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
+  lockBody: {
+    marginTop: 10,
+    fontSize: 14,
+    color: "#FFFFFF",
+    textAlign: "center",
+  },
+  lockButton: {
+    marginTop: 16,
+    backgroundColor: "#E3C67B",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  lockButtonText: {
+    color: "#2F2F2F",
+    fontWeight: "700",
+  },
+});
