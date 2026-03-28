@@ -1,5 +1,6 @@
 // contexts/AuthProvider.tsx
 import { scheduleDailyPrayerNotification } from "@/lib/notifications";
+import { syncRevenueCatIdentity } from "@/lib/revenuecat";
 import { getSupabase } from "@/lib/supabaseClient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { User } from "@supabase/supabase-js";
@@ -93,6 +94,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       if (nextUser?.id) {
         await applyPendingReminderIfAny(nextUser.id);
       }
+      try {
+        await syncRevenueCatIdentity(nextUser?.id ?? null);
+      } catch (error) {
+        console.warn("RevenueCat identity sync failed", error);
+      }
     });
 
     // Keep refresh running only while app is active (RN best practice).
@@ -115,6 +121,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         setUser(null);
         setEmailConfirmed(false);
         setLoading(false);
+        try {
+          await syncRevenueCatIdentity(null);
+        } catch (error) {
+          console.warn("RevenueCat sign-out sync failed", error);
+        }
         return;
       }
     
@@ -125,6 +136,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     
       if (nextUser?.id) {
         await applyPendingReminderIfAny(nextUser.id);
+      }
+      try {
+        await syncRevenueCatIdentity(nextUser?.id ?? null);
+      } catch (error) {
+        console.warn("RevenueCat identity sync failed", error);
       }
     });
 

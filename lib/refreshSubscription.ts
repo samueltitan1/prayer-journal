@@ -2,11 +2,13 @@ import { getSupabase } from "@/lib/supabaseClient";
 
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 
-export async function refreshAppleSubscriptionIfNeeded(userId: string) {
+export async function refreshSubscriptionIfNeeded(userId: string) {
   try {
     const { data, error } = await getSupabase()
       .from("subscriptions")
-      .select("provider, apple_transaction_id, apple_product_id, last_validated_at")
+      .select(
+        "provider, apple_transaction_id, apple_product_id, revenuecat_app_user_id, last_validated_at"
+      )
       .eq("user_id", userId)
       .maybeSingle();
 
@@ -15,17 +17,14 @@ export async function refreshAppleSubscriptionIfNeeded(userId: string) {
       return;
     }
 
-    if (!data || data.provider !== "apple") {
+    if (!data) {
       if (__DEV__) console.log("subscription refresh skipped");
       return;
     }
 
     const transactionId = data.apple_transaction_id;
     const productId = data.apple_product_id;
-    if (!transactionId || !productId) {
-      if (__DEV__) console.log("subscription refresh skipped");
-      return;
-    }
+    const revenueCatAppUserId = data.revenuecat_app_user_id ?? userId;
 
     const lastValidatedAt = data.last_validated_at
       ? new Date(data.last_validated_at).getTime()
@@ -40,10 +39,18 @@ export async function refreshAppleSubscriptionIfNeeded(userId: string) {
     }
 
     if (__DEV__) console.log("subscription refresh triggered");
-    const { error: invokeError } = await getSupabase().functions.invoke(
-      "validate-apple-subscription",
-      { body: { transactionId, productId } }
-    );
+    let invokeError: { message?: string } | null = null;
+    if (revenueCatAppUserId) {
+      const result = await getSupabase().functions.invoke("sync-revenuecat-subscription", {
+        body: { appUserId: revenueCatAppUserId },
+      });
+      invokeError = result.error;
+    } else if (data.provider === "apple" && transactionId && productId) {
+      const result = await getSupabase().functions.invoke("validate-apple-subscription", {
+        body: { transactionId, productId },
+      });
+      invokeError = result.error;
+    }
     if (invokeError) {
       console.warn("subscription refresh failed", invokeError);
     }
