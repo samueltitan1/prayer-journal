@@ -13,6 +13,7 @@ export type OnboardingResponsesPayload = {
   q6?: string;
   q7?: string[];
   q8?: string[];
+  q9?: string[];
 };
 
 export type OnboardingResponsesSnapshot = {
@@ -22,7 +23,7 @@ export type OnboardingResponsesSnapshot = {
   onboarding_last_seen_at?: string | null;
 };
 
-const ARRAY_KEYS = new Set(["q7", "q8"]);
+const ARRAY_KEYS = new Set(["q7", "q8", "q9"]);
 
 const sanitizePayload = (payload: OnboardingResponsesPayload) => {
   const cleaned: Record<string, unknown> = {};

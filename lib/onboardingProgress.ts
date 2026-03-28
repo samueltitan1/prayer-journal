@@ -1,4 +1,4 @@
-export const SURVEY_QUESTION_COUNT = 7;
+export const SURVEY_QUESTION_COUNT = 9;
 
 export const ONBOARDING_FLOW_STEPS = [
   "welcome",
@@ -9,7 +9,10 @@ export const ONBOARDING_FLOW_STEPS = [
   "survey-5",
   "survey-6",
   "survey-7",
+  "survey-8",
+  "survey-9",
   "privacy",
+  "biometric-setup",
   "apple-health",
   "reminder",
   "preparing",

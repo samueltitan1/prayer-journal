@@ -16,8 +16,9 @@ import { getOnboardingProgress, SURVEY_QUESTION_COUNT } from "@/lib/onboardingPr
 import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { colors, fonts, spacing } from "@/theme/theme";
 import { FontAwesome, FontAwesome5, Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 type QuestionType = "single" | "multi" | "info";
@@ -45,7 +46,7 @@ type SurveyQuestion =
       infoKey: "sp1" | "sp2" | "sp3";
     };
 
-type StorageKey = "q1" | "q2" | "q3" | "q4" | "q5" | "q7" | "q8";
+type StorageKey = "q1" | "q2" | "q3" | "q4" | "q5" | "q6" | "q7" | "q8" | "q9";
 type QuestionWithStorage = Extract<SurveyQuestion, { storageKey: StorageKey }>;
 
 const QUESTION_KEY_MAP: Record<StorageKey, string> = {
@@ -54,8 +55,10 @@ const QUESTION_KEY_MAP: Record<StorageKey, string> = {
   q3: "q3_app_experience",
   q4: "q4_journaling_challenge",
   q5: "q5_reflection_habits",
+  q6: "q6_remembering_words",
   q7: "q7_prayer_style",
   q8: "q8_journaling_goals",
+  q9: "q9_how_god_speaks",
 };
 
 const QUESTIONS: SurveyQuestion[] = [
@@ -121,6 +124,31 @@ const QUESTIONS: SurveyQuestion[] = [
     ],
   },
   {
+    id: 8,
+    text: "How does God speak to you?",
+    subtext: "(Select all that apply)",
+    type: "multi",
+    storageKey: "q9",
+    options: [
+      { label: "Through Scripture / the Bible", value: "scripture" },
+      { label: "Through prayer and quiet time", value: "prayer-quiet" },
+      { label: "Through dreams or visions", value: "dreams-visions" },
+      {
+        label: "Through other people (friends, pastor, community)",
+        value: "other-people",
+      },
+      {
+        label: "Through circumstances and open/closed doors",
+        value: "circumstances",
+      },
+      {
+        label: "I'm not sure yet / still learning to hear Him",
+        value: "still-learning",
+      },
+      { label: "Other", value: "other", isOther: true },
+    ],
+  },
+  {
     id: 5,
     text: "What's your biggest challenge when it comes to journaling your prayers?",
     type: "single",
@@ -136,14 +164,35 @@ const QUESTIONS: SurveyQuestion[] = [
   },
   {
     id: 6,
-    text: "How do you currently reflect on your prayers?",
+    text: "How do you currently reflect on your prayers and dreams?",
     type: "single",
     storageKey: "q5",
     options: [
       { label: "I try to remember them mentally", value: "mental" },
       { label: "I write them down somewhere", value: "write-down" },
-      { label: "I don't usually reflect back on prayers", value: "dont-reflect" },
+      { label: "I don't usually reflect back on prayers and dreams", value: "dont-reflect" },
       { label: "I wish I had a better way to do this", value: "wish-better" },
+      { label: "Other", value: "other", isOther: true },
+    ],
+  },
+  {
+    id: 9,
+    text: "How do you remember what God has told or shown you?",
+    type: "single",
+    storageKey: "q6",
+    options: [
+      { label: "I try to hold onto it mentally", value: "mentally" },
+      {
+        label: "I write it down in a notebook or journal",
+        value: "notebook-journal",
+      },
+      { label: "I take notes on my phone", value: "phone-notes" },
+      { label: "I share it with someone I trust", value: "share-trusted" },
+      { label: "I often forget before I can record it", value: "often-forget" },
+      {
+        label: "I don't have a system yet, but I want one",
+        value: "no-system-yet",
+      },
       { label: "Other", value: "other", isOther: true },
     ],
   },
@@ -156,12 +205,12 @@ const QUESTIONS: SurveyQuestion[] = [
   },
   {
     id: 7,
-    text: "What do you hope to gain from journaling your prayers?",
+    text: "What do you hope to gain from journaling your prayers and dreams?",
     subtext: "(Select all that apply)",
     type: "multi",
     storageKey: "q8",
     options: [
-      { label: "Remember what I've prayed about", value: "remember" },
+      { label: "Remember what I've prayed and dreamed about", value: "remember" },
       { label: "See how God answers over time", value: "answers-over-time" },
       { label: "Pray more consistently", value: "more-consistent" },
       { label: "Notice patterns in my spiritual life", value: "notice-patterns" },
@@ -299,6 +348,7 @@ export default function OnboardingSurvey() {
   const handleSelect = (value: string) => {
     if (!question) return;
     if (question.type === "info") return;
+    void Haptics.selectionAsync();
     if (question.type === "single") {
       setSelectedSingle(value);
       if ("storageKey" in question) {
@@ -335,7 +385,7 @@ export default function OnboardingSurvey() {
     const payload: Record<string, string | string[]> = {};
     const storageKey = currentQuestion.storageKey;
     if (Array.isArray(value)) {
-      if (storageKey === "q7" || storageKey === "q8") {
+      if (storageKey === "q7" || storageKey === "q8" || storageKey === "q9") {
         if (value.every((v) => typeof v === "string")) {
           payload[storageKey] = value;
         } else {
