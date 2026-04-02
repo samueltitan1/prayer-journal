@@ -36,6 +36,7 @@ export default function Login() {
   const { colors } = useTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [emailLoading, setEmailLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [appleLoading, setAppleLoading] = useState(false);
@@ -64,38 +65,49 @@ export default function Login() {
   }, [errorMessage]);
 
   const handleLogin = async () => {
+    if (emailLoading) return;
+
     // Basic guard to avoid confusing Supabase errors
     if (!email || !password) {
       setErrorMessage("Please enter your email and password.");
       return;
     }
+
+    setErrorMessage(null);
+    setEmailLoading(true);
     trackSignupMethodSelected("email");
-  
-    const { error } = await getSupabase().auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
-  
-    if (error) {
-      trackAuthResult("email", "error", error.name || error.code || "auth_error");
-      const msg = (error.message || "").toLowerCase();
-  
-      // Common for new accounts if email isn't confirmed yet
-      if (msg.includes("email") && (msg.includes("confirm") || msg.includes("confirmed"))) {
-        setErrorMessage("Please confirm your email, then sign in again.");
+
+    try {
+      const { error } = await getSupabase().auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        trackAuthResult("email", "error", error.name || error.code || "auth_error");
+        const msg = (error.message || "").toLowerCase();
+
+        // Common for new accounts if email isn't confirmed yet
+        if (msg.includes("email") && (msg.includes("confirm") || msg.includes("confirmed"))) {
+          setErrorMessage("Please confirm your email, then sign in again.");
+          return;
+        }
+
+        setErrorMessage("Incorrect email or password. Please try again.");
         return;
       }
-  
-      setErrorMessage("Incorrect email or password. Please try again.");
-      return;
-    }
-  
-    setErrorMessage(null);
-    trackAuthResult("email", "success");
-    trackOnboardingAction("login", "continue");
 
-    // Root layout will route to the correct destination after auth state updates.
-    return;
+      trackAuthResult("email", "success");
+      trackOnboardingAction("login", "continue");
+
+      // Force app shell resolver to run immediately.
+      router.replace("/");
+    } catch {
+      trackAuthResult("email", "error", "unexpected_exception");
+      setErrorMessage("Sign in failed. Please try again.");
+    } finally {
+      setEmailLoading(false);
+    }
   };
 
   const handleForgotPassword = async () => {
@@ -196,11 +208,11 @@ export default function Login() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <Image source={require("@/assets/logo.png")} style={styles.logo} />
+      <Image source={require("@/assets/Logo2.1.png")} style={styles.logo} />
       <Text style={[styles.appTitle, { color: colors.textPrimary }]}>Prayer Journal</Text>
 
       <AuthCard style={{ backgroundColor: colors.card }}>
-        <Text style={[styles.title, { color: colors.textPrimary }]}>Welcome back</Text>
+
 
         {/* Email */}
         <View style={styles.fieldGroup}>
@@ -282,12 +294,13 @@ export default function Login() {
         {/* Sign in button */}
         <TouchableOpacity
           style={[buttons.primary, { marginTop: spacing.sm }]}
+          disabled={emailLoading}
           onPress={() => {
             void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             void handleLogin();
           }}
         >
-          <Text style={styles.continueButton}>SIGN IN</Text>
+          <Text style={styles.continueButton}>{emailLoading ? "SIGNING IN..." : "SIGN IN"}</Text>
         </TouchableOpacity>
 
         <OrDivider />
@@ -356,11 +369,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingTop: spacing.xl,
   },
-  logo: { width: 48, height: 48, marginBottom: spacing.xs },
+  logo: { width: 58, height: 58, marginBottom: spacing.xs, marginTop: spacing.xl },
   appTitle: {
     fontFamily: fonts.heading,
-    fontSize: 20,
-    marginBottom: spacing.lg,
+    fontSize: 22,
+    marginBottom: spacing.xl,
   },
   title: {
     fontFamily: fonts.heading,

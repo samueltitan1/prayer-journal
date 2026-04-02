@@ -1,4 +1,3 @@
-import LinkText from "@/components/onboarding/LinkText";
 import OnboardingHeader from "@/components/onboarding/OnboardingHeader";
 import OnboardingShell from "@/components/onboarding/OnboardingShell";
 import { useAuth } from "@/contexts/AuthProvider";
@@ -14,8 +13,8 @@ import {
 } from "@/lib/revenuecat";
 import { getSupabase } from "@/lib/supabaseClient";
 import { colors, fonts, spacing } from "@/theme/theme";
-import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import RevenueCatUI from "react-native-purchases-ui";
@@ -186,13 +185,13 @@ export default function OnboardingPaywall() {
         {syncing ? <ActivityIndicator style={styles.spinner} /> : null}
         {purchaseError ? <Text style={styles.purchaseError}>{purchaseError}</Text> : null}
 
-        <View style={styles.legalRow}>
+        {/*<View style={styles.legalRow}>
           <LinkText text="Terms" underlineText="Terms" onPress={openTerms} />
           <Text style={styles.legalDivider}>•</Text>
           <LinkText text="Privacy" underlineText="Privacy" onPress={openPrivacy} />
           <Text style={styles.legalDivider}>•</Text>
           <LinkText text="Restore" underlineText="Restore" onPress={handleRestore} />
-        </View>
+        </View>*/}
       </View>
 
       {showVerifyReminder ? (

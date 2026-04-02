@@ -4,10 +4,10 @@
     "slug": "prayer-journal",
     "version": "1.1.0",
     "orientation": "portrait",
-    "icon": "./assets/applogo.png",
+    "icon": "./assets/appicon.png",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/Splashlogo.png",
+      "image": "./assets/splashicon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -44,7 +44,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/splashicon.png",
         "backgroundColor": "#ffffff"
       },
       "package": "com.prayerjournal.app",
@@ -54,7 +54,7 @@
       ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.ico"
     },
     "scheme": "prayer-journal",
     "autolinking": {

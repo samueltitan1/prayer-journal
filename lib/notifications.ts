@@ -15,6 +15,7 @@ const INACTIVE_KIND = "inactive_nudge";
 const PRAY_DEEP_LINK = "prayer-journal://pray";
 const REFLECTION_NOTIFY_TIME_LOCAL = "09:00";
 const INACTIVE_NUDGE_STORAGE_PREFIX = "inactive_nudge_last_date_v1";
+const TRIAL_REMINDER_KIND = "trial_end_reminder";
 
 const EXAMEN_QUESTIONS: string[] = [
   "Where did you see God today?",
@@ -140,6 +141,55 @@ export async function requestNotificationPermissions() {
     return newStatus === "granted";
   }
   return true;
+}
+
+export async function getNotificationPermissionStatus() {
+  if (Platform.OS === "web") return "denied";
+  const { status } = await Notifications.getPermissionsAsync();
+  return status;
+}
+
+export async function scheduleTrialEndingReminderNotification(params: {
+  dedupeKey: string;
+  triggerAt: Date;
+  title: string;
+  body: string;
+}) {
+  if (Platform.OS === "web") return { scheduled: false, reason: "unsupported_platform" as const };
+
+  const status = await getNotificationPermissionStatus();
+  if (status !== "granted") {
+    return { scheduled: false, reason: "permission_not_granted" as const };
+  }
+
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  const existing = scheduled.some(
+    (n: any) =>
+      n?.content?.data?.kind === TRIAL_REMINDER_KIND &&
+      n?.content?.data?.dedupe_key === params.dedupeKey
+  );
+  if (existing) {
+    return { scheduled: false, reason: "already_scheduled" as const };
+  }
+
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: params.title,
+      body: params.body,
+      sound: Platform.OS === "ios" ? "default" : undefined,
+      data: {
+        kind: TRIAL_REMINDER_KIND,
+        dedupe_key: params.dedupeKey,
+        url: PRAY_DEEP_LINK,
+      },
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: params.triggerAt,
+    },
+  });
+
+  return { scheduled: true, reason: "scheduled" as const };
 }
 
 /**

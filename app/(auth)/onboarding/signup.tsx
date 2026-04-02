@@ -43,6 +43,53 @@ export default function SignUp() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
 
+  const resendSignupVerification = async (targetEmail: string) => {
+    const cleanEmail = targetEmail.trim();
+    if (!cleanEmail) return;
+    const { error } = await getSupabase().auth.resend({
+      type: "signup",
+      email: cleanEmail,
+    });
+    if (error) {
+      Alert.alert("Couldn’t resend email", "Please try again in a moment.");
+      return;
+    }
+    Alert.alert("Check your inbox", "We sent a new verification email.");
+  };
+
+  const handleExistingAccountConflict = (targetEmail: string) => {
+    const cleanEmail = targetEmail.trim();
+    Alert.alert(
+      "Account already exists",
+      "This email is already registered. Sign in to continue or resend verification if you haven’t confirmed yet.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign in",
+          onPress: () => {
+            router.replace(`/(auth)/onboarding/login?email=${encodeURIComponent(cleanEmail)}`);
+          },
+        },
+        {
+          text: "Resend verification",
+          onPress: () => {
+            void resendSignupVerification(cleanEmail);
+          },
+        },
+      ]
+    );
+  };
+
+  const isExistingEmailError = (message: string) => {
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes("already registered") ||
+      normalized.includes("already been registered") ||
+      normalized.includes("already exists") ||
+      normalized.includes("user already registered")
+    );
+  };
+
   useEffect(() => {
     trackOnboardingStepViewed("signup");
     void upsertOnboardingResponses(user?.id, {
@@ -60,6 +107,10 @@ export default function SignUp() {
     });
     if (error) {
       trackAuthResult("email", "error", error.name || error.code || "auth_error");
+      if (isExistingEmailError(error.message || "")) {
+        handleExistingAccountConflict(email);
+        return;
+      }
       Alert.alert("Sign up failed", error.message);
     } else {
       trackAuthResult("email", "success");
@@ -171,10 +222,11 @@ export default function SignUp() {
           router.replace("/(auth)/onboarding/reminder");
         }}
       />
+      
       <Text style={[styles.appTitle, { color: colors.textPrimary }]}>Save your progress</Text>
 
-      <AuthCard style={{ backgroundColor: "#FFFFFF" }}>
-        
+      <AuthCard style={styles.AuthCard}>
+      
         {/* Name */}
         <View style={styles.fieldGroup}>
           <Text style={[styles.label, { color: colors.textPrimary }]}>Name</Text>
@@ -328,18 +380,20 @@ const styles = StyleSheet.create({
   logo: {
     width: 48,
     height: 48,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.md,
+    alignSelf: "center",
   },
   appTitle: {
     fontFamily: fonts.heading,
-    fontSize: 20,
+    fontSize: 22,
+    marginTop: spacing.xl,
     marginBottom: spacing.lg,
   },
   title: {
     fontFamily: fonts.heading,
     fontSize: 18,
     textAlign: "center",
-    marginBottom: spacing.md,
+    marginBottom: spacing.xs,
   },
   subtext: {
     fontFamily: fonts.body,
@@ -436,6 +490,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#FFFFFF",
   },
-  
-
+  AuthCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: spacing.xl,
+    marginTop: spacing.xl,
+    marginBottom: spacing.xl,
+  },
 });

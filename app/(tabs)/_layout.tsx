@@ -7,8 +7,8 @@ import { Tabs, useRouter, useSegments } from "expo-router";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Image, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { fonts, spacing } from "../../theme/theme";
 import { useTheme } from "../../contexts/ThemeContext";
+import { fonts, spacing } from "../../theme/theme";
 
 type TabsChromeContextValue = {
   openSettings: () => void;
@@ -154,7 +154,7 @@ export default function TabsLayout() {
             <View style={[styles.header, { borderBottomColor: headerBorderColor }]}>
               <View style={styles.leftHeader}>
                 <Image
-                  source={require("../../assets/Logo2.png")}
+                  source={require("../../assets/Logo2.1.png")}
                   style={{ width: 44, height: 44, marginRight: 8 }}
                   resizeMode="contain"
                 />

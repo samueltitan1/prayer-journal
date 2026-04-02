@@ -11,7 +11,6 @@ import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
-import * as LocalAuthentication from "expo-local-authentication";
 import * as Location from "expo-location";
 import { Pedometer } from "expo-sensors";
 import { useRouter } from "expo-router";
@@ -94,7 +93,7 @@ const IMAGE_MEDIA_TYPES: any = (ImagePicker as any)?.MediaType?.Images
 export default function PrayScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { openSettings, settingsRefreshNonce, setHeaderVisible } = useTabsChrome();
+  const { openSettings, settingsRefreshNonce } = useTabsChrome();
 
   const [prayState, setPrayState] = useState<PrayState>("idle");
   const [secondsLeft, setSecondsLeft] = useState(MAX_SECONDS_DEFAULT);
@@ -124,12 +123,6 @@ export default function PrayScreen() {
   const [dayCount, setDayCount] = useState<number>(0);
 
   const [dailyReminderEnabled, setDailyReminderEnabled] = useState(false);
-  const [biometricLockEnabled, setBiometricLockEnabled] = useState(false);
-  const [biometricSupported, setBiometricSupported] = useState(false);
-  const [isLocked, setIsLocked] = useState(false);
-  const isUnlockingRef = useRef(false);
-  const isLockedRef = useRef(false);
-  const didInitialBiometricCheckForUserRef = useRef<string | null>(null);
 
   const [userId, setUserId] = useState<string | null>(null);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
@@ -283,19 +276,6 @@ export default function PrayScreen() {
     getUserId();
   }, []);
   
-  useEffect(() => {
-    if (!userId) return;
-    (async () => {
-      try {
-        const hasHardware = await LocalAuthentication.hasHardwareAsync();
-        const enrolled = await LocalAuthentication.isEnrolledAsync();
-        setBiometricSupported(Boolean(hasHardware && enrolled));
-      } catch {
-        setBiometricSupported(false);
-      }
-    })();
-  }, [userId]);
-  
   const refreshOfflineCount = async (uid?: string | null) => {
     if (!uid) {
       setOfflineQueuedCount(0);
@@ -447,16 +427,6 @@ useEffect(() => {
 
     fetchSettings();
   }, [userId, settingsRefreshNonce]);
-
-  useEffect(() => {
-    isLockedRef.current = isLocked;
-  }, [isLocked]);
-  useEffect(() => {
-    setHeaderVisible(!isLocked);
-    return () => {
-      setHeaderVisible(true);
-    };
-  }, [isLocked, setHeaderVisible]);
 
   useEffect(() => {
     if (!isWalking) return;
@@ -1800,61 +1770,12 @@ useEffect(() => {
     }
   }, [userId]);
 
-  const unlockWithBiometrics = useCallback(async () => {
-    if (!biometricLockEnabled) {
-      setIsLocked(false);
-      return true;
-    }
-    if (!biometricSupported) {
-      // fail-open so you don’t brick users if biometrics gets disabled on device
-      setIsLocked(false);
-      return true;
-    }
-    if (isUnlockingRef.current) return false;
-  
-    isUnlockingRef.current = true;
-    try {
-      const res = await LocalAuthentication.authenticateAsync({
-        promptMessage: "Unlock Prayer Journal",
-        fallbackLabel: "Use Passcode",
-      });
-  
-      if (!res.success) {
-        // If user cancelled, don't immediately re-prompt via app-state bounces.
-        // Keep locked, but avoid auto re-trigger loops feeling aggressive.
-        if (res.error === "user_cancel" || res.error === "system_cancel") {
-          setIsLocked(true);
-          return false;
-        }
-      
-        setIsLocked(true);
-        return false;
-      }
-  
-      setIsLocked(false);
-      return true;
-    } catch {
-      setIsLocked(true);
-      return false;
-    } finally {
-      isUnlockingRef.current = false;
-    }
-  }, [biometricLockEnabled, biometricSupported]);
-
   // Sync any queued prayers as soon as the userId is available (screen mount/app open)
   useEffect(() => {
     if (!userId) return;
-  
-    // Run the biometric gate once per signed-in user per app run.
-    // Prevents repeated prompts caused by dependency changes (e.g. biometricSupported resolving).
-    if (biometricLockEnabled && didInitialBiometricCheckForUserRef.current !== userId) {
-      didInitialBiometricCheckForUserRef.current = userId;
-      setIsLocked(true);
-      unlockWithBiometrics();
-    }
-  
+
     trySyncOfflineQueue();
-  }, [userId, trySyncOfflineQueue, biometricLockEnabled, unlockWithBiometrics]);
+  }, [userId, trySyncOfflineQueue]);
 
   useEffect(() => {
     if (!userId) return;
@@ -1872,23 +1793,13 @@ useEffect(() => {
         has_recording_ref: !!walkRecordingRef.current,
       });
 
-      // When app goes background/inactive, lock so it requires auth when returning.
       if (state === "background" || state === "inactive") {
-        // Do not stop an active Prayer Walk on app background/lock.
-        // Audio/location background behavior is controlled by runtime modes + iOS capabilities.
-        if (biometricLockEnabled) setIsLocked(true);
         return;
       }
   
       if (state === "active") {
         if (isWalking) {
           void hydrateWalkCoordsFromStorage("app_active");
-        }
-
-        // IMPORTANT: do NOT force-lock on active.
-        // iOS can bounce AppState during the Face ID sheet which causes re-prompt loops.
-        if (biometricLockEnabled && isLockedRef.current) {
-          unlockWithBiometrics();
         }
   
         trySyncOfflineQueue();
@@ -1899,8 +1810,6 @@ useEffect(() => {
   }, [
     userId,
     trySyncOfflineQueue,
-    biometricLockEnabled,
-    unlockWithBiometrics,
     isWalking,
     logWalk,
     hydrateWalkCoordsFromStorage,
@@ -2689,58 +2598,6 @@ useEffect(() => {
   }, []);
 
   // UI ------------------------------------------------------------------
-  if (isLocked) {
-    return (
-      <SafeAreaView
-        style={[
-          styles.container,
-          {
-            backgroundColor: colors.background,
-            justifyContent: "center",
-            alignItems: "center",
-          },
-        ]}
-      >
-        <Ionicons name="lock-closed-outline" size={28} color={colors.textPrimary} />
-        <Text
-          style={{
-            marginTop: spacing.md,
-            fontFamily: fonts.heading,
-            fontSize: 18,
-            color: colors.textPrimary,
-          }}
-        >
-          Locked
-        </Text>
-        <Text
-          style={{
-            marginTop: spacing.xs,
-            marginHorizontal: spacing.xl,
-            textAlign: "center",
-            fontFamily: fonts.body,
-            fontSize: 14,
-            color: colors.textSecondary,
-          }}
-        >
-          Unlock with Face ID / Touch ID to continue.
-        </Text>
-  
-        <TouchableOpacity
-          style={{
-            marginTop: spacing.lg,
-            paddingHorizontal: spacing.lg,
-            paddingVertical: spacing.sm,
-            borderRadius: 999,
-            backgroundColor: colors.accent,
-          }}
-          onPress={unlockWithBiometrics}
-          activeOpacity={0.85}
-        >
-          <Text style={{ fontFamily: fonts.heading, color: "#000" }}>Unlock</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-    );
-  }
   return (
     <SafeAreaView
       edges={["left", "right", "bottom"]}

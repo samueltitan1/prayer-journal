@@ -37,14 +37,34 @@ const inferPlan = (productId: string | null | undefined) => {
 
 const inferStatus = (eventType: string, expiresAt: string | null, periodType: string | null) => {
   const type = (eventType ?? "").toUpperCase();
-  if (type.includes("EXPIRATION")) return "expired";
-  if (type.includes("BILLING_ISSUE")) return "past_due";
-  if (type.includes("CANCELLATION")) return "canceled";
-  if (type.includes("TRANSFER")) return "active";
-
   const expiresMs = expiresAt ? new Date(expiresAt).getTime() : 0;
-  if (!expiresAt || expiresMs <= Date.now()) return "expired";
-  return (periodType ?? "").toLowerCase() === "trial" ? "trialing" : "active";
+  const hasFutureAccess = Boolean(expiresAt && expiresMs > Date.now());
+  const isTrial = (periodType ?? "").toLowerCase() === "trial";
+
+  if (type.includes("EXPIRATION")) return "expired";
+  if (type.includes("BILLING_ISSUE")) {
+    return hasFutureAccess ? (isTrial ? "trialing" : "past_due") : "past_due";
+  }
+  if (type.includes("CANCELLATION")) {
+    // Auto-renew might be turned off while trial/access is still active.
+    return hasFutureAccess ? (isTrial ? "trialing" : "active") : "canceled";
+  }
+  if (type.includes("TRANSFER")) {
+    return hasFutureAccess ? (isTrial ? "trialing" : "active") : "expired";
+  }
+
+  if (!hasFutureAccess) return "expired";
+  return isTrial ? "trialing" : "active";
+};
+
+const toBool = (value: unknown): boolean | null => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return null;
 };
 
 serve(async (req: Request): Promise<Response> => {
@@ -84,14 +104,36 @@ serve(async (req: Request): Promise<Response> => {
       return json({ received: true, duplicate: true });
     }
 
+    const eventType = event?.type ?? null;
+    const eventTypeUpper = (eventType ?? "").toUpperCase();
     const entitlementIds = Array.isArray(event?.entitlement_ids) ? event.entitlement_ids : [];
     const entitlementId = entitlementIds[0] ?? null;
     const productId = event?.product_id ?? null;
     const provider = mapProvider(event?.store ?? null);
     const expiresAt = toIso(event?.expiration_at_ms ?? event?.expiration_at ?? null);
     const periodType = event?.period_type ?? null;
-    const status = inferStatus(event?.type ?? "", expiresAt, periodType);
+    const purchasedAt = toIso(event?.purchased_at_ms ?? event?.purchased_at ?? null);
+    const cancellationAt =
+      toIso(
+        event?.cancellation_at_ms ??
+          event?.cancellation_at ??
+          event?.unsubscribe_detected_at_ms ??
+          event?.unsubscribe_detected_at ??
+          null
+      ) ?? (eventTypeUpper.includes("CANCELLATION") ? new Date().toISOString() : null);
+    const explicitAutoRenew = toBool(event?.auto_renew_status ?? null);
+    const autoRenewEnabled =
+      explicitAutoRenew ??
+      (cancellationAt || eventTypeUpper.includes("CANCELLATION") || eventTypeUpper.includes("EXPIRATION")
+        ? false
+        : null);
+    const isTrial = (periodType ?? "").toLowerCase() === "trial";
+    const trialStartedAt = isTrial ? purchasedAt : null;
+    const trialEndsAt = isTrial ? expiresAt : null;
+    const status = inferStatus(eventType ?? "", expiresAt, periodType);
     const plan = inferPlan(productId);
+
+    const shouldResetReminderMarkers = eventTypeUpper.includes("INITIAL_PURCHASE") && isTrial;
 
     const { error: insertEventError } = await service.from("revenuecat_webhook_events").insert({
       event_id: eventId,
@@ -110,6 +152,15 @@ serve(async (req: Request): Promise<Response> => {
         plan,
         status,
         current_period_end: expiresAt,
+        period_type: periodType,
+        trial_started_at: trialStartedAt,
+        trial_ends_at: trialEndsAt,
+        auto_renew_enabled: autoRenewEnabled,
+        cancellation_detected_at: cancellationAt,
+        latest_event_type: eventType,
+        trial_reminder_dedupe_key: shouldResetReminderMarkers ? null : undefined,
+        trial_reminder_scheduled_at: shouldResetReminderMarkers ? null : undefined,
+        trial_reminder_inapp_shown_at: shouldResetReminderMarkers ? null : undefined,
         environment: event?.environment ?? null,
         revenuecat_app_user_id: appUserId,
         revenuecat_product_id: productId,
@@ -117,9 +168,15 @@ serve(async (req: Request): Promise<Response> => {
         revenuecat_event_id: eventId,
         provider_meta: {
           source: "revenuecat_webhook",
-          event_type: event?.type ?? null,
+          event_type: eventType,
           period_type: periodType,
           store: event?.store ?? null,
+          purchased_at: purchasedAt,
+          expiration_at: expiresAt,
+          trial_started_at: trialStartedAt,
+          trial_ends_at: trialEndsAt,
+          auto_renew_enabled: autoRenewEnabled,
+          cancellation_detected_at: cancellationAt,
           transferred_from: event?.transferred_from ?? null,
           transferred_to: event?.transferred_to ?? null,
         },

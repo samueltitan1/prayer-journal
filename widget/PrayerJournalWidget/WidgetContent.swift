@@ -16,7 +16,6 @@ let EXAMEN_QUESTIONS: [String] = [
     "Where did you see God today?",
     "What moment today are you most grateful for?",
     "When did you feel most alive today? Could that be God speaking?",
-    "What beauty did God place in front of you today that you almost missed?",
     "What prayer from this week has God already answered?",
     "Have you been honest with God today — really honest?",
     "What would you say to God right now if you knew He was listening?",

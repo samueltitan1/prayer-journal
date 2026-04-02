@@ -47,7 +47,7 @@ export async function upsertOnboardingResponses(
   payload: OnboardingResponsesPayload
 ) {
   if (!userId) {
-    console.warn("Missing userId for onboarding_responses upsert");
+    // Expected on unauthenticated onboarding screens before a session exists.
     return;
   }
 

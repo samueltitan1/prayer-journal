@@ -3,21 +3,21 @@ import OnboardingShell from "@/components/onboarding/OnboardingShell";
 import PrimaryButton from "@/components/onboarding/PrimaryButton";
 import { useAuth } from "@/contexts/AuthProvider";
 import {
+  trackOnboardingAction,
+  trackOnboardingStepViewed,
+} from "@/lib/analytics/onboarding";
+import {
   getBiometricAvailability,
   markBiometricOnboardingSeen,
   promptBiometricAuth,
   setBiometricLockEnabled,
 } from "@/lib/biometricLock";
-import {
-  trackOnboardingAction,
-  trackOnboardingStepViewed,
-} from "@/lib/analytics/onboarding";
 import { getOnboardingProgress } from "@/lib/onboardingProgress";
 import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { colors, fonts, spacing } from "@/theme/theme";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 export default function OnboardingBiometricSetup() {
   const router = useRouter();
@@ -84,15 +84,18 @@ export default function OnboardingBiometricSetup() {
         }}
       />
       <View style={styles.container}>
-        <Text style={styles.title}>Protect your journal with Face ID / Touch ID</Text>
+       
+          <Image source={require("../../../assets/faceIDG.png")} style={styles.iconImage} />
+        
+        <Text style={styles.title}>Keep your prayers private</Text>
         <Text style={styles.subtitle}>
-          Add an extra layer of privacy. When enabled, you will unlock the app with biometrics.
+          Your prayers are personal. Use Face ID to make sure only you can open your journal.
         </Text>
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
       <View style={styles.footer}>
         <PrimaryButton
-          title={busy ? "Please wait..." : "Enable Face ID / Touch ID"}
+          title={busy ? "Please wait..." : "Enable Face ID"}
           onPress={() => void handleEnable()}
           disabled={busy}
         />
@@ -101,7 +104,7 @@ export default function OnboardingBiometricSetup() {
           disabled={busy}
           onPress={() => void handleNotNow()}
         >
-          <Text style={styles.notNowText}>Not now</Text>
+          <Text style={styles.notNowText}>Skip</Text>
         </TouchableOpacity>
       </View>
     </OnboardingShell>
@@ -114,6 +117,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: spacing.lg,
+  },
+  iconWrap: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: `${colors.accentGold}20`,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.xl,
+  },
+  iconImage: {
+    width: 100,
+    height: 100,
+    marginBottom: spacing.xl,
   },
   title: {
     fontFamily: fonts.heading,

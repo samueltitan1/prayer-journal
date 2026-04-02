@@ -23,24 +23,17 @@ private extension Color {
     }
 }
 
-private let widgetBackground = Color(hex: "F9F7F4")
+private let widgetBackground = Color(hex: "F6F3EE")
 private let primaryText = Color(hex: "1A1A1A")
 private let accentText = Color(hex: "C4A572")
 
 private struct WidgetHeaderView: View {
-    let crossSize: CGFloat
-    let labelSize: CGFloat
-
     var body: some View {
-        HStack(spacing: 4) {
-            Text("✝")
-                .font(.custom("Playfair Display", size: crossSize))
-                .foregroundColor(accentText)
-            Text("PRAYER JOURNAL")
-                .font(.custom("Playfair Display", size: labelSize))
-                .foregroundColor(accentText)
-                .tracking(0.8)
-        }
+        Image("widget-logo")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 18, height: 18)
+            .opacity(0.9)
     }
 }
 
@@ -49,9 +42,9 @@ struct PrayerJournalSmallWidgetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            WidgetHeaderView(crossSize: 11, labelSize: 9)
+            WidgetHeaderView()
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 4)
 
             Text(entry.content.body)
                 .font(.custom("Georgia", size: 13))
@@ -72,8 +65,9 @@ struct PrayerJournalSmallWidgetView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(widgetBackground)
+                .fill(widgetBackground.opacity(0.9))
         )
+        .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 2)
         .widgetURL(URL(string: "prayer-journal://pray"))
     }
 }
@@ -88,9 +82,9 @@ struct PrayerJournalMediumWidgetView: View {
 
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
-                    WidgetHeaderView(crossSize: 11, labelSize: 9)
+                    WidgetHeaderView()
 
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 4)
 
                     Text(entry.content.body)
                         .font(.custom("Georgia", size: 13))
@@ -113,23 +107,25 @@ struct PrayerJournalMediumWidgetView: View {
                 Rectangle()
                     .fill(accentText)
                     .frame(width: 1)
+                    .opacity(0.3)
                     .padding(.vertical, 12)
 
                 VStack(spacing: 6) {
                     Image(systemName: "mic.fill")
-                        .font(.system(size: 22, weight: .regular))
-                        .foregroundColor(accentText)
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundColor(accentText.opacity(0.9))
                     Text("Pray Now")
                         .font(.custom("Georgia", size: 11))
-                        .foregroundColor(accentText)
+                        .foregroundColor(accentText.opacity(0.9))
                 }
                 .padding(.horizontal, 8)
                 .frame(width: rightWidth, height: proxy.size.height, alignment: .center)
             }
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(widgetBackground)
+                    .fill(widgetBackground.opacity(0.9))
             )
+            .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 2)
         }
         // WidgetKit supports one tap target for this widget configuration without AppIntents.
         .widgetURL(URL(string: "prayer-journal://pray"))
@@ -141,15 +137,8 @@ struct PrayerJournalLockWidgetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 4) {
-                Text("✝")
-                    .font(.custom("Playfair Display", size: 9))
-                    .widgetAccentable()
-                Text("PRAYER JOURNAL")
-                    .font(.custom("Playfair Display", size: 8))
-                    .tracking(0.8)
-                    .widgetAccentable()
-            }
+            WidgetHeaderView()
+                .widgetAccentable()
 
             Text(entry.content.body)
                 .font(.custom("Georgia", size: 12))

@@ -19,7 +19,7 @@ import { FontAwesome, FontAwesome5, Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 type QuestionType = "single" | "multi" | "info";
 
@@ -43,7 +43,7 @@ type SurveyQuestion =
       text: string;
       subtext?: string;
       type: "info";
-      infoKey: "sp1" | "sp2" | "sp3";
+      infoKey: "sp1" | "sp2" | "sp3" | "sp4";
     };
 
 type StorageKey = "q1" | "q2" | "q3" | "q4" | "q5" | "q6" | "q7" | "q8" | "q9";
@@ -105,7 +105,7 @@ const QUESTIONS: SurveyQuestion[] = [
     id: 103,
     type: "info",
     infoKey: "sp1",
-    text: "Prayer Journal creates long-term consistency",
+    text: "This time, it's different",
     subtext: "80% of Prayer Journal users pray and reflect more consistently even after 6 months.",
   },
   {
@@ -161,6 +161,13 @@ const QUESTIONS: SurveyQuestion[] = [
       { label: "It feels awkward or forced when I write", value: "awkward-write" },
       { label: "Other", value: "other", isOther: true },
     ],
+  },
+  {
+    id: 108,
+    type: "info",
+    infoKey: "sp4",
+    text: "Just speak — we'll handle the rest",
+    subtext: "No need to write. Just pray. Just you and God.",
   },
   {
     id: 6,
@@ -468,7 +475,14 @@ export default function OnboardingSurvey() {
         >
           {question.type === "info" ? (
             <View style={styles.infoWrap}>
-              <Text style={styles.infoTitle}>{question.text}</Text>
+              <Text
+                style={[
+                  styles.infoTitle,
+                  question.infoKey === "sp4" ? styles.infoTitlePrayer : null,
+                ]}
+              >
+                {question.text}
+              </Text>
               {question.infoKey === "sp1" ? (
                 <>
                   <LongTermResultsGraphRN
@@ -491,6 +505,20 @@ export default function OnboardingSurvey() {
                     title="Your first 30 days"
                     description="Habits begin to form in just 7 days. By day 30, prayer becomes part of who you are"
                   />
+                </>
+              ) : null}
+              {question.infoKey === "sp4" ? (
+                <>
+                  <Image
+                    source={require("@/assets/Prayer.png")}
+                    style={styles.infoPrayerImage}
+                    resizeMode="contain"
+                  />
+                  {question.subtext ? (
+                    <Text style={[styles.infoBody, styles.infoPrayerSubtext]}>
+                      {question.subtext}
+                    </Text>
+                  ) : null}
                 </>
               ) : null}
               {!question.infoKey ? (
@@ -626,6 +654,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl * 3,
     marginHorizontal: spacing.sm,
   },
+  infoTitlePrayer: {
+    marginBottom: spacing.md,
+  },
   infoBody: {
     marginTop: spacing.sm,
     fontFamily: fonts.body,
@@ -633,6 +664,16 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: "center",
     lineHeight: 20,
+  },
+  infoPrayerImage: {
+    width: 570,
+    height: 570,
+    marginBottom: spacing.xs,
+    alignSelf: "center",
+  },
+  infoPrayerSubtext: {
+    paddingHorizontal: spacing.xs,
+    marginTop: spacing.sm,
   },
   footer: {
     paddingTop: spacing.md,

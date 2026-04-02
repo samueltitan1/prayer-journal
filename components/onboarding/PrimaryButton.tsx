@@ -1,6 +1,5 @@
 import { colors, fonts } from "@/theme/theme";
 import * as Haptics from "expo-haptics";
-import React from "react";
 import { StyleProp, StyleSheet, Text, TextStyle, TouchableOpacity, ViewStyle } from "react-native";
 
 type PrimaryButtonProps = {
@@ -51,7 +50,7 @@ const styles = StyleSheet.create({
   text: {
     fontFamily: fonts.headingBold,
     fontSize: 18,
-    fontWeight: "900",
+    
     color: "#FFFFFF",
   },
 });

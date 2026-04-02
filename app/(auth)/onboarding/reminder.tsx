@@ -207,7 +207,7 @@ const styles = StyleSheet.create({
     maxWidth: '90%',
   },
   heading: {
-    fontSize: 16,
+    fontSize: 19,
     lineHeight: 24,
     color: '#2F2F2F',
     textAlign: 'center',

@@ -41,6 +41,16 @@ const inferPlan = (productId: string | null | undefined) => {
   return "unknown";
 };
 
+const toBool = (value: unknown): boolean | null => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return null;
+};
+
 serve(async (req: Request): Promise<Response> => {
   try {
     if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -106,6 +116,18 @@ serve(async (req: Request): Promise<Response> => {
       (subscription?.period_type ?? activeEntitlement?.period_type ?? "").toLowerCase();
     const active = Boolean(expiresAt && expiresMs > Date.now());
     const status = active ? (periodType === "trial" ? "trialing" : "active") : "expired";
+    const purchasedAt = toIso(
+      subscription?.purchase_date ?? activeEntitlement?.purchase_date ?? null
+    );
+    const cancellationDetectedAt = toIso(
+      subscription?.unsubscribe_detected_at ?? activeEntitlement?.unsubscribe_detected_at ?? null
+    );
+    const explicitAutoRenew = toBool(
+      subscription?.auto_renew_status ?? activeEntitlement?.auto_renew_status ?? null
+    );
+    const autoRenewEnabled = explicitAutoRenew ?? (cancellationDetectedAt ? false : null);
+    const trialStartedAt = periodType === "trial" ? purchasedAt : null;
+    const trialEndsAt = periodType === "trial" ? expiresAt : null;
     const provider = mapProvider(subscription?.store ?? null);
     const plan = inferPlan(productId);
 
@@ -117,6 +139,12 @@ serve(async (req: Request): Promise<Response> => {
         plan,
         status,
         current_period_end: expiresAt,
+        period_type: periodType || null,
+        trial_started_at: trialStartedAt,
+        trial_ends_at: trialEndsAt,
+        auto_renew_enabled: autoRenewEnabled,
+        cancellation_detected_at: cancellationDetectedAt,
+        latest_event_type: "SYNC",
         revenuecat_app_user_id: appUserId,
         revenuecat_customer_id: subscriber?.original_app_user_id ?? subscriber?.app_user_id ?? null,
         revenuecat_product_id: productId,
@@ -129,6 +157,11 @@ serve(async (req: Request): Promise<Response> => {
             : null,
         provider_meta: {
           source: "revenuecat_sync",
+          period_type: periodType || null,
+          trial_started_at: trialStartedAt,
+          trial_ends_at: trialEndsAt,
+          auto_renew_enabled: autoRenewEnabled,
+          cancellation_detected_at: cancellationDetectedAt,
           entitlement: activeEntitlement,
           subscription,
         },

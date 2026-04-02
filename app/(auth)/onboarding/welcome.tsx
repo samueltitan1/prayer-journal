@@ -34,7 +34,7 @@ export default function OnboardingWelcome() {
     <OnboardingShell showBack={false}>
       <View style={styles.container}>
         <Image
-          source={require("@/assets/Crucifix.png")}
+          source={require("@/assets/Logo2.0.png")}
           style={styles.logo}
           resizeMode="contain"
         />
@@ -75,8 +75,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   logo: {
-    width: 72,
-    height: 72,
+    width: 112,
+    height: 112,
     marginBottom: spacing.lg,
   },
   title: {

@@ -20,13 +20,22 @@ import {
   promptBiometricAuth,
 } from "@/lib/biometricLock";
 import { ThemeProvider } from "@/contexts/ThemeContext";
-import { requestNotificationPermissions } from "@/lib/notifications";
+import {
+  requestNotificationPermissions,
+  scheduleTrialEndingReminderNotification,
+} from "@/lib/notifications";
 import { getOnboardingResponsesSnapshot, upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { identifyUser, initPostHog, resetAnalytics } from "@/lib/posthog";
 import "@/lib/prayerWalkLocationTask";
 import { refreshSubscriptionIfNeeded } from "@/lib/refreshSubscription";
 import { DevBuildGate } from "@/lib/runtime/requireDevBuild";
 import { getEntitlement } from "@/lib/subscriptions";
+import {
+  buildTrialReminderPlan,
+  getTrialReminderRow,
+  markTrialReminderInAppShown,
+  markTrialReminderScheduled,
+} from "@/lib/trialReminders";
 
 function RootNavigator() {
   const auth = useAuth();
@@ -38,6 +47,7 @@ function RootNavigator() {
   const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
   const [entitled, setEntitled] = useState<boolean | null>(null);
   const [biometricOnboardingSeen, setBiometricOnboardingSeen] = useState<boolean | null>(null);
+  const [trialReminderFallback, setTrialReminderFallback] = useState<string | null>(null);
   const paywallUpsertedForUserRef = useRef<string | null>(null);
   const lastSnapshotLogKeyRef = useRef<string | null>(null);
 
@@ -118,6 +128,56 @@ function RootNavigator() {
     }
   }, [entitled, onboardingComplete, userId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!userId || onboardingComplete !== true) {
+        setTrialReminderFallback(null);
+        return;
+      }
+
+      const row = await getTrialReminderRow(userId);
+      if (cancelled) return;
+
+      const plan = buildTrialReminderPlan(row);
+      if (!plan) {
+        setTrialReminderFallback(null);
+        return;
+      }
+
+      const scheduled = await scheduleTrialEndingReminderNotification({
+        dedupeKey: plan.dedupeKey,
+        triggerAt: plan.triggerAt,
+        title: plan.title,
+        body: plan.body,
+      });
+      if (cancelled) return;
+
+      if (scheduled.scheduled) {
+        await markTrialReminderScheduled(userId, plan.dedupeKey);
+        if (cancelled) return;
+        setTrialReminderFallback(null);
+        return;
+      }
+
+      if (scheduled.reason === "already_scheduled") {
+        await markTrialReminderScheduled(userId, plan.dedupeKey);
+        if (cancelled) return;
+        setTrialReminderFallback(null);
+        return;
+      }
+
+      await markTrialReminderInAppShown(userId, plan.dedupeKey);
+      if (cancelled) return;
+      setTrialReminderFallback(plan.fallbackMessage);
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [onboardingComplete, userId]);
+
   if (
     loading ||
     (userId && (onboardingComplete === null || entitled === null || biometricOnboardingSeen === null))
@@ -130,28 +190,38 @@ function RootNavigator() {
   }
 
   return (
-    <Stack
-      key={userId ? "authenticated" : "unauthenticated"}
-      screenOptions={{ headerShown: false }}
-    >
-      {/*
-        Keep `index` registered at the root so the app shell remains complete.
-      */}
-      <Stack.Screen name="index" />
- 
-      {!userId ? (
-        <Stack.Screen name="(auth)" />
-      ) : onboardingComplete === false ? (
-        <Stack.Screen name="(auth)" />
-      ) : biometricOnboardingSeen === false ? (
-        <Stack.Screen name="(auth)" />
-      ) : entitled === false ? (
-        <Stack.Screen name="(auth)" />
-      ) : (
-        // Ensure tabs mounts to an existing route (you do NOT have app/(tabs)/index.tsx)
-        <Stack.Screen name="(tabs)"/>
-      )}
-    </Stack>
+    <View style={{ flex: 1 }}>
+      <Stack
+        key={userId ? "authenticated" : "unauthenticated"}
+        screenOptions={{ headerShown: false }}
+      >
+        {/*
+          Keep `index` registered at the root so the app shell remains complete.
+        */}
+        <Stack.Screen name="index" />
+  
+        {!userId ? (
+          <Stack.Screen name="(auth)" />
+        ) : onboardingComplete === false ? (
+          <Stack.Screen name="(auth)" />
+        ) : biometricOnboardingSeen === false ? (
+          <Stack.Screen name="(auth)" />
+        ) : entitled === false ? (
+          <Stack.Screen name="(auth)" />
+        ) : (
+          // Ensure tabs mounts to an existing route (you do NOT have app/(tabs)/index.tsx)
+          <Stack.Screen name="(tabs)"/>
+        )}
+      </Stack>
+      {trialReminderFallback ? (
+        <View style={styles.trialFallbackBanner}>
+          <Text style={styles.trialFallbackText}>{trialReminderFallback}</Text>
+          <TouchableOpacity onPress={() => setTrialReminderFallback(null)}>
+            <Text style={styles.trialFallbackDismiss}>Dismiss</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -361,6 +431,26 @@ const styles = StyleSheet.create({
   },
   lockButtonText: {
     color: "#2F2F2F",
+    fontWeight: "700",
+  },
+  trialFallbackBanner: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    bottom: 24,
+    backgroundColor: "#1E1E1E",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  trialFallbackText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  trialFallbackDismiss: {
+    color: "#E3C67B",
     fontWeight: "700",
   },
 });
