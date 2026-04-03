@@ -66,6 +66,8 @@ const MIN_TRANSCRIBE_FILE_BYTES = 4096;
 const MIN_METERING_SAMPLES = 6;
 const SILENCE_AVG_DB_THRESHOLD = -52;
 const SILENCE_PEAK_DB_THRESHOLD = -40;
+const IOS_INTERRUPTION_DO_NOT_MIX = (Audio as any).InterruptionModeIOS?.DoNotMix ?? 1;
+const ANDROID_INTERRUPTION_DO_NOT_MIX = (Audio as any).InterruptionModeAndroid?.DoNotMix ?? 1;
 const SHORT_HALLUCINATION_PHRASES = new Set([
   "thank you",
   "thanks for watching",
@@ -548,10 +550,11 @@ useEffect(() => {
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: true,
       playsInSilentModeIOS: true,
-      staysActiveInBackground: true,
-      interruptionModeIOS: (Audio as any).InterruptionModeIOS?.DoNotMix ?? 1,
-      interruptionModeAndroid: (Audio as any).InterruptionModeAndroid?.DoNotMix ?? 1,
-      shouldDuckAndroid: true,
+      staysActiveInBackground: false,
+      interruptionModeIOS: IOS_INTERRUPTION_DO_NOT_MIX,
+      interruptionModeAndroid: ANDROID_INTERRUPTION_DO_NOT_MIX,
+      shouldDuckAndroid: false,
+      playThroughEarpieceAndroid: false,
     });
 
     return true;
@@ -611,10 +614,31 @@ useEffect(() => {
       allowsRecordingIOS: true,
       playsInSilentModeIOS: true,
       staysActiveInBackground: true,
-      interruptionModeIOS: (Audio as any).InterruptionModeIOS?.DoNotMix ?? 1,
-      interruptionModeAndroid: (Audio as any).InterruptionModeAndroid?.DoNotMix ?? 1,
-      shouldDuckAndroid: true,
+      interruptionModeIOS: IOS_INTERRUPTION_DO_NOT_MIX,
+      interruptionModeAndroid: ANDROID_INTERRUPTION_DO_NOT_MIX,
+      shouldDuckAndroid: false,
+      playThroughEarpieceAndroid: false,
     });
+  };
+
+  const getRecordingStartErrorMessage = (code: string | null, rawMessage: string) => {
+    const normalized = `${code ?? ""} ${rawMessage}`.toLowerCase();
+    if (
+      normalized.includes("permission") ||
+      normalized.includes("not authorized") ||
+      normalized.includes("denied")
+    ) {
+      return "Microphone permission is required. Please enable it in Settings and try again.";
+    }
+    if (
+      normalized.includes("audio mode") ||
+      normalized.includes("session") ||
+      normalized.includes("recordernotcreated") ||
+      normalized.includes("recording")
+    ) {
+      return "Could not start recording while another audio source is active. Pause music and try again.";
+    }
+    return "Could not start recording. Please try again.";
   };
 
   const computeZoomForSpan = (span: number) => {
@@ -1417,11 +1441,6 @@ useEffect(() => {
       if (!ok) return;
       setWalkMapUri(null);
       setDraftWalkDistanceMeters(null);
-      // HARD reset audio session for iOS TestFlight reliability
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
       // Keep the screen awake while recording so the phone doesn't sleep mid-prayer.
       try {
         await activateKeepAwakeAsync();
@@ -1454,7 +1473,15 @@ useEffect(() => {
       setSecondsLeft(MAX_SECONDS_DEFAULT);
       setPrayState("recording");
     } catch (e) {
-      Alert.alert("Error", "Could not start recording.");
+      const err = e as { code?: string; message?: string };
+      const code = typeof err?.code === "string" ? err.code : null;
+      const message = typeof err?.message === "string" ? err.message : String(e ?? "unknown");
+      console.error("recording_start_failed", { code, message });
+      capture("recording_start_failed", {
+        code: code ?? undefined,
+        message,
+      });
+      Alert.alert("Error", getRecordingStartErrorMessage(code, message));
     }
   };
 

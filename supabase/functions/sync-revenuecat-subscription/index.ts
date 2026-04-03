@@ -41,6 +41,13 @@ const inferPlan = (productId: string | null | undefined) => {
   return "unknown";
 };
 
+const resolvePlan = (inferredPlan: string, existingPlan: string | null | undefined) => {
+  if (inferredPlan && inferredPlan !== "unknown") return inferredPlan;
+  const normalizedExisting = (existingPlan ?? "").toLowerCase();
+  if (normalizedExisting && normalizedExisting !== "unknown") return normalizedExisting;
+  return "free";
+};
+
 const toBool = (value: unknown): boolean | null => {
   if (typeof value === "boolean") return value;
   if (typeof value === "string") {
@@ -128,10 +135,23 @@ serve(async (req: Request): Promise<Response> => {
     const autoRenewEnabled = explicitAutoRenew ?? (cancellationDetectedAt ? false : null);
     const trialStartedAt = periodType === "trial" ? purchasedAt : null;
     const trialEndsAt = periodType === "trial" ? expiresAt : null;
-    const provider = mapProvider(subscription?.store ?? null);
-    const plan = inferPlan(productId);
-
     const service = createClient(supabaseUrl, serviceRoleKey);
+    const { data: existingSubscription, error: existingSubscriptionError } = await service
+      .from("subscriptions")
+      .select("plan")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (existingSubscriptionError) {
+      return json(
+        { error: "Failed to load existing subscription", details: existingSubscriptionError.message },
+        500
+      );
+    }
+
+    const provider = mapProvider(subscription?.store ?? null);
+    const inferredPlan = inferPlan(productId);
+    const plan = resolvePlan(inferredPlan, existingSubscription?.plan ?? null);
     const { error: upsertError } = await service.from("subscriptions").upsert(
       {
         user_id: user.id,

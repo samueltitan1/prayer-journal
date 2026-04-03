@@ -1,6 +1,17 @@
 import SwiftUI
 import WidgetKit
 
+private extension WidgetConfiguration {
+    @ViewBuilder
+    func withPrayerJournalContainerBackground() -> some WidgetConfiguration {
+        if #available(iOSApplicationExtension 17.0, *) {
+            self.containerBackground(.clear, for: .widget)
+        } else {
+            self
+        }
+    }
+}
+
 struct PrayerJournalSmallWidget: Widget {
     let kind: String = "PrayerJournalSmall"
 
@@ -8,6 +19,7 @@ struct PrayerJournalSmallWidget: Widget {
         StaticConfiguration(kind: kind, provider: PrayerJournalTimelineProvider()) { entry in
             PrayerJournalSmallWidgetView(entry: entry)
         }
+        .withPrayerJournalContainerBackground()
         .configurationDisplayName("Daily Prayer")
         .description("A daily verse or reflection for your prayer life.")
         .supportedFamilies([.systemSmall])
@@ -21,6 +33,7 @@ struct PrayerJournalMediumWidget: Widget {
         StaticConfiguration(kind: kind, provider: PrayerJournalTimelineProvider()) { entry in
             PrayerJournalMediumWidgetView(entry: entry)
         }
+        .withPrayerJournalContainerBackground()
         .configurationDisplayName("Daily Prayer & Journal")
         .description("A daily verse or reflection with a shortcut to pray.")
         .supportedFamilies([.systemMedium])
@@ -34,6 +47,7 @@ struct PrayerJournalLockWidget: Widget {
         StaticConfiguration(kind: kind, provider: PrayerJournalTimelineProvider()) { entry in
             PrayerJournalLockWidgetView(entry: entry)
         }
+        .withPrayerJournalContainerBackground()
         .configurationDisplayName("Prayer Lock Screen")
         .description("A daily verse or reflection on your lock screen.")
         .supportedFamilies([.accessoryRectangular])

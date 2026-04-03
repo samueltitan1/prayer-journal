@@ -30,6 +30,7 @@ import "@/lib/prayerWalkLocationTask";
 import { refreshSubscriptionIfNeeded } from "@/lib/refreshSubscription";
 import { DevBuildGate } from "@/lib/runtime/requireDevBuild";
 import { getEntitlement } from "@/lib/subscriptions";
+import { getSupabase } from "@/lib/supabaseClient";
 import {
   buildTrialReminderPlan,
   getTrialReminderRow,
@@ -71,32 +72,41 @@ function RootNavigator() {
         lastSnapshotLogKeyRef.current = null;
         return;
       }
-      const seen = await hasSeenBiometricOnboarding();
-      if (cancelled) return;
-      setBiometricOnboardingSeen(seen);
-      await refreshSubscriptionIfNeeded(userId);
-      if (cancelled) return;
-      const [onboarding, entitlement] = await Promise.all([
-        getOnboardingResponsesSnapshot(userId),
-        getEntitlement(userId),
-      ]);
-      if (cancelled) return;
-      const completed = Boolean(onboarding?.onboarding_completed_at);
-      const step = onboarding?.onboarding_step ?? null;
-      const entitlementActive = entitlement.active;
-      setOnboardingComplete(completed);
-      setEntitled(entitlement.active);
-      if (__DEV__) {
-        const snapshotLogKey = `${userId}:${String(completed)}:${String(step)}:${String(
-          entitlementActive
-        )}`;
-        if (lastSnapshotLogKeyRef.current !== snapshotLogKey) {
-          lastSnapshotLogKeyRef.current = snapshotLogKey;
-          console.log("layout: snapshot", {
-            completed,
-            step,
-            entitled: entitlementActive,
-          });
+      try {
+        const seen = await hasSeenBiometricOnboarding();
+        if (cancelled) return;
+        setBiometricOnboardingSeen(seen);
+        await refreshSubscriptionIfNeeded(userId);
+        if (cancelled) return;
+        const [onboarding, entitlement] = await Promise.all([
+          getOnboardingResponsesSnapshot(userId),
+          getEntitlement(userId),
+        ]);
+        if (cancelled) return;
+        const completed = Boolean(onboarding?.onboarding_completed_at);
+        const step = onboarding?.onboarding_step ?? null;
+        const entitlementActive = entitlement.active;
+        setOnboardingComplete(completed);
+        setEntitled(entitlement.active);
+        if (__DEV__) {
+          const snapshotLogKey = `${userId}:${String(completed)}:${String(step)}:${String(
+            entitlementActive
+          )}`;
+          if (lastSnapshotLogKeyRef.current !== snapshotLogKey) {
+            lastSnapshotLogKeyRef.current = snapshotLogKey;
+            console.log("layout: snapshot", {
+              completed,
+              step,
+              entitled: entitlementActive,
+            });
+          }
+        }
+      } catch (error) {
+        console.error("layout: failed to load auth snapshot", error);
+        if (!cancelled) {
+          setOnboardingComplete(false);
+          setEntitled(false);
+          setBiometricOnboardingSeen(true);
         }
       }
     };
@@ -136,40 +146,45 @@ function RootNavigator() {
         return;
       }
 
-      const row = await getTrialReminderRow(userId);
-      if (cancelled) return;
-
-      const plan = buildTrialReminderPlan(row);
-      if (!plan) {
-        setTrialReminderFallback(null);
-        return;
-      }
-
-      const scheduled = await scheduleTrialEndingReminderNotification({
-        dedupeKey: plan.dedupeKey,
-        triggerAt: plan.triggerAt,
-        title: plan.title,
-        body: plan.body,
-      });
-      if (cancelled) return;
-
-      if (scheduled.scheduled) {
-        await markTrialReminderScheduled(userId, plan.dedupeKey);
+      try {
+        const row = await getTrialReminderRow(userId);
         if (cancelled) return;
-        setTrialReminderFallback(null);
-        return;
-      }
 
-      if (scheduled.reason === "already_scheduled") {
-        await markTrialReminderScheduled(userId, plan.dedupeKey);
+        const plan = buildTrialReminderPlan(row);
+        if (!plan) {
+          setTrialReminderFallback(null);
+          return;
+        }
+
+        const scheduled = await scheduleTrialEndingReminderNotification({
+          dedupeKey: plan.dedupeKey,
+          triggerAt: plan.triggerAt,
+          title: plan.title,
+          body: plan.body,
+        });
         if (cancelled) return;
-        setTrialReminderFallback(null);
-        return;
-      }
 
-      await markTrialReminderInAppShown(userId, plan.dedupeKey);
-      if (cancelled) return;
-      setTrialReminderFallback(plan.fallbackMessage);
+        if (scheduled.scheduled) {
+          await markTrialReminderScheduled(userId, plan.dedupeKey);
+          if (cancelled) return;
+          setTrialReminderFallback(null);
+          return;
+        }
+
+        if (scheduled.reason === "already_scheduled") {
+          await markTrialReminderScheduled(userId, plan.dedupeKey);
+          if (cancelled) return;
+          setTrialReminderFallback(null);
+          return;
+        }
+
+        await markTrialReminderInAppShown(userId, plan.dedupeKey);
+        if (cancelled) return;
+        setTrialReminderFallback(plan.fallbackMessage);
+      } catch (error) {
+        console.error("layout: trial reminder sync failed", error);
+        if (!cancelled) setTrialReminderFallback(null);
+      }
     };
 
     void run();
@@ -325,14 +340,58 @@ export default function RootLayout() {
     Inter_700Bold,
   });
 
-  const navigateFromDeepLink = useCallback((url: string | null) => {
-    if (!url) return;
-    const parsed = Linking.parse(url);
-    const path = (parsed.path ?? "").replace(/^\/+/, "");
-    if (path === "pray") {
-      router.replace("/(tabs)/pray");
-    }
-  }, [router]);
+  const navigateFromDeepLink = useCallback(
+    (url: string | null) => {
+      if (!url) return;
+      const parsed = Linking.parse(url);
+      const path = (parsed.path ?? "").replace(/^\/+/, "");
+      if (path !== "pray") return;
+
+      void (async () => {
+        try {
+          const { data } = await getSupabase().auth.getSession();
+          const userId = data.session?.user?.id ?? null;
+
+          if (!userId) {
+            router.replace("/(auth)/onboarding/welcome");
+            return;
+          }
+
+          const onboarding = await getOnboardingResponsesSnapshot(userId);
+          const completed = Boolean(onboarding?.onboarding_completed_at);
+          const step = onboarding?.onboarding_step ?? null;
+
+          if (!completed) {
+            const allowed = new Set([
+              "welcome",
+              "survey",
+              "privacy",
+              "apple-health",
+              "reminder",
+              "preparing",
+              "paywall",
+              "congratulations",
+            ]);
+            const next = step && allowed.has(step) ? step : "welcome";
+            router.replace(`/(auth)/onboarding/${next}`);
+            return;
+          }
+
+          const entitlement = await getEntitlement(userId);
+          if (!entitlement.active) {
+            await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
+            router.replace("/(auth)/onboarding/paywall");
+            return;
+          }
+
+          router.replace("/(tabs)/pray");
+        } catch {
+          router.replace("/(auth)/onboarding/welcome");
+        }
+      })();
+    },
+    [router]
+  );
 
   useEffect(() => {
     requestNotificationPermissions();
@@ -362,7 +421,7 @@ export default function RootLayout() {
     });
 
     const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const url = response.notification.request.content.data?.url;
+      const url = response?.notification?.request?.content?.data?.url;
       if (typeof url === "string") {
         navigateFromDeepLink(url);
       }

@@ -100,8 +100,8 @@ export default function Login() {
       trackAuthResult("email", "success");
       trackOnboardingAction("login", "continue");
 
-      // Force app shell resolver to run immediately.
-      router.replace("/");
+      // Route into onboarding resolver directly to avoid unnecessary splash flashes.
+      router.replace("/(auth)/onboarding");
     } catch {
       trackAuthResult("email", "error", "unexpected_exception");
       setErrorMessage("Sign in failed. Please try again.");

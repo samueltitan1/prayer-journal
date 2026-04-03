@@ -26,15 +26,49 @@ export default function OnboardingPaywall() {
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [paywallReady, setPaywallReady] = useState(false);
+  const [paywallInitError, setPaywallInitError] = useState<string | null>(null);
+
+  const initializePaywall = async () => {
+    setPaywallInitError(null);
+    setPaywallReady(false);
+    try {
+      await ensureRevenueCatConfigured(user?.id);
+      setPaywallReady(true);
+    } catch (error) {
+      console.error("paywall: revenuecat init failed", error);
+      setPaywallInitError(
+        "We couldn't load subscription options right now. Please try again in a moment."
+      );
+    }
+  };
 
   useEffect(() => {
+    let cancelled = false;
     trackPaywallViewed();
     trackOnboardingStepViewed("paywall");
-    void ensureRevenueCatConfigured(user?.id);
+    void (async () => {
+      setPaywallInitError(null);
+      setPaywallReady(false);
+      try {
+        await ensureRevenueCatConfigured(user?.id);
+        if (cancelled) return;
+        setPaywallReady(true);
+      } catch (error) {
+        console.error("paywall: revenuecat init failed", error);
+        if (cancelled) return;
+        setPaywallInitError(
+          "We couldn't load subscription options right now. Please try again in a moment."
+        );
+      }
+    })();
     void upsertOnboardingResponses(user?.id, {
       onboarding_step: "paywall",
       onboarding_last_seen_at: new Date().toISOString(),
     });
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
   const completeOnboardingAfterPurchase = async (source: string) => {
@@ -130,57 +164,68 @@ export default function OnboardingPaywall() {
         }}
       />
       <View style={styles.container}>
-        <RevenueCatUI.Paywall
-          style={styles.paywall}
-          options={{ displayCloseButton: true }}
-          onPurchaseCancelled={() => {
-            trackPurchaseResult("cancel");
-          }}
-          onPurchaseError={() => {
-            setPurchaseError("Could not complete purchase. Please try again.");
-            trackPurchaseResult("error");
-          }}
-          onPurchaseCompleted={({ customerInfo }) => {
-            void (async () => {
-              setPurchaseError(null);
-              const active = hasActiveRevenueCatEntitlement(customerInfo);
-              if (!active) {
-                setPurchaseError("We couldn’t verify your subscription yet. Please try again.");
-                trackPurchaseResult("error");
-                return;
-              }
-              await completeOnboardingAfterPurchase("revenuecat");
-            })();
-          }}
-          onRestoreCompleted={({ customerInfo }) => {
-            void (async () => {
-              setPurchaseError(null);
-              const active = hasActiveRevenueCatEntitlement(customerInfo);
-              if (!active) {
-                setPurchaseError("No active subscription found to restore.");
-                return;
-              }
-              await completeOnboardingAfterPurchase("restore");
-            })();
-          }}
-          onRestoreError={() => {
-            setPurchaseError("Could not restore purchases. Please try again.");
-            trackPurchaseResult("error", "restore");
-          }}
-          onDismiss={() => {
-            void (async () => {
-              try {
-                const info = await getRevenueCatCustomerInfo();
-                const active = hasActiveRevenueCatEntitlement(info);
-                if (active) {
-                  await completeOnboardingAfterPurchase("revenuecat");
+        {paywallReady ? (
+          <RevenueCatUI.Paywall
+            style={styles.paywall}
+            options={{ displayCloseButton: true }}
+            onPurchaseCancelled={() => {
+              trackPurchaseResult("cancel");
+            }}
+            onPurchaseError={() => {
+              setPurchaseError("Could not complete purchase. Please try again.");
+              trackPurchaseResult("error");
+            }}
+            onPurchaseCompleted={({ customerInfo }) => {
+              void (async () => {
+                setPurchaseError(null);
+                const active = hasActiveRevenueCatEntitlement(customerInfo);
+                if (!active) {
+                  setPurchaseError("We couldn’t verify your subscription yet. Please try again.");
+                  trackPurchaseResult("error");
+                  return;
                 }
-              } catch {
-                // noop
-              }
-            })();
-          }}
-        />
+                await completeOnboardingAfterPurchase("revenuecat");
+              })();
+            }}
+            onRestoreCompleted={({ customerInfo }) => {
+              void (async () => {
+                setPurchaseError(null);
+                const active = hasActiveRevenueCatEntitlement(customerInfo);
+                if (!active) {
+                  setPurchaseError("No active subscription found to restore.");
+                  return;
+                }
+                await completeOnboardingAfterPurchase("restore");
+              })();
+            }}
+            onRestoreError={() => {
+              setPurchaseError("Could not restore purchases. Please try again.");
+              trackPurchaseResult("error", "restore");
+            }}
+            onDismiss={() => {
+              void (async () => {
+                try {
+                  const info = await getRevenueCatCustomerInfo();
+                  const active = hasActiveRevenueCatEntitlement(info);
+                  if (active) {
+                    await completeOnboardingAfterPurchase("revenuecat");
+                  }
+                } catch {
+                  // noop
+                }
+              })();
+            }}
+          />
+        ) : paywallInitError ? (
+          <View style={styles.initErrorWrap}>
+            <Text style={styles.purchaseError}>{paywallInitError}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={() => void initializePaywall()}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <ActivityIndicator style={styles.spinner} />
+        )}
 
         {syncing ? <ActivityIndicator style={styles.spinner} /> : null}
         {purchaseError ? <Text style={styles.purchaseError}>{purchaseError}</Text> : null}
@@ -226,8 +271,26 @@ const styles = StyleSheet.create({
   paywall: {
     flex: 1,
   },
+  initErrorWrap: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: spacing.lg,
+    gap: spacing.sm,
+  },
   spinner: {
     marginTop: spacing.sm,
+  },
+  retryButton: {
+    backgroundColor: colors.accentGold,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  retryButtonText: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.textPrimary,
   },
   legalRow: {
     marginTop: spacing.sm,

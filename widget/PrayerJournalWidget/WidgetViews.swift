@@ -67,7 +67,6 @@ struct PrayerJournalSmallWidgetView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(widgetBackground.opacity(0.9))
         )
-        .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 2)
         .widgetURL(URL(string: "prayer-journal://pray"))
     }
 }
@@ -114,7 +113,7 @@ struct PrayerJournalMediumWidgetView: View {
                     Image(systemName: "mic.fill")
                         .font(.system(size: 20, weight: .regular))
                         .foregroundColor(accentText.opacity(0.9))
-                    Text("Pray Now")
+                    Text(entry.content.isSignedIn ? "Pray Now" : "Open App")
                         .font(.custom("Georgia", size: 11))
                         .foregroundColor(accentText.opacity(0.9))
                 }
@@ -125,7 +124,6 @@ struct PrayerJournalMediumWidgetView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(widgetBackground.opacity(0.9))
             )
-            .shadow(color: Color.black.opacity(0.05), radius: 6, x: 0, y: 2)
         }
         // WidgetKit supports one tap target for this widget configuration without AppIntents.
         .widgetURL(URL(string: "prayer-journal://pray"))

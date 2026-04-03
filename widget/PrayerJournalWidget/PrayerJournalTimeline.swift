@@ -20,7 +20,8 @@ struct PrayerJournalTimelineProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<PrayerJournalTimelineEntry>) -> Void) {
         let now = Date()
         let entry = PrayerJournalTimelineEntry(date: now, content: getDailyContent(for: now))
-        let timeline = Timeline(entries: [entry], policy: .atEnd)
+        let refreshDate = Calendar.current.date(byAdding: .minute, value: 5, to: now) ?? now.addingTimeInterval(300)
+        let timeline = Timeline(entries: [entry], policy: .after(refreshDate))
         completion(timeline)
     }
 }

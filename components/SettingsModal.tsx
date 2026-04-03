@@ -41,6 +41,7 @@ import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useTheme } from "../contexts/ThemeContext";
 import { getSupabase } from "../lib/supabaseClient";
+import { setWidgetSignedInState } from "../lib/widgetAuthState";
 import { fonts, spacing } from "../theme/theme";
 
 interface SettingsModalProps {
@@ -582,14 +583,22 @@ export default function SettingsModal({
 
   const handleSignOut = async () => {
     try {
-      // Fully sign out from Supabase
-      await getSupabase().auth.signOut();
+      const { error } = await getSupabase().auth.signOut();
+      if (error) {
+        throw error;
+      }
+      await setWidgetSignedInState(false);
 
-      // Clear any persisted session data
+      // Clear session keys used by this app and older builds.
+      await AsyncStorage.removeItem("prayer-journal-auth");
       await AsyncStorage.removeItem("supabase_session");
 
-      // Force navigation reset to login
-      router.replace("/(auth)/onboarding/login");
+      // Best effort cleanup of user-facing reminders after sign-out.
+      await cancelDailyPrayerNotification();
+      await cancelNightlyReflectionPrompt();
+
+      closeEverything();
+      router.replace("/(auth)/onboarding/welcome");
     } catch (err: any) {
       Alert.alert("Sign out failed", err?.message ?? "Please try again.");
     }

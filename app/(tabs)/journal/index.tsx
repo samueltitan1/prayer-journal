@@ -1094,6 +1094,9 @@ useEffect(() => {
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
         staysActiveInBackground: false,
+        interruptionModeIOS: (Audio as any).InterruptionModeIOS?.MixWithOthers ?? 0,
+        interruptionModeAndroid: (Audio as any).InterruptionModeAndroid?.DuckOthers ?? 2,
+        shouldDuckAndroid: true,
         playThroughEarpieceAndroid: !playThroughSpeaker,
       });
     } catch (e) {

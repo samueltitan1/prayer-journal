@@ -35,6 +35,13 @@ const inferPlan = (productId: string | null | undefined) => {
   return "unknown";
 };
 
+const resolvePlan = (inferredPlan: string, existingPlan: string | null | undefined) => {
+  if (inferredPlan && inferredPlan !== "unknown") return inferredPlan;
+  const normalizedExisting = (existingPlan ?? "").toLowerCase();
+  if (normalizedExisting && normalizedExisting !== "unknown") return normalizedExisting;
+  return "free";
+};
+
 const inferStatus = (eventType: string, expiresAt: string | null, periodType: string | null) => {
   const type = (eventType ?? "").toUpperCase();
   const expiresMs = expiresAt ? new Date(expiresAt).getTime() : 0;
@@ -131,7 +138,19 @@ serve(async (req: Request): Promise<Response> => {
     const trialStartedAt = isTrial ? purchasedAt : null;
     const trialEndsAt = isTrial ? expiresAt : null;
     const status = inferStatus(eventType ?? "", expiresAt, periodType);
-    const plan = inferPlan(productId);
+    const inferredPlan = inferPlan(productId);
+
+    const { data: existingSubscription, error: existingSubscriptionError } = await service
+      .from("subscriptions")
+      .select("plan")
+      .eq("user_id", appUserId)
+      .maybeSingle();
+
+    if (existingSubscriptionError) {
+      return json({ error: existingSubscriptionError.message }, 500);
+    }
+
+    const plan = resolvePlan(inferredPlan, existingSubscription?.plan ?? null);
 
     const shouldResetReminderMarkers = eventTypeUpper.includes("INITIAL_PURCHASE") && isTrial;
 

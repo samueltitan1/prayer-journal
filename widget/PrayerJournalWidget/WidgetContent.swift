@@ -10,6 +10,7 @@ struct WidgetEntry {
     let body: String
     let reference: String?
     let date: Date
+    let isSignedIn: Bool
 }
 
 let EXAMEN_QUESTIONS: [String] = [
@@ -138,7 +139,38 @@ let BIBLE_VERSES: [(text: String, reference: String)] = [
     )
 ]
 
+private let WIDGET_APP_GROUP = "group.app.prayerjournal.widget"
+private let WIDGET_AUTH_KEY = "widget_signed_in"
+
+private func isWidgetUserSignedIn() -> Bool {
+    guard let defaults = UserDefaults(suiteName: WIDGET_APP_GROUP) else {
+        return false
+    }
+
+    if let value = defaults.object(forKey: WIDGET_AUTH_KEY) as? [String: Any],
+       let signedIn = value["signedIn"] as? Bool {
+        return signedIn
+    }
+
+    if let signedIn = defaults.object(forKey: WIDGET_AUTH_KEY) as? Bool {
+        return signedIn
+    }
+
+    return false
+}
+
 func getDailyContent(for date: Date) -> WidgetEntry {
+    let signedIn = isWidgetUserSignedIn()
+    if !signedIn {
+        return WidgetEntry(
+            type: .question,
+            body: "Open Prayer Journal to view today's prompt.",
+            reference: nil,
+            date: date,
+            isSignedIn: false
+        )
+    }
+
     let dayOfYear = Calendar.current.ordinality(of: .day, in: .year, for: date) ?? 1
     let index = (dayOfYear / 2)
 
@@ -148,7 +180,8 @@ func getDailyContent(for date: Date) -> WidgetEntry {
             type: .verse,
             body: verse.text,
             reference: verse.reference,
-            date: date
+            date: date,
+            isSignedIn: true
         )
     }
 
@@ -157,6 +190,7 @@ func getDailyContent(for date: Date) -> WidgetEntry {
         type: .question,
         body: question,
         reference: nil,
-        date: date
+        date: date,
+        isSignedIn: true
     )
 }

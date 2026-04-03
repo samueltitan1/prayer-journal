@@ -39,52 +39,61 @@ export default function TabsLayout() {
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      const { data } = await getSupabase().auth.getSession();
-      const session = data.session;
-      if (!session?.user?.id) {
+      try {
+        const { data } = await getSupabase().auth.getSession();
+        const session = data.session;
+        if (!session?.user?.id) {
+          setSettingsUserId(null);
+          if (__DEV__) console.log("tabs guard: no session -> welcome");
+          router.replace("/(auth)/onboarding/welcome");
+          return;
+        }
+
+        const userId = session.user.id;
+        setSettingsUserId(userId);
+        const onboarding = await getOnboardingResponsesSnapshot(userId);
+        const completed = Boolean(onboarding?.onboarding_completed_at);
+        const step = onboarding?.onboarding_step ?? null;
+
+        if (!completed) {
+          if (step === "login" || step === "signup") {
+            if (__DEV__) console.log("tabs guard: stale auth step while authed -> paywall");
+            await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
+            router.replace("/(auth)/onboarding/paywall");
+            return;
+          }
+          const allowed = new Set([
+            "welcome",
+            "survey",
+            "privacy",
+            "apple-health",
+            "reminder",
+            "signup",
+            "login",
+            "preparing",
+            "paywall",
+            "congratulations",
+          ]);
+          const next = step && allowed.has(step) ? step : "welcome";
+          if (__DEV__) console.log("tabs guard: onboarding incomplete ->", next);
+          router.replace(`/(auth)/onboarding/${next}`);
+          return;
+        }
+
+        const entitlement = await getEntitlement(userId);
+        if (!entitlement.active) {
+          if (__DEV__) console.log("tabs guard: no entitlement -> paywall");
+          await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
+          router.replace("/(auth)/onboarding/paywall");
+          return;
+        }
+      } catch (error) {
+        console.error("tabs guard failed", error);
         setSettingsUserId(null);
-        if (__DEV__) console.log("tabs guard: no session -> welcome");
         router.replace("/(auth)/onboarding/welcome");
+      } finally {
         if (!cancelled) setChecking(false);
-        return;
       }
-
-      const userId = session.user.id;
-      setSettingsUserId(userId);
-      const onboarding = await getOnboardingResponsesSnapshot(userId);
-      const completed = Boolean(onboarding?.onboarding_completed_at);
-      const step = onboarding?.onboarding_step ?? null;
-
-      if (!completed) {
-        const allowed = new Set([
-          "welcome",
-          "survey",
-          "privacy",
-          "apple-health",
-          "reminder",
-          "signup",
-          "login",
-          "preparing",
-          "paywall",
-          "congratulations",
-        ]);
-        const next = step && allowed.has(step) ? step : "welcome";
-        if (__DEV__) console.log("tabs guard: onboarding incomplete ->", next);
-        router.replace(`/(auth)/onboarding/${next}`);
-        if (!cancelled) setChecking(false);
-        return;
-      }
-
-      const entitlement = await getEntitlement(userId);
-      if (!entitlement.active) {
-        if (__DEV__) console.log("tabs guard: no entitlement -> paywall");
-        await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
-        router.replace("/(auth)/onboarding/paywall");
-        if (!cancelled) setChecking(false);
-        return;
-      }
-
-      if (!cancelled) setChecking(false);
     };
 
     void run();

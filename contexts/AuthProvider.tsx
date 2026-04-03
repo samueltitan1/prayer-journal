@@ -2,6 +2,7 @@
 import { scheduleDailyPrayerNotification } from "@/lib/notifications";
 import { syncRevenueCatIdentity } from "@/lib/revenuecat";
 import { getSupabase } from "@/lib/supabaseClient";
+import { setWidgetSignedInState } from "@/lib/widgetAuthState";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { User } from "@supabase/supabase-js";
 import {
@@ -90,6 +91,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       setUser(nextUser);
       setEmailConfirmed(!!nextUser?.email_confirmed_at);
       setLoading(false);
+      await setWidgetSignedInState(Boolean(nextUser?.id));
     
       if (nextUser?.id) {
         await applyPendingReminderIfAny(nextUser.id);
@@ -121,6 +123,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         setUser(null);
         setEmailConfirmed(false);
         setLoading(false);
+        await setWidgetSignedInState(false);
         try {
           await syncRevenueCatIdentity(null);
         } catch (error) {
@@ -133,6 +136,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       setUser(nextUser);
       setEmailConfirmed(!!nextUser?.email_confirmed_at);
       setLoading(false);
+      await setWidgetSignedInState(Boolean(nextUser?.id));
     
       if (nextUser?.id) {
         await applyPendingReminderIfAny(nextUser.id);
