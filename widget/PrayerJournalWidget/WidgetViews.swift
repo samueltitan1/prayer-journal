@@ -64,15 +64,8 @@ struct PrayerJournalSmallWidgetView: View {
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
-            Group {
-                if #available(iOS 17.0, *) {
-                    Color.clear
-                        .containerBackground(.clear, for: .widget)
-                } else {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(widgetBackground.opacity(0.9))
-                }
-            }
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(widgetBackground.opacity(0.9))
         )
         .widgetURL(URL(string: "prayer-journal://pray"))
     }
@@ -128,15 +121,8 @@ struct PrayerJournalMediumWidgetView: View {
                 .frame(width: rightWidth, height: proxy.size.height, alignment: .center)
             }
             .background(
-                Group {
-                    if #available(iOS 17.0, *) {
-                        Color.clear
-                            .containerBackground(.clear, for: .widget)
-                    } else {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(widgetBackground.opacity(0.9))
-                    }
-                }
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(widgetBackground.opacity(0.9))
             )
         }
         // WidgetKit supports one tap target for this widget configuration without AppIntents.
@@ -166,17 +152,6 @@ struct PrayerJournalLockWidgetView: View {
                     .widgetAccentable()
             }
         }
-        .background(
-            Group {
-                if #available(iOS 17.0, *) {
-                    Color.clear
-                        .containerBackground(.clear, for: .widget)
-                } else {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(widgetBackground.opacity(0.9))
-                }
-            }
-        )
         .widgetURL(URL(string: "prayer-journal://pray"))
     }
 }

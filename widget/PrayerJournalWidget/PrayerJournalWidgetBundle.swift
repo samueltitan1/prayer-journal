@@ -2,13 +2,16 @@ import SwiftUI
 import WidgetKit
 
 private extension WidgetConfiguration {
-    @ViewBuilder
     func withPrayerJournalContainerBackground() -> some WidgetConfiguration {
+        #if swift(>=5.9)
         if #available(iOSApplicationExtension 17.0, *) {
             self.containerBackground(.clear, for: .widget)
         } else {
             self
         }
+        #else
+        self
+        #endif
     }
 }
 
