@@ -64,29 +64,11 @@ export default function SplashScreen() {
           "congratulations",
         ]);
         if (step === "login" || step === "signup") {
-          if (__DEV__) console.log("boot: step is auth screen (login/signup) while authed -> entitlement check");
-          try {
-            const entitlement = await getEntitlement(userId);
-            if (__DEV__) console.log("boot: entitlement (auth-step) OK", entitlement);
-
-            if (entitlement.active) {
-              // Returning user: go straight to the app.
-              if (__DEV__) console.log("boot: entitled (auth-step) -> tabs/journal");
-              router.replace('/(tabs)/journal');
-              return;
-            }
-
-            // Not entitled: send to paywall.
-            if (__DEV__) console.log("boot: not entitled (auth-step) -> paywall");
-            await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
-            router.replace('/(auth)/onboarding/paywall');
-            return;
-          } catch (e) {
-            console.error("boot: entitlement (auth-step) FAILED", e);
-            // Safe fallback.
-            router.replace('/(auth)/onboarding/paywall');
-            return;
-          }
+          // Session exists; force paywall path instead of returning to auth screens.
+          if (__DEV__) console.log("boot: step is auth screen (login/signup) while authed -> paywall");
+          await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
+          router.replace('/(auth)/onboarding/paywall');
+          return;
         }
         if (step && allowed.has(step)) {
           if (__DEV__) console.log("boot: resume onboarding ->", step);
@@ -112,7 +94,7 @@ export default function SplashScreen() {
         }
       } catch (e) {
         console.error("boot: entitlement FAILED", e);
-        // If entitlement check fails, route to paywall (safe default) instead of crashing.
+        // If entitlement check fails, route to paywall (safe default).
         router.replace('/(auth)/onboarding/paywall');
         return;
       }

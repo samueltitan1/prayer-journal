@@ -84,24 +84,34 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         };
 
     // 1. Load initial session
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!isMounted) return;
-    
-      const nextUser = data.session?.user ?? null;
-      setUser(nextUser);
-      setEmailConfirmed(!!nextUser?.email_confirmed_at);
-      setLoading(false);
-      await setWidgetSignedInState(Boolean(nextUser?.id));
-    
-      if (nextUser?.id) {
-        await applyPendingReminderIfAny(nextUser.id);
-      }
-      try {
-        await syncRevenueCatIdentity(nextUser?.id ?? null);
-      } catch (error) {
-        console.warn("RevenueCat identity sync failed", error);
-      }
-    });
+    supabase.auth
+      .getSession()
+      .then(async ({ data }) => {
+        if (!isMounted) return;
+
+        const nextUser = data.session?.user ?? null;
+        setUser(nextUser);
+        setEmailConfirmed(!!nextUser?.email_confirmed_at);
+        setLoading(false);
+        await setWidgetSignedInState(Boolean(nextUser?.id));
+
+        if (nextUser?.id) {
+          await applyPendingReminderIfAny(nextUser.id);
+        }
+        try {
+          await syncRevenueCatIdentity(nextUser?.id ?? null);
+        } catch (error) {
+          console.warn("RevenueCat identity sync failed", error);
+        }
+      })
+      .catch(async (error) => {
+        console.warn("AuthProvider getSession failed", error);
+        if (!isMounted) return;
+        setUser(null);
+        setEmailConfirmed(false);
+        setLoading(false);
+        await setWidgetSignedInState(false);
+      });
 
     // Keep refresh running only while app is active (RN best practice).
     supabase.auth.startAutoRefresh();

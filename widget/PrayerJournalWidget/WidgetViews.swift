@@ -63,10 +63,7 @@ struct PrayerJournalSmallWidgetView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(widgetBackground.opacity(0.9))
-        )
+        .background(widgetBackground)
         .widgetURL(URL(string: "prayer-journal://pray"))
     }
 }
@@ -120,10 +117,7 @@ struct PrayerJournalMediumWidgetView: View {
                 .padding(.horizontal, 8)
                 .frame(width: rightWidth, height: proxy.size.height, alignment: .center)
             }
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(widgetBackground.opacity(0.9))
-            )
+            .background(widgetBackground)
         }
         // WidgetKit supports one tap target for this widget configuration without AppIntents.
         .widgetURL(URL(string: "prayer-journal://pray"))

@@ -132,7 +132,11 @@ function RootNavigator() {
       paywallUpsertedForUserRef.current = null;
       return;
     }
-    if (onboardingComplete === true && entitled === false && paywallUpsertedForUserRef.current !== userId) {
+    if (
+      onboardingComplete === true &&
+      entitled === false &&
+      paywallUpsertedForUserRef.current !== userId
+    ) {
       paywallUpsertedForUserRef.current = userId;
       void upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
     }
@@ -333,6 +337,7 @@ function BiometricLockGate({ children }: { children: any }) {
 
 export default function RootLayout() {
   const router = useRouter();
+  const lastDeepLinkNavRef = useRef<{ target: string; at: number } | null>(null);
   const [fontsLoaded] = useFonts({
     PlayfairDisplay_500Medium,
     PlayfairDisplay_700Bold,
@@ -384,9 +389,21 @@ export default function RootLayout() {
             return;
           }
 
-          router.replace("/(tabs)/pray");
+          const target = "/(tabs)/pray";
+          const last = lastDeepLinkNavRef.current;
+          const now = Date.now();
+          if (!last || last.target !== target || now - last.at > 1500) {
+            lastDeepLinkNavRef.current = { target, at: now };
+            router.replace(target);
+          }
         } catch {
-          router.replace("/(auth)/onboarding/welcome");
+          const target = "/(auth)/onboarding/welcome";
+          const last = lastDeepLinkNavRef.current;
+          const now = Date.now();
+          if (!last || last.target !== target || now - last.at > 1500) {
+            lastDeepLinkNavRef.current = { target, at: now };
+            router.replace(target);
+          }
         }
       })();
     },

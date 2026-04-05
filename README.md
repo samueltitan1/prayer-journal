@@ -1,75 +1,143 @@
 # Prayer Journal
 
-A mobile app for recording and reflecting on prayers, built with Expo Router.
+Prayer Journal is an Expo/React Native app for guided prayer, voice/text journaling, reflections, and subscription-gated access.
 
-## Project Structure
+## Current App Structure
 
-```
+```text
 app/
-├── _layout.tsx              # Root layout
-├── index.tsx                # Splash screen
-├── onboarding/              # Onboarding flow
+├── _layout.tsx
+├── index.tsx
+├── (auth)/
 │   ├── _layout.tsx
-│   ├── 1.tsx
-│   ├── 2.tsx
-│   ├── 3.tsx
-│   ├── reminder.tsx
-│   └── reminder2.tsx
-├── auth/                    # Authentication
-│   ├── _layout.tsx
-│   ├── login.tsx
-│   └── signup.tsx
-├── (tabs)/                  # Main app tabs
-│   ├── _layout.tsx
-│   ├── pray/                # Prayer recording
-│   │   ├── index.tsx
-│   │   ├── recording.tsx
-│   │   └── saved.tsx
-│   └── journal/             # Journal view
+│   ├── reset-password.tsx
+│   └── onboarding/
+│       ├── _layout.tsx
 │       ├── index.tsx
-│       └── entry.tsx
-├── settings.tsx             # Settings screen
-└── paywall.tsx              # Subscription screen
+│       ├── welcome.tsx
+│       ├── survey.tsx
+│       ├── privacy.tsx
+│       ├── apple-health.tsx
+│       ├── reminder.tsx
+│       ├── biometric-setup.tsx
+│       ├── preparing.tsx
+│       ├── congratulations.tsx
+│       ├── signup.tsx
+│       ├── login.tsx
+│       ├── paywall.tsx
+│       ├── confirm-email.tsx
+│       └── splash.tsx
+└── (tabs)/
+    ├── _layout.tsx
+    ├── pray/index.tsx
+    └── journal/index.tsx
 ```
 
-## Getting Started
+## Widget
 
-1. Install dependencies:
+iOS widget source lives in:
+
+```text
+widget/PrayerJournalWidget/
+```
+
+The custom config plugin copies widget files into `ios/PrayerJournalWidget` during prebuild:
+
+- `plugins/withPrayerJournalWidget.js`
+
+Important: treat `widget/PrayerJournalWidget` as source of truth for widget changes.
+
+## Supabase
+
+Supabase assets in this repo:
+
+```text
+supabase/
+├── migrations/
+└── functions/
+    ├── transcribe
+    ├── ocr
+    ├── generate_reflection
+    ├── validate-apple-subscription
+    ├── sync-revenuecat-subscription
+    └── revenuecat-webhook
+```
+
+## Environment Variables
+
+### App (`EXPO_PUBLIC_*`)
+
+- `EXPO_PUBLIC_SUPABASE_URL` (or `EXPO_PUBLIC_SUPABASE_URL_PUBLIC`)
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY` (or `EXPO_PUBLIC_SUPABASE_ANON_KEY_PUBLIC`)
+- `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`
+- `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`
+- `EXPO_PUBLIC_POSTHOG_API_KEY`
+- `EXPO_PUBLIC_POSTHOG_HOST`
+- `EXPO_PUBLIC_REVENUECAT_API_KEY_IOS`
+- `EXPO_PUBLIC_REVENUECAT_API_KEY_ANDROID`
+- `EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID` (optional, defaults to `pro`)
+- `EXPO_PUBLIC_REVENUECAT_DEBUG_LOGS` (optional; `1` to enable debug logs in dev)
+
+### Supabase Edge Function Secrets
+
+- `OPENAI_API_KEY`
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `REVENUECAT_SECRET_API_KEY`
+- `REVENUECAT_ENTITLEMENT_ID`
+- `REVENUECAT_WEBHOOK_AUTH`
+- `AZURE_VISION_ENDPOINT`
+- `AZURE_VISION_KEY`
+- `APPLE_ISSUER_ID`
+- `APPLE_KEY_ID`
+- `APPLE_PRIVATE_KEY`
+- `APPLE_BUNDLE_ID`
+
+## Local Development
+
+Install:
+
 ```bash
 npm install
 ```
 
-2. Start the development server:
-```bash
-npm start
-```
+Run:
 
-3. Run on iOS:
 ```bash
+npm run start
 npm run ios
-```
-
-4. Run on Android:
-```bash
 npm run android
-```
-
-5. Run on Web:
-```bash
 npm run web
 ```
 
-## Features
+Typecheck:
 
-- Prayer recording interface
-- Journal with calendar view
-- Weekly and monthly reflections
-- Settings and preferences
-- Subscription management
+```bash
+npx tsc --noEmit
+```
+
+## Build & Release Notes
+
+- EAS is configured with remote app versioning (`eas.json` -> `"appVersionSource": "remote"`).
+- Production profile uses `autoIncrement`.
+- iOS widget is included via custom plugin and EAS app extension config.
+
+## Subscription / Access Model
+
+- Canonical subscription state is stored in `public.subscriptions`.
+- RevenueCat sync updates subscription status.
+- Entitlement checks read subscription status plus override fields.
+- Permanent/manual grants are supported through:
+  - `access_override`
+  - `access_override_reason`
+  - `access_override_expires_at`
 
 ## Tech Stack
 
-- Expo Router (file-based routing)
-- React Native
+- Expo SDK 54
+- React Native 0.81
+- Expo Router
+- Supabase
+- RevenueCat
 - TypeScript
-

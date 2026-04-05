@@ -184,6 +184,7 @@ export default function PrayScreen() {
   const [walkMapWarning, setWalkMapWarning] = useState(false);
   const [walkMapUri, setWalkMapUri] = useState<string | null>(null);
   const [draftWalkDistanceMeters, setDraftWalkDistanceMeters] = useState<number | null>(null);
+  const [streakReloadNonce, setStreakReloadNonce] = useState(0);
   const [mapSnapshotVisible, setMapSnapshotVisible] = useState(false);
   const [mapSnapshotCoords, setMapSnapshotCoords] = useState<Array<{ latitude: number; longitude: number }>>([]);
   const mapSnapshotResolveRef = useRef<null | ((uri: string | null, errorCode?: string) => void)>(null);
@@ -193,7 +194,6 @@ export default function PrayScreen() {
   const [appleHealthConnected, setAppleHealthConnected] = useState<boolean | null>(null);
   const healthKitOptInRef = useRef(false);
   const lastAppStateRef = useRef(AppState.currentState);
-
   const logWalk = useCallback((event: string, meta?: Record<string, unknown>) => {
     if (!__DEV__) return;
     if (meta) {
@@ -271,11 +271,16 @@ export default function PrayScreen() {
 
   // Load user ID
   useEffect(() => {
+    let cancelled = false;
     const getUserId = async () => {
       const { data } = await getSupabase().auth.getUser();
+      if (cancelled) return;
       setUserId(data?.user?.id ?? null);
     };
     getUserId();
+    return () => {
+      cancelled = true;
+    };
   }, []);
   
   const refreshOfflineCount = async (uid?: string | null) => {
@@ -304,6 +309,7 @@ export default function PrayScreen() {
 
   useEffect(() => {
     if (!userId) return;
+    let cancelled = false;
     (async () => {
       try {
         const { data, error } = await getSupabase()
@@ -312,17 +318,22 @@ export default function PrayScreen() {
           .eq("user_id", userId)
           .maybeSingle();
         if (error) return;
+        if (cancelled) return;
         const connected = data?.apple_health_connected === true;
         setAppleHealthConnected(connected);
         healthKitOptInRef.current = connected;
       } catch {}
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [userId]);
 
   // Load streak count
 // Load streak (local calculation, instant + matches Journal)
 useEffect(() => {
   if (!userId) return;
+  let cancelled = false;
 
   const loadStreak = async () => {
     const { data: rows, error } = await getSupabase()
@@ -331,15 +342,14 @@ useEffect(() => {
       .eq("user_id", userId)
       .order("prayed_at", { ascending: false });
 
+    if (cancelled) return;
     if (error || !rows) {
       setDayCount(0);
       return;
     }
 
     // Extract unique YYYY-MM-DD keys
-    const allDates = Array.from(
-      new Set(rows.map((p) => p.prayed_at.slice(0, 10)))
-    );
+    const allDatesSet = new Set(rows.map((p) => p.prayed_at.slice(0, 10)));
 
 
     // Same logic as Journal
@@ -354,7 +364,7 @@ useEffect(() => {
 
     while (true) {
       const key = formatDateKey(day);
-      if (allDates.includes(key)) {
+      if (allDatesSet.has(key)) {
         streak++;
         day.setDate(day.getDate() - 1);
       } else {
@@ -362,15 +372,20 @@ useEffect(() => {
       }
     }
 
+    if (cancelled) return;
     setDayCount(streak);
   };
 
   loadStreak();
-}, [userId, prayState]);
+  return () => {
+    cancelled = true;
+  };
+}, [userId, streakReloadNonce]);
 
   // 🔥 Load reminder setting whenever userId changes or settings modal closes
   useEffect(() => {
     if (!userId) return;
+    let cancelled = false;
 
     const fetchSettings = async () => {
       const { data, error } = await getSupabase()
@@ -384,6 +399,7 @@ useEffect(() => {
       // If DB read fails, fall back to on-device schedule status
       if (error) {
         const status = await getDailyPrayerReminderStatus();
+        if (cancelled) return;
         setDailyReminderEnabled(Boolean(status.enabled));
         return;
       }
@@ -396,6 +412,7 @@ useEffect(() => {
       if (!dbDailyEnabled) {
         const status = await getDailyPrayerReminderStatus();
         if (status.enabled) {
+          if (cancelled) return;
           setDailyReminderEnabled(true);
 
           // Best-effort backfill so future loads/devices are consistent
@@ -424,10 +441,14 @@ useEffect(() => {
         }
       }
 
+      if (cancelled) return;
       setDailyReminderEnabled(dbDailyEnabled);
     };
 
     fetchSettings();
+    return () => {
+      cancelled = true;
+    };
   }, [userId, settingsRefreshNonce]);
 
   useEffect(() => {
@@ -894,7 +915,12 @@ useEffect(() => {
     capture("walk_map_snapshot_started", { point_count: coords.length });
   
     return new Promise<string | null>((resolve) => {
+      let timeoutId: NodeJS.Timeout | null = null;
       mapSnapshotResolveRef.current = async (uri, errorCode) => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
         mapSnapshotInFlightRef.current = false;
         const ms = Date.now() - startedAt;
         if (uri) {
@@ -916,7 +942,7 @@ useEffect(() => {
       setMapSnapshotVisible(true);
   
       // hard timeout (never hang stopWalk)
-      setTimeout(() => {
+      timeoutId = setTimeout(() => {
         if (mapSnapshotResolveRef.current) {
           setMapSnapshotVisible(false);
           mapSnapshotResolveRef.current?.(null, "timeout");
@@ -1972,6 +1998,7 @@ useEffect(() => {
     };
     let saveStart = 0;
     let insertSucceeded = false;
+    let savedLocallyOrRemotely = false;
 
     try {
       setIsProcessing(true);
@@ -2025,6 +2052,7 @@ useEffect(() => {
 
         if (insertError) throw insertError;
         insertSucceeded = true;
+        savedLocallyOrRemotely = true;
         await cancelStreakFollowupNotification();
         capture("prayer_save_succeeded", {
           ...baseSaveProps,
@@ -2161,9 +2189,13 @@ useEffect(() => {
           isBookmarked: bookmarkToSave,
           audioUri: editorMode === "audio" && keepAudioToSave ? draftAudioUri : null,
         });
+        savedLocallyOrRemotely = true;
         await refreshOfflineCount(userId);
         showSyncBanner("We’ll retry uploading your prayer when you’re online.");
         console.log("Saved offline (queued):", e?.message || e);
+      }
+      if (savedLocallyOrRemotely) {
+        setStreakReloadNonce((n) => n + 1);
       }
       // Show Day X complete toast only once per calendar day, if not showing milestone modal
       try {

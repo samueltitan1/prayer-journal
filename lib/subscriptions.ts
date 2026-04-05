@@ -3,6 +3,8 @@ import { getSupabase } from "@/lib/supabaseClient";
 export type SubscriptionSnapshot = {
   status?: string | null;
   current_period_end?: string | null;
+  access_override?: boolean | null;
+  access_override_expires_at?: string | null;
 };
 
 export async function getEntitlement(userId: string | null | undefined) {
@@ -11,7 +13,7 @@ export async function getEntitlement(userId: string | null | undefined) {
   try {
     const { data, error } = await getSupabase()
       .from("subscriptions")
-      .select("status, current_period_end")
+      .select("status, current_period_end, access_override, access_override_expires_at")
       .eq("user_id", userId)
       .maybeSingle();
     if (error) {
@@ -21,10 +23,19 @@ export async function getEntitlement(userId: string | null | undefined) {
 
     const end = data?.current_period_end ?? null;
     const endMs = end ? new Date(end).getTime() : 0;
+    const overrideEnabled = data?.access_override === true;
+    const overrideExpiresAt = data?.access_override_expires_at ?? null;
+    const overrideExpiresMs = overrideExpiresAt
+      ? new Date(overrideExpiresAt).getTime()
+      : 0;
+    const overrideActive =
+      overrideEnabled &&
+      (!overrideExpiresAt ||
+        (Number.isFinite(overrideExpiresMs) && overrideExpiresMs > Date.now()));
     const activeByStatus =
       data?.status === "active" || data?.status === "trialing";
     const activeByEnd = !!end && endMs > Date.now();
-    const active = activeByStatus || activeByEnd;
+    const active = overrideActive || activeByStatus || activeByEnd;
     return { active, currentPeriodEnd: end };
   } catch (e) {
     console.warn("Failed to load subscription snapshot (exception)", e);

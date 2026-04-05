@@ -626,7 +626,7 @@ const bookmarkedPrayers = useMemo(() => {
 
         const { data: rows, error } = await getSupabase()
           .from("prayers")
-          .select("*")
+          .select("id,user_id,prayed_at,transcript_text,duration_seconds,audio_path,bible_reference,bible_version,location_name,entry_source,walk_map_path,walk_distance_meters,walk_steps")
           .eq("user_id", userId)
           .gte("prayed_at", monthStart)
           .lte("prayed_at", monthEnd)

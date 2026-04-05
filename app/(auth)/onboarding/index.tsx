@@ -23,8 +23,6 @@ export default function OnboardingIndex() {
         "privacy",
         "apple-health",
         "reminder",
-        "signup",
-        "login",
         "preparing",
         "paywall",
         "congratulations",

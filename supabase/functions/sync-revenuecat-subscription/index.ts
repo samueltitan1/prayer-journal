@@ -122,7 +122,12 @@ serve(async (req: Request): Promise<Response> => {
     const periodType =
       (subscription?.period_type ?? activeEntitlement?.period_type ?? "").toLowerCase();
     const active = Boolean(expiresAt && expiresMs > Date.now());
-    const status = active ? (periodType === "trial" ? "trialing" : "active") : "expired";
+    const hasKnownSubscription = Boolean(activeEntitlement || subscription || productId);
+    const status = !hasKnownSubscription
+      ? "incomplete"
+      : active
+      ? (periodType === "trial" ? "trialing" : "active")
+      : "expired";
     const purchasedAt = toIso(
       subscription?.purchase_date ?? activeEntitlement?.purchase_date ?? null
     );
