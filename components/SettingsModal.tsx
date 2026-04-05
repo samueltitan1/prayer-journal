@@ -617,6 +617,7 @@ export default function SettingsModal({
             return;
           }
           await getSupabase().auth.signOut();
+          await setWidgetSignedInState(false);
           closeEverything();
         },
       },

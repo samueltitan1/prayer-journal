@@ -8,7 +8,7 @@ export type SubscriptionSnapshot = {
 };
 
 export async function getEntitlement(userId: string | null | undefined) {
-  if (!userId) return { active: false, currentPeriodEnd: null };
+  if (!userId) return { active: false, currentPeriodEnd: null, source: "none" as const };
 
   try {
     const { data, error } = await getSupabase()
@@ -18,7 +18,7 @@ export async function getEntitlement(userId: string | null | undefined) {
       .maybeSingle();
     if (error) {
       console.warn("Failed to load subscription snapshot", error);
-      return { active: false, currentPeriodEnd: null };
+      return { active: false, currentPeriodEnd: null, source: "none" as const };
     }
 
     const end = data?.current_period_end ?? null;
@@ -36,9 +36,16 @@ export async function getEntitlement(userId: string | null | undefined) {
       data?.status === "active" || data?.status === "trialing";
     const activeByEnd = !!end && endMs > Date.now();
     const active = overrideActive || activeByStatus || activeByEnd;
-    return { active, currentPeriodEnd: end };
+    const source = overrideActive
+      ? "override"
+      : activeByStatus
+      ? "status"
+      : activeByEnd
+      ? "period_end"
+      : "none";
+    return { active, currentPeriodEnd: end, source };
   } catch (e) {
     console.warn("Failed to load subscription snapshot (exception)", e);
-    return { active: false, currentPeriodEnd: null };
+    return { active: false, currentPeriodEnd: null, source: "none" as const };
   }
 }

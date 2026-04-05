@@ -50,6 +50,14 @@ export default function SplashScreen() {
 
       const completed = Boolean(onboarding?.onboarding_completed_at);
       const step = onboarding?.onboarding_step ?? null;
+      let entitlementSnapshot: Awaited<ReturnType<typeof getEntitlement>> | null = null;
+      const ensureEntitlement = async () => {
+        if (entitlementSnapshot) return entitlementSnapshot;
+        if (__DEV__) console.log("boot: checking entitlement", userId);
+        entitlementSnapshot = await getEntitlement(userId);
+        if (__DEV__) console.log("boot: entitlement OK", entitlementSnapshot);
+        return entitlementSnapshot;
+      };
 
       if (!completed) {
         const allowed = new Set([
@@ -64,8 +72,21 @@ export default function SplashScreen() {
           "congratulations",
         ]);
         if (step === "login" || step === "signup") {
-          // Session exists; force paywall path instead of returning to auth screens.
-          if (__DEV__) console.log("boot: step is auth screen (login/signup) while authed -> paywall");
+          // Session exists; never send authed users back to login/signup.
+          const entitlement = await ensureEntitlement();
+          if (entitlement.active) {
+            if (__DEV__) {
+              console.log(
+                "boot: step is auth screen but user is entitled -> tabs/journal",
+                entitlement.source
+              );
+            }
+            router.replace('/(tabs)/journal');
+            return;
+          }
+          if (__DEV__) {
+            console.log("boot: step is auth screen (login/signup) while authed -> paywall");
+          }
           await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
           router.replace('/(auth)/onboarding/paywall');
           return;
@@ -82,9 +103,7 @@ export default function SplashScreen() {
 
       // --- Entitlement ---
       try {
-        if (__DEV__) console.log("boot: checking entitlement", userId);
-        const entitlement = await getEntitlement(userId);
-        if (__DEV__) console.log("boot: entitlement OK", entitlement);
+        const entitlement = await ensureEntitlement();
 
         if (!entitlement.active) {
           if (__DEV__) console.log("boot: onboarding complete but no entitlement -> paywall");

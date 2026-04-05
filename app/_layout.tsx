@@ -5,8 +5,8 @@ import {
   PlayfairDisplay_700Bold,
   useFonts,
 } from "@expo-google-fonts/playfair-display";
-import * as Notifications from "expo-notifications";
 import * as Linking from "expo-linking";
+import * as Notifications from "expo-notifications";
 import { Stack, useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -14,12 +14,12 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { AuthProvider, useAuth } from "@/contexts/AuthProvider";
+import { ThemeProvider } from "@/contexts/ThemeContext";
 import {
   getBiometricLockEnabled,
   hasSeenBiometricOnboarding,
   promptBiometricAuth,
 } from "@/lib/biometricLock";
-import { ThemeProvider } from "@/contexts/ThemeContext";
 import {
   requestNotificationPermissions,
   scheduleTrialEndingReminderNotification,
@@ -86,18 +86,20 @@ function RootNavigator() {
         const completed = Boolean(onboarding?.onboarding_completed_at);
         const step = onboarding?.onboarding_step ?? null;
         const entitlementActive = entitlement.active;
+        const entitlementSource = entitlement.source;
         setOnboardingComplete(completed);
         setEntitled(entitlement.active);
         if (__DEV__) {
           const snapshotLogKey = `${userId}:${String(completed)}:${String(step)}:${String(
             entitlementActive
-          )}`;
+          )}:${String(entitlementSource)}`;
           if (lastSnapshotLogKeyRef.current !== snapshotLogKey) {
             lastSnapshotLogKeyRef.current = snapshotLogKey;
             console.log("layout: snapshot", {
               completed,
               step,
               entitled: entitlementActive,
+              entitlementSource,
             });
           }
         }
@@ -119,13 +121,14 @@ function RootNavigator() {
   useEffect(() => {
     if (!userId) return;
     if (onboardingComplete !== true) return;
+    if (entitled !== true) return;
     if (biometricOnboardingSeen !== false) return;
     void upsertOnboardingResponses(userId, {
       onboarding_step: "biometric-setup",
       onboarding_last_seen_at: new Date().toISOString(),
     });
     router.replace("/(auth)/onboarding/biometric-setup");
-  }, [biometricOnboardingSeen, onboardingComplete, router, userId]);
+  }, [biometricOnboardingSeen, entitled, onboardingComplete, router, userId]);
 
   useEffect(() => {
     if (!userId) {
@@ -337,7 +340,6 @@ function BiometricLockGate({ children }: { children: any }) {
 
 export default function RootLayout() {
   const router = useRouter();
-  const lastDeepLinkNavRef = useRef<{ target: string; at: number } | null>(null);
   const [fontsLoaded] = useFonts({
     PlayfairDisplay_500Medium,
     PlayfairDisplay_700Bold,
@@ -355,55 +357,10 @@ export default function RootLayout() {
       void (async () => {
         try {
           const { data } = await getSupabase().auth.getSession();
-          const userId = data.session?.user?.id ?? null;
-
-          if (!userId) {
-            router.replace("/(auth)/onboarding/welcome");
-            return;
-          }
-
-          const onboarding = await getOnboardingResponsesSnapshot(userId);
-          const completed = Boolean(onboarding?.onboarding_completed_at);
-          const step = onboarding?.onboarding_step ?? null;
-
-          if (!completed) {
-            const allowed = new Set([
-              "welcome",
-              "survey",
-              "privacy",
-              "apple-health",
-              "reminder",
-              "preparing",
-              "paywall",
-              "congratulations",
-            ]);
-            const next = step && allowed.has(step) ? step : "welcome";
-            router.replace(`/(auth)/onboarding/${next}`);
-            return;
-          }
-
-          const entitlement = await getEntitlement(userId);
-          if (!entitlement.active) {
-            await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
-            router.replace("/(auth)/onboarding/paywall");
-            return;
-          }
-
-          const target = "/(tabs)/pray";
-          const last = lastDeepLinkNavRef.current;
-          const now = Date.now();
-          if (!last || last.target !== target || now - last.at > 1500) {
-            lastDeepLinkNavRef.current = { target, at: now };
-            router.replace(target);
-          }
+          const isSignedIn = Boolean(data.session?.user?.id);
+          router.replace(isSignedIn ? "/(tabs)/pray" : "/(auth)/onboarding/welcome");
         } catch {
-          const target = "/(auth)/onboarding/welcome";
-          const last = lastDeepLinkNavRef.current;
-          const now = Date.now();
-          if (!last || last.target !== target || now - last.at > 1500) {
-            lastDeepLinkNavRef.current = { target, at: now };
-            router.replace(target);
-          }
+          router.replace("/(auth)/onboarding/welcome");
         }
       })();
     },

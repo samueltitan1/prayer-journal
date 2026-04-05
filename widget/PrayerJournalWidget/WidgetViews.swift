@@ -27,6 +27,22 @@ private let widgetBackground = Color(hex: "F6F3EE")
 private let primaryText = Color(hex: "1A1A1A")
 private let accentText = Color(hex: "C4A572")
 
+private struct WidgetBackgroundModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOSApplicationExtension 17.0, *) {
+            content.containerBackground(for: .widget) { widgetBackground }
+        } else {
+            content.background(widgetBackground)
+        }
+    }
+}
+
+private extension View {
+    func widgetCardBackground() -> some View {
+        modifier(WidgetBackgroundModifier())
+    }
+}
+
 private struct WidgetHeaderView: View {
     var body: some View {
         Image("widget-logo")
@@ -61,9 +77,9 @@ struct PrayerJournalSmallWidgetView: View {
                     .lineLimit(1)
             }
         }
-        .padding(14)
+        .padding(1)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(widgetBackground)
+        .widgetCardBackground()
         .widgetURL(URL(string: "prayer-journal://pray"))
     }
 }
@@ -117,7 +133,7 @@ struct PrayerJournalMediumWidgetView: View {
                 .padding(.horizontal, 8)
                 .frame(width: rightWidth, height: proxy.size.height, alignment: .center)
             }
-            .background(widgetBackground)
+            .widgetCardBackground()
         }
         // WidgetKit supports one tap target for this widget configuration without AppIntents.
         .widgetURL(URL(string: "prayer-journal://pray"))
