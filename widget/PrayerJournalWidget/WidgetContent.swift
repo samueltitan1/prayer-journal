@@ -18,7 +18,7 @@ let EXAMEN_QUESTIONS: [String] = [
     "What moment today are you most grateful for?",
     "When did you feel most alive today? Could that be God speaking?",
     "What prayer from this week has God already answered?",
-    "Have you been honest with God today — really honest?",
+    "Have you been honest with God today?",
     "What would you say to God right now if you knew He was listening?",
     "What has God been trying to tell you that you keep putting off hearing?",
     "Who did God place on your heart today?",
@@ -33,7 +33,12 @@ let EXAMEN_QUESTIONS: [String] = [
     "Who needed grace from you today — and did they receive it?",
     "Where did God send you today and did you show up as He intended?",
     "How did you reflect God's love to someone today?",
-    "What scripture has God been bringing to your mind lately?"
+    "What scripture has God been bringing to your mind lately?",
+    "Did you act as a good steward of your time, body, and resources?",
+    "What is God calling you to start, stop, or modify in your life?",
+    "How did you grow in your love for God or your understanding of the Bible today?",
+    "Where did you see God's grace and kindness today?",
+
 ]
 
 let BIBLE_VERSES: [(text: String, reference: String)] = [
