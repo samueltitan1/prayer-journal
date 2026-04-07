@@ -1,6 +1,7 @@
 // components/SettingsModal.tsx
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import * as Application from "expo-application";
 import { BlurView } from "expo-blur";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -64,6 +65,12 @@ const DAILY_REMINDER_COLUMN_CANDIDATES = [
   "reminder_enabled",
 ] as const;
 
+function getRuntimeVersionLabel() {
+  const appVersion = Application.nativeApplicationVersion ?? "1.0.0";
+  const buildVersion = Application.nativeBuildVersion;
+  return buildVersion ? `v${appVersion} (${buildVersion})` : `v${appVersion}`;
+}
+
 export default function SettingsModal({
   visible,
   onClose,
@@ -84,7 +91,7 @@ export default function SettingsModal({
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [subscriptionRow, setSubscriptionRow] = useState<SubscriptionRow | null>(null);
   const [loadingSubscription, setLoadingSubscription] = useState(false);
-  const [version, setVersion] = useState("v1.0.0");
+  const [version] = useState(getRuntimeVersionLabel);
   const [hasReflectiveSummary, setHasReflectiveSummary] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [biometricLockEnabled, setBiometricLockEnabled] = useState(false);
@@ -250,7 +257,6 @@ export default function SettingsModal({
         setDeleteAudioAfterTranscription(
           data.delete_audio_after_transcription ?? false
         );
-        setVersion(data.version ?? "1.0.0");
         setHasReflectiveSummary(data.has_reflective_summary ?? false);
 
         if (data.dark_mode_preference && data.dark_mode_preference !== theme) {
