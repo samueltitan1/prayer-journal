@@ -140,23 +140,45 @@ let BIBLE_VERSES: [(text: String, reference: String)] = [
 ]
 
 private let WIDGET_APP_GROUP = "group.app.prayerjournal.widget"
-private let WIDGET_AUTH_KEY = "widget_signed_in"
+private let WIDGET_AUTH_STATE_KEY = "widget_auth_state"
+private let LEGACY_WIDGET_AUTH_KEY = "widget_signed_in"
+
+struct WidgetAuthState {
+    let signedIn: Bool
+    let updatedAtMs: Double?
+}
+
+private struct WidgetAuthPayload: Decodable {
+    let signedIn: Bool
+    let updatedAtMs: Double?
+}
+
+func readWidgetAuthState() -> WidgetAuthState {
+    guard let defaults = UserDefaults(suiteName: WIDGET_APP_GROUP) else {
+        return WidgetAuthState(signedIn: false, updatedAtMs: nil)
+    }
+
+    if let payloadString = defaults.string(forKey: WIDGET_AUTH_STATE_KEY),
+       let data = payloadString.data(using: .utf8),
+       let payload = try? JSONDecoder().decode(WidgetAuthPayload.self, from: data) {
+        return WidgetAuthState(signedIn: payload.signedIn, updatedAtMs: payload.updatedAtMs)
+    }
+
+    // Backward compatibility with old key shapes from previous builds.
+    if let value = defaults.object(forKey: LEGACY_WIDGET_AUTH_KEY) as? [String: Any],
+       let signedIn = value["signedIn"] as? Bool {
+        return WidgetAuthState(signedIn: signedIn, updatedAtMs: nil)
+    }
+
+    if let signedIn = defaults.object(forKey: LEGACY_WIDGET_AUTH_KEY) as? Bool {
+        return WidgetAuthState(signedIn: signedIn, updatedAtMs: nil)
+    }
+
+    return WidgetAuthState(signedIn: false, updatedAtMs: nil)
+}
 
 private func isWidgetUserSignedIn() -> Bool {
-    guard let defaults = UserDefaults(suiteName: WIDGET_APP_GROUP) else {
-        return false
-    }
-
-    if let value = defaults.object(forKey: WIDGET_AUTH_KEY) as? [String: Any],
-       let signedIn = value["signedIn"] as? Bool {
-        return signedIn
-    }
-
-    if let signedIn = defaults.object(forKey: WIDGET_AUTH_KEY) as? Bool {
-        return signedIn
-    }
-
-    return false
+    readWidgetAuthState().signedIn
 }
 
 func getDailyContent(for date: Date) -> WidgetEntry {

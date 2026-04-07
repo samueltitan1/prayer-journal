@@ -1,6 +1,5 @@
 import AuthCard from "@/components/AuthCard";
 import OrDivider from "@/components/OrDivider";
-import { useAuth } from "@/contexts/AuthProvider";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
   trackAuthResult,
@@ -9,7 +8,6 @@ import {
   trackSignupMethodSelected,
 } from "@/lib/analytics/onboarding";
 import { signInWithGoogleToSupabase } from "@/lib/auth/googleNative";
-import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { getSupabase } from "@/lib/supabaseClient";
 import { buttons, fonts, spacing } from "@/theme/theme";
 import { Ionicons } from "@expo/vector-icons";
@@ -32,7 +30,6 @@ import {
 
 export default function Login() {
   const router = useRouter();
-  const { user } = useAuth();
   const { colors } = useTheme();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -46,11 +43,7 @@ export default function Login() {
 
   useEffect(() => {
     trackOnboardingStepViewed("login");
-    void upsertOnboardingResponses(user?.id, {
-      onboarding_step: "login",
-      onboarding_last_seen_at: new Date().toISOString(),
-    });
-  }, [user?.id]);
+  }, []);
 
   useEffect(() => {
     if (errorMessage) {
@@ -100,8 +93,8 @@ export default function Login() {
       trackAuthResult("email", "success");
       trackOnboardingAction("login", "continue");
 
-      // Route into onboarding resolver directly to avoid unnecessary splash flashes.
-      router.replace("/(auth)/onboarding");
+      // Hand off to the root resolver/guards to avoid onboarding-index races.
+      router.replace("/");
     } catch {
       trackAuthResult("email", "error", "unexpected_exception");
       setErrorMessage("Sign in failed. Please try again.");

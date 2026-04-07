@@ -66,6 +66,7 @@ export default function SplashScreen() {
           "privacy",
           "apple-health",
           "reminder",
+          "biometric-setup",
           // NOTE: do NOT resume to auth screens once a session exists.
           "preparing",
           "paywall",

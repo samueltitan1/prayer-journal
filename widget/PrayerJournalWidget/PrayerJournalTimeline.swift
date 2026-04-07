@@ -1,18 +1,13 @@
 import Foundation
 import WidgetKit
 
-private let WIDGET_APP_GROUP = "group.app.prayerjournal.widget"
-private let WIDGET_AUTH_UPDATED_AT_KEY = "widget_auth_updated_at"
-
 private func timelineRefreshDate(from now: Date) -> Date {
-    guard
-        let defaults = UserDefaults(suiteName: WIDGET_APP_GROUP),
-        let updatedAt = defaults.object(forKey: WIDGET_AUTH_UPDATED_AT_KEY) as? NSNumber
-    else {
+    let authState = readWidgetAuthState()
+    guard let updatedAtMs = authState.updatedAtMs else {
         return Calendar.current.date(byAdding: .minute, value: 5, to: now) ?? now.addingTimeInterval(300)
     }
 
-    let updatedAtDate = Date(timeIntervalSince1970: updatedAt.doubleValue / 1000.0)
+    let updatedAtDate = Date(timeIntervalSince1970: updatedAtMs / 1000.0)
     let isRecentlyUpdated = now.timeIntervalSince(updatedAtDate) <= 120
     if isRecentlyUpdated {
         return now.addingTimeInterval(30)

@@ -2,8 +2,12 @@ import SharedGroupPreferences from "react-native-shared-group-preferences";
 import { NativeModules, Platform } from "react-native";
 
 const WIDGET_APP_GROUP = "group.app.prayerjournal.widget";
-const WIDGET_AUTH_KEY = "widget_signed_in";
-const WIDGET_AUTH_UPDATED_AT_KEY = "widget_auth_updated_at";
+const WIDGET_AUTH_STATE_KEY = "widget_auth_state";
+
+type WidgetAuthStatePayload = {
+  signedIn: boolean;
+  updatedAtMs: number;
+};
 
 type PossibleWidgetReloadModule = {
   reloadAllTimelines?: () => void;
@@ -41,10 +45,11 @@ function tryReloadWidgetTimelines() {
 export async function setWidgetSignedInState(signedIn: boolean) {
   if (Platform.OS !== "ios") return;
   try {
-    await Promise.all([
-      SharedGroupPreferences.setItem(WIDGET_AUTH_KEY, { signedIn }, WIDGET_APP_GROUP),
-      SharedGroupPreferences.setItem(WIDGET_AUTH_UPDATED_AT_KEY, Date.now(), WIDGET_APP_GROUP),
-    ]);
+    const payload: WidgetAuthStatePayload = {
+      signedIn,
+      updatedAtMs: Date.now(),
+    };
+    await SharedGroupPreferences.setItem(WIDGET_AUTH_STATE_KEY, payload, WIDGET_APP_GROUP);
     tryReloadWidgetTimelines();
   } catch (error) {
     if (__DEV__) {

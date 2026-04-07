@@ -57,6 +57,14 @@ export default function TabsLayout() {
 
         if (!completed) {
           if (step === "login" || step === "signup") {
+            const entitlement = await getEntitlement(userId);
+            if (entitlement.active) {
+              if (__DEV__) {
+                console.log("tabs guard: stale auth step while authed + entitled -> journal");
+              }
+              router.replace("/(tabs)/journal");
+              return;
+            }
             if (__DEV__) console.log("tabs guard: stale auth step while authed -> paywall");
             await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
             router.replace("/(auth)/onboarding/paywall");
@@ -66,6 +74,7 @@ export default function TabsLayout() {
             "welcome",
             "survey",
             "privacy",
+            "biometric-setup",
             "apple-health",
             "reminder",
             "signup",
