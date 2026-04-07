@@ -93,8 +93,8 @@ export default function Login() {
       trackAuthResult("email", "success");
       trackOnboardingAction("login", "continue");
 
-      // Hand off to the root resolver/guards to avoid onboarding-index races.
-      router.replace("/");
+      // Route straight into the app shell to avoid splash/onboarding flash races.
+      router.replace("/(tabs)/journal");
     } catch {
       trackAuthResult("email", "error", "unexpected_exception");
       setErrorMessage("Sign in failed. Please try again.");

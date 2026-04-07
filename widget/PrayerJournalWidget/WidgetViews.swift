@@ -49,7 +49,6 @@ private struct WidgetHeaderView: View {
             .resizable()
             .scaledToFit()
             .frame(width: 18, height: 18)
-            .opacity(0.9)
     }
 }
 
@@ -57,10 +56,8 @@ struct PrayerJournalSmallWidgetView: View {
     let entry: PrayerJournalTimelineEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 6) {
             WidgetHeaderView()
-
-            Spacer(minLength: 4)
 
             Text(entry.content.body)
                 .font(.custom("Georgia", size: 13))
@@ -73,12 +70,11 @@ struct PrayerJournalSmallWidgetView: View {
                 Text(reference)
                     .font(.custom("Georgia", size: 11))
                     .foregroundColor(accentText)
-                    .padding(.top, 4)
                     .lineLimit(1)
             }
         }
         .padding(1)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .widgetCardBackground()
         .widgetURL(URL(string: "prayer-journal://pray"))
     }
@@ -93,10 +89,8 @@ struct PrayerJournalMediumWidgetView: View {
             let rightWidth = proxy.size.width * 0.3
 
             HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 6) {
                     WidgetHeaderView()
-
-                    Spacer(minLength: 4)
 
                     Text(entry.content.body)
                         .font(.custom("Georgia", size: 13))
@@ -109,12 +103,11 @@ struct PrayerJournalMediumWidgetView: View {
                         Text(reference)
                             .font(.custom("Georgia", size: 11))
                             .foregroundColor(accentText)
-                            .padding(.top, 4)
                             .lineLimit(1)
                     }
                 }
-                .padding(14)
-                .frame(width: leftWidth, height: proxy.size.height, alignment: .topLeading)
+                .padding(1)
+                .frame(width: leftWidth, height: proxy.size.height, alignment: .center)
 
                 Rectangle()
                     .fill(accentText)

@@ -7,8 +7,9 @@ export default function OnboardingLayout() {
         headerShown: false,
         animation: 'slide_from_right',
       }}
-      initialRouteName="welcome"
+      initialRouteName="index"
     >
+      <Stack.Screen name="index" />
       <Stack.Screen name="welcome" />
       <Stack.Screen name="survey" />
       <Stack.Screen name="privacy" />

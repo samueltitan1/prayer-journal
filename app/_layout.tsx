@@ -119,18 +119,6 @@ function RootNavigator() {
   }, [userId]);
 
   useEffect(() => {
-    if (!userId) return;
-    if (onboardingComplete !== true) return;
-    if (entitled !== true) return;
-    if (biometricOnboardingSeen !== false) return;
-    void upsertOnboardingResponses(userId, {
-      onboarding_step: "biometric-setup",
-      onboarding_last_seen_at: new Date().toISOString(),
-    });
-    router.replace("/(auth)/onboarding/biometric-setup");
-  }, [biometricOnboardingSeen, entitled, onboardingComplete, router, userId]);
-
-  useEffect(() => {
     if (!userId) {
       paywallUpsertedForUserRef.current = null;
       return;
@@ -225,8 +213,6 @@ function RootNavigator() {
         {!userId ? (
           <Stack.Screen name="(auth)" />
         ) : onboardingComplete === false ? (
-          <Stack.Screen name="(auth)" />
-        ) : biometricOnboardingSeen === false ? (
           <Stack.Screen name="(auth)" />
         ) : entitled === false ? (
           <Stack.Screen name="(auth)" />
