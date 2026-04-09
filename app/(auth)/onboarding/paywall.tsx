@@ -21,7 +21,7 @@ import RevenueCatUI from "react-native-purchases-ui";
 
 export default function OnboardingPaywall() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const [showVerifyReminder, setShowVerifyReminder] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
@@ -30,10 +30,15 @@ export default function OnboardingPaywall() {
   const [paywallInitError, setPaywallInitError] = useState<string | null>(null);
 
   const initializePaywall = async () => {
+    if (!user?.id) {
+      setPaywallReady(false);
+      setPaywallInitError(null);
+      return;
+    }
     setPaywallInitError(null);
     setPaywallReady(false);
     try {
-      await ensureRevenueCatConfigured(user?.id);
+      await ensureRevenueCatConfigured(user.id);
       setPaywallReady(true);
     } catch (error) {
       console.error("paywall: revenuecat init failed", error);
@@ -44,6 +49,16 @@ export default function OnboardingPaywall() {
   };
 
   useEffect(() => {
+    if (loading) return;
+    if (!user?.id) {
+      setPaywallReady(false);
+      setPaywallInitError(null);
+      router.replace("/(auth)/onboarding/welcome");
+    }
+  }, [loading, router, user?.id]);
+
+  useEffect(() => {
+    if (loading || !user?.id) return;
     let cancelled = false;
     trackPaywallViewed();
     trackOnboardingStepViewed("paywall");
@@ -51,7 +66,7 @@ export default function OnboardingPaywall() {
       setPaywallInitError(null);
       setPaywallReady(false);
       try {
-        await ensureRevenueCatConfigured(user?.id);
+        await ensureRevenueCatConfigured(user.id);
         if (cancelled) return;
         setPaywallReady(true);
       } catch (error) {
@@ -62,14 +77,14 @@ export default function OnboardingPaywall() {
         );
       }
     })();
-    void upsertOnboardingResponses(user?.id, {
+    void upsertOnboardingResponses(user.id, {
       onboarding_step: "paywall",
       onboarding_last_seen_at: new Date().toISOString(),
     });
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [loading, user?.id]);
 
   const completeOnboardingAfterPurchase = async (source: string) => {
     if (!user?.id) {

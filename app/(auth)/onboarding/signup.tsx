@@ -1,7 +1,6 @@
 import AuthCard from "@/components/AuthCard";
 import OnboardingHeader from "@/components/onboarding/OnboardingHeader";
 import OrDivider from "@/components/OrDivider";
-import { useAuth } from "@/contexts/AuthProvider";
 import {
   trackAuthResult,
   trackOnboardingAction,
@@ -33,7 +32,6 @@ import {
 
 export default function SignUp() {
   const router = useRouter();
-  const { user } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -92,11 +90,7 @@ export default function SignUp() {
 
   useEffect(() => {
     trackOnboardingStepViewed("signup");
-    void upsertOnboardingResponses(user?.id, {
-      onboarding_step: "signup",
-      onboarding_last_seen_at: new Date().toISOString(),
-    });
-  }, [user?.id]);
+  }, []);
 
   const handleSignUp = async () => {
     trackSignupMethodSelected("email");
@@ -116,7 +110,11 @@ export default function SignUp() {
       trackAuthResult("email", "success");
       const { data } = await getSupabase().auth.getSession();
       const userId = data.session?.user?.id;
-      void upsertOnboardingResponses(userId, {
+      if (!userId) {
+        setErrorMessage("Sign up succeeded but session is unavailable. Please sign in again.");
+        return;
+      }
+      await upsertOnboardingResponses(userId, {
         onboarding_step: "preparing",
       });
       void persistOnboardingSurveyAnswers(userId);
@@ -168,7 +166,11 @@ export default function SignUp() {
 
       const { data } = await getSupabase().auth.getSession();
       const userId = data.session?.user?.id;
-      void upsertOnboardingResponses(userId, {
+      if (!userId) {
+        setErrorMessage("Apple sign-in succeeded but session is unavailable. Please try again.");
+        return;
+      }
+      await upsertOnboardingResponses(userId, {
         onboarding_step: "preparing",
       });
       void persistOnboardingSurveyAnswers(userId);
@@ -195,10 +197,13 @@ export default function SignUp() {
     setGoogleLoading(true);
     try {
       const userId = await signInWithGoogleToSupabase();
-      if (!userId) return;
+      if (!userId) {
+        setErrorMessage("Google sign-in was cancelled or did not complete. Please try again.");
+        return;
+      }
       console.log("Google sign-in success (signup)", userId);
       trackAuthResult("google", "success");
-      void upsertOnboardingResponses(userId, {
+      await upsertOnboardingResponses(userId, {
         onboarding_step: "preparing",
       });
       void persistOnboardingSurveyAnswers(userId);
@@ -316,6 +321,7 @@ export default function SignUp() {
         </TouchableOpacity>
 
         <OrDivider textColor={colors.textSecondary} lineColor={colors.textSecondary} />
+        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
         {Platform.OS === "ios" && (
           <View style={{ marginTop: spacing.sm }}>
@@ -442,6 +448,13 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: spacing.md,
     fontFamily: fonts.body,
+  },
+  errorText: {
+    color: "#D64545",
+    fontFamily: fonts.body,
+    fontSize: 13,
+    textAlign: "center",
+    marginTop: spacing.sm,
   },
   continueButton: { 
     color: "#FFFFFF",

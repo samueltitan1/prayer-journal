@@ -5,6 +5,53 @@ import { Platform } from "react-native";
 let configured = false;
 let googleModule: typeof import("@react-native-google-signin/google-signin") | null = null;
 
+type GoogleClientIds = {
+  webClientId: string;
+  iosClientId?: string;
+  source: "process.env" | "expo.extra" | "mixed";
+};
+
+const getConfigExtra = () => {
+  const constantsWithLegacy = Constants as typeof Constants & {
+    manifest?: { extra?: Record<string, unknown> };
+    manifest2?: { extra?: Record<string, unknown> };
+  };
+  return (
+    Constants.expoConfig?.extra ??
+    constantsWithLegacy.manifest2?.extra ??
+    constantsWithLegacy.manifest?.extra ??
+    {}
+  ) as Record<string, unknown>;
+};
+
+const getString = (value: unknown) =>
+  typeof value === "string" ? value.trim() : "";
+
+const resolveGoogleClientIds = (): GoogleClientIds => {
+  const extra = getConfigExtra();
+  const googleExtra =
+    typeof extra.google === "object" && extra.google
+      ? (extra.google as Record<string, unknown>)
+      : {};
+
+  const envWebClientId = getString(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
+  const envIosClientId = getString(process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID);
+  const extraWebClientId = getString(googleExtra.webClientId);
+  const extraIosClientId = getString(googleExtra.iosClientId);
+
+  const webClientId = envWebClientId || extraWebClientId;
+  const iosClientId = envIosClientId || extraIosClientId || undefined;
+
+  const source: GoogleClientIds["source"] =
+    envWebClientId && !extraWebClientId
+      ? "process.env"
+      : !envWebClientId && extraWebClientId
+      ? "expo.extra"
+      : "mixed";
+
+  return { webClientId, iosClientId, source };
+};
+
 const decodeJwtPayload = (token: string) => {
   try {
     const parts = token.split(".");
@@ -40,8 +87,15 @@ export const initGoogleSigninOnce = async () => {
   if (configured) return;
   if (Constants.appOwnership === "expo") return;
 
-  const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
-  const iosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
+  const { webClientId, iosClientId, source } = resolveGoogleClientIds();
+
+  if (__DEV__) {
+    console.log("google: runtime client IDs resolved", {
+      webClientIdPresent: Boolean(webClientId),
+      iosClientIdPresent: Boolean(iosClientId),
+      source,
+    });
+  }
 
   if (!webClientId) {
     throw new Error("Missing EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID");

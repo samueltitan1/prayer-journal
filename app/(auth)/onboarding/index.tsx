@@ -50,8 +50,8 @@ export default function OnboardingIndex() {
             router.replace("/(tabs)/journal");
             return;
           }
-          await upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
-          router.replace("/(auth)/onboarding/paywall");
+          await upsertOnboardingResponses(userId, { onboarding_step: "preparing" });
+          router.replace("/(auth)/onboarding/preparing");
           return;
         }
 

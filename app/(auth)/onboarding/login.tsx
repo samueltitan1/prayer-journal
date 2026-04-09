@@ -182,7 +182,10 @@ export default function Login() {
     setGoogleLoading(true);
     try {
       const userId = await signInWithGoogleToSupabase();
-      if (!userId) return;
+      if (!userId) {
+        setErrorMessage("Google sign-in was cancelled or did not complete. Please try again.");
+        return;
+      }
       console.log("Google sign-in success (login)", userId);
       trackAuthResult("google", "success");
       trackOnboardingAction("login", "continue");
