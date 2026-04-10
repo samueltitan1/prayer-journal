@@ -94,6 +94,7 @@ export default function SettingsModal({
   const [version] = useState(getRuntimeVersionLabel);
   const [hasReflectiveSummary, setHasReflectiveSummary] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [biometricLockEnabled, setBiometricLockEnabled] = useState(false);
   const [biometricHasHardware, setBiometricHasHardware] = useState(false);
   const [biometricEnrolled, setBiometricEnrolled] = useState(false);
@@ -611,20 +612,37 @@ export default function SettingsModal({
   };
 
   const handleDeleteAccount = () => {
+    if (deletingAccount) return;
     Alert.alert("Delete Account", "This will permanently delete your data.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
-          const { error } = await getSupabase().rpc("delete_user_and_settings");
-          if (error) {
-            Alert.alert("Error", error.message);
-            return;
+          if (deletingAccount) return;
+          setDeletingAccount(true);
+          try {
+            const { error } = await getSupabase().rpc("delete_user_and_settings");
+            if (error) throw error;
+
+            await getSupabase().auth.signOut();
+            await setWidgetSignedInState(false);
+            await AsyncStorage.removeItem("prayer-journal-auth");
+            await AsyncStorage.removeItem("supabase_session");
+            await cancelDailyPrayerNotification();
+            await cancelNightlyReflectionPrompt();
+
+            capture("delete_account_success");
+            closeEverything();
+            router.replace("/(auth)/onboarding/welcome");
+          } catch (err: any) {
+            capture("delete_account_failure", {
+              message: err?.message ?? "unknown_error",
+            });
+            Alert.alert("Error", err?.message ?? "Could not delete account. Please try again.");
+          } finally {
+            setDeletingAccount(false);
           }
-          await getSupabase().auth.signOut();
-          await setWidgetSignedInState(false);
-          closeEverything();
         },
       },
     ]);
@@ -1107,9 +1125,12 @@ export default function SettingsModal({
 
           <TouchableOpacity
             style={[styles.deleteBtn, { marginTop: spacing.lg, paddingVertical: spacing.sm }]}
+            disabled={deletingAccount}
             onPress={handleDeleteAccount}
           >
-            <Text style={styles.deleteText}>Delete Account</Text>
+            <Text style={[styles.deleteText, deletingAccount ? styles.deleteTextDisabled : null]}>
+              {deletingAccount ? "Deleting account..." : "Delete Account"}
+            </Text>
           </TouchableOpacity>
 
           {/* VERSION */}
@@ -1234,6 +1255,7 @@ const styles = StyleSheet.create({
   signOutText: { fontFamily: fonts.body, fontSize: 15 },
   deleteBtn: { marginTop: spacing.sm, alignItems: "center" },
   deleteText: { color: "#E45858", fontFamily: fonts.body, fontSize: 15 },
+  deleteTextDisabled: { opacity: 0.65 },
   version: {
     textAlign: "center",
     fontFamily: fonts.body,

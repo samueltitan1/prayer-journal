@@ -24,7 +24,7 @@
           "audio",
           "location"
         ],
-        "NSMicrophoneUsageDescription": "Allow microphone access to record prayers.",
+        "NSMicrophoneUsageDescription": "This app uses the microphone to record your spoken prayers. For example, you can record a prayer during your day, which is then transcribed and saved in your private journal.",
         "NSLocationWhenInUseUsageDescription": "Allow location access to map your Prayer Walk route.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Allow background location so Prayer Walk can keep tracking while your phone is locked.",
         "NSHealthShareUsageDescription": "We use Apple Health to enhance Prayer Walk insights (steps/distance) and show patterns over time.",
