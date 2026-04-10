@@ -110,6 +110,12 @@ export default function SignUp() {
       trackAuthResult("email", "success");
       const { data } = await getSupabase().auth.getSession();
       const userId = data.session?.user?.id;
+      if (__DEV__) {
+        console.log("signup: email session resolved", {
+          hasSession: Boolean(data.session),
+          userId: userId ?? null,
+        });
+      }
       if (!userId) {
         setErrorMessage("Sign up succeeded but session is unavailable. Please sign in again.");
         return;
@@ -166,6 +172,12 @@ export default function SignUp() {
 
       const { data } = await getSupabase().auth.getSession();
       const userId = data.session?.user?.id;
+      if (__DEV__) {
+        console.log("signup: apple session resolved", {
+          hasSession: Boolean(data.session),
+          userId: userId ?? null,
+        });
+      }
       if (!userId) {
         setErrorMessage("Apple sign-in succeeded but session is unavailable. Please try again.");
         return;
@@ -202,6 +214,11 @@ export default function SignUp() {
         return;
       }
       console.log("Google sign-in success (signup)", userId);
+      if (__DEV__) {
+        console.log("signup: google session resolved", {
+          userId,
+        });
+      }
       trackAuthResult("google", "success");
       await upsertOnboardingResponses(userId, {
         onboarding_step: "preparing",

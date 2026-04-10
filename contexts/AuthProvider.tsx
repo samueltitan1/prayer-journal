@@ -41,6 +41,20 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [loading, setLoading] = useState(true);
   const [emailConfirmed, setEmailConfirmed] = useState(false);
 
+  const logAuthSnapshot = (
+    source: "getSession" | "onAuthStateChange",
+    event: string,
+    sessionUserId: string | null | undefined
+  ) => {
+    if (!__DEV__) return;
+    console.log("auth: snapshot", {
+      source,
+      event,
+      hasSession: Boolean(sessionUserId),
+      userId: sessionUserId ?? null,
+    });
+  };
+
   useEffect(() => {
     let isMounted = true;
 
@@ -88,6 +102,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       .getSession()
       .then(async ({ data }) => {
         if (!isMounted) return;
+        logAuthSnapshot("getSession", "INITIAL_SESSION", data.session?.user?.id ?? null);
 
         const nextUser = data.session?.user ?? null;
         setUser(nextUser);
@@ -100,6 +115,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         }
         try {
           await syncRevenueCatIdentity(nextUser?.id ?? null);
+          if (__DEV__) {
+            console.log("auth: revenuecat identity synced from getSession", {
+              userId: nextUser?.id ?? null,
+            });
+          }
         } catch (error) {
           console.warn("RevenueCat identity sync failed", error);
         }
@@ -128,6 +148,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return;
+      logAuthSnapshot("onAuthStateChange", event, session?.user?.id ?? null);
     
       if (event === "SIGNED_OUT") {
         setUser(null);
@@ -136,6 +157,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         await setWidgetSignedInState(false);
         try {
           await syncRevenueCatIdentity(null);
+          if (__DEV__) {
+            console.log("auth: revenuecat identity cleared on sign-out");
+          }
         } catch (error) {
           console.warn("RevenueCat sign-out sync failed", error);
         }
@@ -153,6 +177,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       }
       try {
         await syncRevenueCatIdentity(nextUser?.id ?? null);
+        if (__DEV__) {
+          console.log("auth: revenuecat identity synced from auth change", {
+            event,
+            userId: nextUser?.id ?? null,
+          });
+        }
       } catch (error) {
         console.warn("RevenueCat identity sync failed", error);
       }

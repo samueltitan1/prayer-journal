@@ -92,6 +92,18 @@ export default function Login() {
 
       trackAuthResult("email", "success");
       trackOnboardingAction("login", "continue");
+      const { data } = await getSupabase().auth.getSession();
+      const userId = data.session?.user?.id ?? null;
+      if (__DEV__) {
+        console.log("login: email session resolved", {
+          hasSession: Boolean(data.session),
+          userId,
+        });
+      }
+      if (!userId) {
+        setErrorMessage("Sign in succeeded but session is not ready yet. Please try again.");
+        return;
+      }
 
       // Route straight into the app shell to avoid splash/onboarding flash races.
       router.replace("/(tabs)/journal");
@@ -158,6 +170,18 @@ export default function Login() {
       console.log("Apple sign-in success (login)");
       trackAuthResult("apple", "success");
       trackOnboardingAction("login", "continue");
+      const { data } = await getSupabase().auth.getSession();
+      const userId = data.session?.user?.id ?? null;
+      if (__DEV__) {
+        console.log("login: apple session resolved", {
+          hasSession: Boolean(data.session),
+          userId,
+        });
+      }
+      if (!userId) {
+        setErrorMessage("Apple sign-in succeeded but session is not ready yet. Please try again.");
+        return;
+      }
 
       // Hand off to tabs so the tabs guard can enforce paywall vs journal.
       router.replace("/(tabs)/journal");

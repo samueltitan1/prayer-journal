@@ -10,7 +10,9 @@ type GoogleClientIds = {
   iosClientId?: string;
   source: "process.env" | "expo.extra" | "mixed" | "missing";
   envWebDefined: boolean;
+  envIosDefined: boolean;
   extraWebDefined: boolean;
+  extraIosDefined: boolean;
 };
 
 const getConfigExtra = () => {
@@ -38,27 +40,46 @@ const resolveGoogleClientIds = (): GoogleClientIds => {
 
   const envWebClientId = getString(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
   const envIosClientId = getString(process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID);
-  const extraWebClientId = getString(googleExtra.webClientId);
-  const extraIosClientId = getString(googleExtra.iosClientId);
+  const extraWebClientId =
+    getString(googleExtra.webClientId) || getString(extra.googleWebClientId);
+  const extraIosClientId =
+    getString(googleExtra.iosClientId) || getString(extra.googleIosClientId);
   const envWebDefined = Object.prototype.hasOwnProperty.call(
     process.env,
     "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID"
   );
-  const extraWebDefined = typeof googleExtra.webClientId !== "undefined";
+  const envIosDefined = Object.prototype.hasOwnProperty.call(
+    process.env,
+    "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID"
+  );
+  const extraWebDefined =
+    typeof googleExtra.webClientId !== "undefined" || typeof extra.googleWebClientId !== "undefined";
+  const extraIosDefined =
+    typeof googleExtra.iosClientId !== "undefined" || typeof extra.googleIosClientId !== "undefined";
 
   const webClientId = envWebClientId || extraWebClientId;
   const iosClientId = envIosClientId || extraIosClientId || undefined;
+  const envDefined = Boolean(envWebClientId || envIosClientId);
+  const extraDefined = Boolean(extraWebClientId || extraIosClientId);
 
   const source: GoogleClientIds["source"] =
-    !webClientId
+    !envDefined && !extraDefined
       ? "missing"
-      : envWebClientId && !extraWebClientId
+      : envDefined && !extraDefined
       ? "process.env"
-      : !envWebClientId && extraWebClientId
+      : !envDefined && extraDefined
       ? "expo.extra"
       : "mixed";
 
-  return { webClientId, iosClientId, source, envWebDefined, extraWebDefined };
+  return {
+    webClientId,
+    iosClientId,
+    source,
+    envWebDefined,
+    envIosDefined,
+    extraWebDefined,
+    extraIosDefined,
+  };
 };
 
 const decodeJwtPayload = (token: string) => {
@@ -96,7 +117,15 @@ export const initGoogleSigninOnce = async () => {
   if (configured) return;
   if (Constants.appOwnership === "expo") return;
 
-  const { webClientId, iosClientId, source, envWebDefined, extraWebDefined } = resolveGoogleClientIds();
+  const {
+    webClientId,
+    iosClientId,
+    source,
+    envWebDefined,
+    envIosDefined,
+    extraWebDefined,
+    extraIosDefined,
+  } = resolveGoogleClientIds();
 
   if (__DEV__) {
     console.log("google: runtime client IDs resolved", {
@@ -104,18 +133,29 @@ export const initGoogleSigninOnce = async () => {
       iosClientIdPresent: Boolean(iosClientId),
       source,
       envWebDefined,
+      envIosDefined,
       extraWebDefined,
+      extraIosDefined,
+      platform: Platform.OS,
     });
   }
 
-  if (!webClientId) {
-    throw new Error("Missing EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID");
+  if (Platform.OS === "ios" && !iosClientId) {
+    throw new Error(
+      "Missing EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID (or app config extra.google.iosClientId/googleIosClientId)."
+    );
+  }
+
+  if (Platform.OS !== "ios" && !webClientId) {
+    throw new Error(
+      "Missing EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (or app config extra.google.webClientId/googleWebClientId)."
+    );
   }
 
   const { GoogleSignin } = await loadGoogleModule();
   GoogleSignin.configure({
-    webClientId,
-    iosClientId,
+    webClientId: webClientId || undefined,
+    iosClientId: iosClientId || undefined,
     offlineAccess: false,
   });
 

@@ -5,17 +5,18 @@ import { trackOnboardingAction, trackOnboardingStepViewed, trackPaywallViewed, t
 import { getOnboardingProgress } from "@/lib/onboardingProgress";
 import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import {
-  ensureRevenueCatConfigured,
+  getRevenueCatOfferings,
   getRevenueCatCustomerInfo,
   hasActiveRevenueCatEntitlement,
   restoreRevenueCatPurchases,
+  syncRevenueCatIdentity,
   syncRevenueCatSubscription,
 } from "@/lib/revenuecat";
 import { getSupabase } from "@/lib/supabaseClient";
 import { colors, fonts, spacing } from "@/theme/theme";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import RevenueCatUI from "react-native-purchases-ui";
 
@@ -28,36 +29,67 @@ export default function OnboardingPaywall() {
   const [syncing, setSyncing] = useState(false);
   const [paywallReady, setPaywallReady] = useState(false);
   const [paywallInitError, setPaywallInitError] = useState<string | null>(null);
+  const [paywallInitStage, setPaywallInitStage] = useState<"auth" | "revenuecat" | "offerings" | "ready">("auth");
 
   const getPaywallInitErrorMessage = (error: unknown) => {
     const raw = error instanceof Error ? error.message : String(error ?? "");
     const normalized = raw.toLowerCase();
-    if (normalized.includes("missing revenuecat api key")) {
+    if (normalized.includes("missing revenuecat") && normalized.includes("api key")) {
       return "Subscriptions are not configured for this build yet. Please update app configuration and try again.";
+    }
+    if (normalized.includes("no revenuecat offerings")) {
+      return "No subscription packages are configured for this app environment yet.";
     }
     return "We couldn't load subscription options right now. Please try again in a moment.";
   };
 
-  const initializePaywall = async () => {
+  const initializePaywall = useCallback(async () => {
     if (!user?.id) {
       setPaywallReady(false);
       setPaywallInitError(null);
+      setPaywallInitStage("auth");
       return;
+    }
+    if (__DEV__) {
+      console.log("paywall: initialization started", { userId: user.id });
     }
     setPaywallInitError(null);
     setPaywallReady(false);
     try {
-      await ensureRevenueCatConfigured(user.id);
+      setPaywallInitStage("revenuecat");
+      await syncRevenueCatIdentity(user.id);
+      if (__DEV__) {
+        console.log("paywall: revenuecat identity ready", { userId: user.id });
+      }
+
+      setPaywallInitStage("offerings");
+      const offerings = await getRevenueCatOfferings();
+      const hasCurrent = Boolean(offerings.current);
+      const offeringKeys = Object.keys(offerings.all ?? {});
+      if (__DEV__) {
+        console.log("paywall: offerings fetched", {
+          hasCurrent,
+          offeringKeys,
+        });
+      }
+      if (!hasCurrent && offeringKeys.length === 0) {
+        throw new Error("No RevenueCat offerings are configured for this app environment.");
+      }
       setPaywallReady(true);
+      setPaywallInitStage("ready");
     } catch (error) {
       console.error("paywall: revenuecat init failed", error);
       setPaywallInitError(getPaywallInitErrorMessage(error));
+      setPaywallInitStage("auth");
     }
-  };
+  }, [user?.id]);
 
   useEffect(() => {
     if (loading) return;
     if (!user?.id) {
+      if (__DEV__) {
+        console.log("paywall: auth context has no user; redirecting to welcome");
+      }
       setPaywallReady(false);
       setPaywallInitError(null);
       router.replace("/(auth)/onboarding/welcome");
@@ -65,31 +97,21 @@ export default function OnboardingPaywall() {
   }, [loading, router, user?.id]);
 
   useEffect(() => {
-    if (loading || !user?.id) return;
-    let cancelled = false;
+    if (loading || !user?.id) {
+      if (loading) setPaywallInitStage("auth");
+      return;
+    }
+    if (__DEV__) {
+      console.log("paywall: auth context ready", { userId: user.id });
+    }
     trackPaywallViewed();
     trackOnboardingStepViewed("paywall");
-    void (async () => {
-      setPaywallInitError(null);
-      setPaywallReady(false);
-      try {
-        await ensureRevenueCatConfigured(user.id);
-        if (cancelled) return;
-        setPaywallReady(true);
-      } catch (error) {
-        console.error("paywall: revenuecat init failed", error);
-        if (cancelled) return;
-        setPaywallInitError(getPaywallInitErrorMessage(error));
-      }
-    })();
+    void initializePaywall();
     void upsertOnboardingResponses(user.id, {
       onboarding_step: "paywall",
       onboarding_last_seen_at: new Date().toISOString(),
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [loading, user?.id]);
+  }, [initializePaywall, loading, user?.id]);
 
   const completeOnboardingAfterPurchase = async (source: string) => {
     if (!user?.id) {
@@ -121,7 +143,11 @@ export default function OnboardingPaywall() {
     setPurchaseError(null);
     setSyncing(true);
     try {
-      await ensureRevenueCatConfigured(user?.id);
+      if (!user?.id) {
+        setPurchaseError("Please sign in again and retry.");
+        return;
+      }
+      await syncRevenueCatIdentity(user.id);
       const customerInfo = await restoreRevenueCatPurchases();
       const active = hasActiveRevenueCatEntitlement(customerInfo);
       if (!active) {
@@ -244,7 +270,16 @@ export default function OnboardingPaywall() {
             </TouchableOpacity>
           </View>
         ) : (
-          <ActivityIndicator style={styles.spinner} />
+          <View style={styles.initLoadingWrap}>
+            <ActivityIndicator style={styles.spinner} />
+            <Text style={styles.initLoadingText}>
+              {paywallInitStage === "auth"
+                ? "Checking account…"
+                : paywallInitStage === "revenuecat"
+                ? "Connecting subscriptions…"
+                : "Loading subscription options…"}
+            </Text>
+          </View>
         )}
 
         {syncing ? <ActivityIndicator style={styles.spinner} /> : null}
@@ -300,6 +335,17 @@ const styles = StyleSheet.create({
   },
   spinner: {
     marginTop: spacing.sm,
+  },
+  initLoadingWrap: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  initLoadingText: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.textSecondary,
   },
   retryButton: {
     backgroundColor: colors.accentGold,

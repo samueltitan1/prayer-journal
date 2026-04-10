@@ -1,7 +1,7 @@
 import { getSupabase } from "@/lib/supabaseClient";
 import Constants from "expo-constants";
 import { Platform } from "react-native";
-import Purchases, { CustomerInfo, LOG_LEVEL } from "react-native-purchases";
+import Purchases, { CustomerInfo, LOG_LEVEL, PurchasesOfferings } from "react-native-purchases";
 
 const DEFAULT_ENTITLEMENT_ID = "pro";
 const DEBUG_LOGS_FLAG = "1";
@@ -26,6 +26,16 @@ const getConfigExtra = () => {
 const getString = (value: unknown) =>
   typeof value === "string" ? value.trim() : "";
 
+type RevenueCatKeys = {
+  iosApiKey: string;
+  androidApiKey: string;
+  source: "process.env" | "expo.extra" | "mixed" | "missing";
+  envIosDefined: boolean;
+  envAndroidDefined: boolean;
+  extraIosDefined: boolean;
+  extraAndroidDefined: boolean;
+};
+
 const resolveRevenueCatKeys = () => {
   const extra = getConfigExtra();
   const revenuecatExtra =
@@ -33,28 +43,70 @@ const resolveRevenueCatKeys = () => {
       ? (extra.revenuecat as Record<string, unknown>)
       : {};
 
-  const iosApiKey =
-    getString(process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_IOS) ||
-    getString(revenuecatExtra.iosApiKey);
-  const androidApiKey =
-    getString(process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_ANDROID) ||
-    getString(revenuecatExtra.androidApiKey);
+  const envIosApiKey = getString(process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_IOS);
+  const envAndroidApiKey = getString(process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_ANDROID);
+  const extraIosApiKey =
+    getString(revenuecatExtra.iosApiKey) || getString(extra.revenuecatIosApiKey);
+  const extraAndroidApiKey =
+    getString(revenuecatExtra.androidApiKey) || getString(extra.revenuecatAndroidApiKey);
+
+  const iosApiKey = envIosApiKey || extraIosApiKey;
+  const androidApiKey = envAndroidApiKey || extraAndroidApiKey;
+  const envDefined = Boolean(envIosApiKey || envAndroidApiKey);
+  const extraDefined = Boolean(extraIosApiKey || extraAndroidApiKey);
+  const source: RevenueCatKeys["source"] = !envDefined && !extraDefined
+    ? "missing"
+    : envDefined && !extraDefined
+    ? "process.env"
+    : !envDefined && extraDefined
+    ? "expo.extra"
+    : "mixed";
 
   return {
     iosApiKey,
     androidApiKey,
-  };
+    source,
+    envIosDefined: Object.prototype.hasOwnProperty.call(
+      process.env,
+      "EXPO_PUBLIC_REVENUECAT_API_KEY_IOS"
+    ),
+    envAndroidDefined: Object.prototype.hasOwnProperty.call(
+      process.env,
+      "EXPO_PUBLIC_REVENUECAT_API_KEY_ANDROID"
+    ),
+    extraIosDefined:
+      typeof revenuecatExtra.iosApiKey !== "undefined" ||
+      typeof extra.revenuecatIosApiKey !== "undefined",
+    extraAndroidDefined:
+      typeof revenuecatExtra.androidApiKey !== "undefined" ||
+      typeof extra.revenuecatAndroidApiKey !== "undefined",
+  } satisfies RevenueCatKeys;
 };
 
 function getEntitlementId() {
   return process.env.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID || DEFAULT_ENTITLEMENT_ID;
 }
 
-function getApiKey() {
-  const { iosApiKey, androidApiKey } = resolveRevenueCatKeys();
-  if (Platform.OS === "ios") return iosApiKey;
-  if (Platform.OS === "android") return androidApiKey;
-  return iosApiKey || androidApiKey;
+function getApiKeyForPlatform(keys: RevenueCatKeys) {
+  if (Platform.OS === "ios") return keys.iosApiKey;
+  if (Platform.OS === "android") return keys.androidApiKey;
+  return keys.iosApiKey || keys.androidApiKey;
+}
+
+function getMissingApiKeyError() {
+  if (Platform.OS === "ios") {
+    return new Error(
+      "Missing RevenueCat iOS API key. Set EXPO_PUBLIC_REVENUECAT_API_KEY_IOS or extra.revenuecat.iosApiKey in app config."
+    );
+  }
+  if (Platform.OS === "android") {
+    return new Error(
+      "Missing RevenueCat Android API key. Set EXPO_PUBLIC_REVENUECAT_API_KEY_ANDROID or extra.revenuecat.androidApiKey in app config."
+    );
+  }
+  return new Error(
+    "Missing RevenueCat API key. Set EXPO_PUBLIC_REVENUECAT_API_KEY_IOS/ANDROID or app config extra keys."
+  );
 }
 
 export async function ensureRevenueCatConfigured(appUserId?: string | null) {
@@ -65,11 +117,22 @@ export async function ensureRevenueCatConfigured(appUserId?: string | null) {
   }
 
   configureInFlight = (async () => {
-    const apiKey = getApiKey();
+    const keys = resolveRevenueCatKeys();
+    const apiKey = getApiKeyForPlatform(keys);
+    if (__DEV__) {
+      console.log("revenuecat: configure attempt", {
+        platform: Platform.OS,
+        appUserIdPresent: Boolean(appUserId),
+        apiKeyPresent: Boolean(apiKey),
+        source: keys.source,
+        envIosDefined: keys.envIosDefined,
+        envAndroidDefined: keys.envAndroidDefined,
+        extraIosDefined: keys.extraIosDefined,
+        extraAndroidDefined: keys.extraAndroidDefined,
+      });
+    }
     if (!apiKey) {
-      throw new Error(
-        "Missing RevenueCat API key. Set EXPO_PUBLIC_REVENUECAT_API_KEY_IOS/ANDROID."
-      );
+      throw getMissingApiKeyError();
     }
     if (__DEV__ && process.env.EXPO_PUBLIC_REVENUECAT_DEBUG_LOGS === DEBUG_LOGS_FLAG) {
       Purchases.setLogLevel(LOG_LEVEL.DEBUG);
@@ -109,6 +172,9 @@ export async function syncRevenueCatIdentity(userId: string | null | undefined) 
     }
     try {
       await Purchases.logOut();
+      if (__DEV__) {
+        console.log("revenuecat: logged out to anonymous user");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
       // No-op if RevenueCat is already anonymous.
@@ -124,7 +190,13 @@ export async function syncRevenueCatIdentity(userId: string | null | undefined) 
   if (lastSyncedAppUserId === userId) {
     return;
   }
-  await Purchases.logIn(userId);
+  const loginResult = await Purchases.logIn(userId);
+  if (__DEV__) {
+    console.log("revenuecat: logIn success", {
+      appUserId: userId,
+      created: loginResult.created,
+    });
+  }
   lastSyncedAppUserId = userId;
 }
 
@@ -136,6 +208,29 @@ export async function restoreRevenueCatPurchases() {
 export async function getRevenueCatCustomerInfo() {
   await ensureRevenueCatConfigured();
   return Purchases.getCustomerInfo();
+}
+
+export async function getRevenueCatOfferings() {
+  await ensureRevenueCatConfigured();
+  return Purchases.getOfferings();
+}
+
+export async function ensureRevenueCatPaywallReady(userId: string): Promise<PurchasesOfferings> {
+  await syncRevenueCatIdentity(userId);
+  const offerings = await getRevenueCatOfferings();
+  const hasCurrent = Boolean(offerings.current);
+  const hasAny = Object.keys(offerings.all ?? {}).length > 0;
+  if (__DEV__) {
+    console.log("revenuecat: offerings result", {
+      hasCurrent,
+      hasAny,
+      offeringKeys: Object.keys(offerings.all ?? {}),
+    });
+  }
+  if (!hasCurrent && !hasAny) {
+    throw new Error("No RevenueCat offerings are configured for this app environment.");
+  }
+  return offerings;
 }
 
 export function hasActiveRevenueCatEntitlement(
