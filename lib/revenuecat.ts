@@ -1,4 +1,5 @@
 import { getSupabase } from "@/lib/supabaseClient";
+import Constants from "expo-constants";
 import { Platform } from "react-native";
 import Purchases, { CustomerInfo, LOG_LEVEL } from "react-native-purchases";
 
@@ -6,16 +7,51 @@ const DEFAULT_ENTITLEMENT_ID = "pro";
 const DEBUG_LOGS_FLAG = "1";
 
 let configured = false;
+let configureInFlight: Promise<void> | null = null;
 let lastSyncedAppUserId: string | null = null;
 
-const iosApiKey = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_IOS;
-const androidApiKey = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_ANDROID;
+const getConfigExtra = () => {
+  const constantsWithLegacy = Constants as typeof Constants & {
+    manifest?: { extra?: Record<string, unknown> };
+    manifest2?: { extra?: Record<string, unknown> };
+  };
+  return (
+    Constants.expoConfig?.extra ??
+    constantsWithLegacy.manifest2?.extra ??
+    constantsWithLegacy.manifest?.extra ??
+    {}
+  ) as Record<string, unknown>;
+};
+
+const getString = (value: unknown) =>
+  typeof value === "string" ? value.trim() : "";
+
+const resolveRevenueCatKeys = () => {
+  const extra = getConfigExtra();
+  const revenuecatExtra =
+    typeof extra.revenuecat === "object" && extra.revenuecat
+      ? (extra.revenuecat as Record<string, unknown>)
+      : {};
+
+  const iosApiKey =
+    getString(process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_IOS) ||
+    getString(revenuecatExtra.iosApiKey);
+  const androidApiKey =
+    getString(process.env.EXPO_PUBLIC_REVENUECAT_API_KEY_ANDROID) ||
+    getString(revenuecatExtra.androidApiKey);
+
+  return {
+    iosApiKey,
+    androidApiKey,
+  };
+};
 
 function getEntitlementId() {
   return process.env.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID || DEFAULT_ENTITLEMENT_ID;
 }
 
 function getApiKey() {
+  const { iosApiKey, androidApiKey } = resolveRevenueCatKeys();
   if (Platform.OS === "ios") return iosApiKey;
   if (Platform.OS === "android") return androidApiKey;
   return iosApiKey || androidApiKey;
@@ -23,20 +59,46 @@ function getApiKey() {
 
 export async function ensureRevenueCatConfigured(appUserId?: string | null) {
   if (configured) return;
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new Error("Missing RevenueCat API key. Set EXPO_PUBLIC_REVENUECAT_API_KEY_IOS/ANDROID.");
+  if (configureInFlight) {
+    await configureInFlight;
+    return;
   }
-  if (__DEV__ && process.env.EXPO_PUBLIC_REVENUECAT_DEBUG_LOGS === DEBUG_LOGS_FLAG) {
-    Purchases.setLogLevel(LOG_LEVEL.DEBUG);
-  } else {
-    Purchases.setLogLevel(LOG_LEVEL.WARN);
+
+  configureInFlight = (async () => {
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      throw new Error(
+        "Missing RevenueCat API key. Set EXPO_PUBLIC_REVENUECAT_API_KEY_IOS/ANDROID."
+      );
+    }
+    if (__DEV__ && process.env.EXPO_PUBLIC_REVENUECAT_DEBUG_LOGS === DEBUG_LOGS_FLAG) {
+      Purchases.setLogLevel(LOG_LEVEL.DEBUG);
+    } else {
+      Purchases.setLogLevel(LOG_LEVEL.WARN);
+    }
+    try {
+      Purchases.configure({
+        apiKey,
+        appUserID: appUserId ?? undefined,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+      if (!message.includes("already configured")) {
+        throw error;
+      }
+      if (__DEV__) {
+        console.warn("RevenueCat configure called after native configure; reusing existing instance.");
+      }
+    }
+    configured = true;
+  })();
+
+  try {
+    await configureInFlight;
+  } finally {
+    configureInFlight = null;
   }
-  Purchases.configure({
-    apiKey,
-    appUserID: appUserId ?? undefined,
-  });
-  configured = true;
 }
 
 export async function syncRevenueCatIdentity(userId: string | null | undefined) {

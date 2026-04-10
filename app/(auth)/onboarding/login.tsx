@@ -159,7 +159,8 @@ export default function Login() {
       trackAuthResult("apple", "success");
       trackOnboardingAction("login", "continue");
 
-      // Root layout will route to the correct destination after auth state updates.
+      // Hand off to tabs so the tabs guard can enforce paywall vs journal.
+      router.replace("/(tabs)/journal");
       return;
     } catch (e: any) {
       // user cancels Apple sheet
@@ -190,7 +191,8 @@ export default function Login() {
       trackAuthResult("google", "success");
       trackOnboardingAction("login", "continue");
 
-      // Root layout will route to the correct destination after auth state updates.
+      // Hand off to tabs so the tabs guard can enforce paywall vs journal.
+      router.replace("/(tabs)/journal");
       return;
     } catch (err: any) {
       console.log("Google sign-in error (login)", err);

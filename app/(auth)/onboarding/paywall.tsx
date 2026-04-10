@@ -29,6 +29,15 @@ export default function OnboardingPaywall() {
   const [paywallReady, setPaywallReady] = useState(false);
   const [paywallInitError, setPaywallInitError] = useState<string | null>(null);
 
+  const getPaywallInitErrorMessage = (error: unknown) => {
+    const raw = error instanceof Error ? error.message : String(error ?? "");
+    const normalized = raw.toLowerCase();
+    if (normalized.includes("missing revenuecat api key")) {
+      return "Subscriptions are not configured for this build yet. Please update app configuration and try again.";
+    }
+    return "We couldn't load subscription options right now. Please try again in a moment.";
+  };
+
   const initializePaywall = async () => {
     if (!user?.id) {
       setPaywallReady(false);
@@ -42,9 +51,7 @@ export default function OnboardingPaywall() {
       setPaywallReady(true);
     } catch (error) {
       console.error("paywall: revenuecat init failed", error);
-      setPaywallInitError(
-        "We couldn't load subscription options right now. Please try again in a moment."
-      );
+      setPaywallInitError(getPaywallInitErrorMessage(error));
     }
   };
 
@@ -72,9 +79,7 @@ export default function OnboardingPaywall() {
       } catch (error) {
         console.error("paywall: revenuecat init failed", error);
         if (cancelled) return;
-        setPaywallInitError(
-          "We couldn't load subscription options right now. Please try again in a moment."
-        );
+        setPaywallInitError(getPaywallInitErrorMessage(error));
       }
     })();
     void upsertOnboardingResponses(user.id, {

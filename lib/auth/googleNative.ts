@@ -8,7 +8,9 @@ let googleModule: typeof import("@react-native-google-signin/google-signin") | n
 type GoogleClientIds = {
   webClientId: string;
   iosClientId?: string;
-  source: "process.env" | "expo.extra" | "mixed";
+  source: "process.env" | "expo.extra" | "mixed" | "missing";
+  envWebDefined: boolean;
+  extraWebDefined: boolean;
 };
 
 const getConfigExtra = () => {
@@ -38,18 +40,25 @@ const resolveGoogleClientIds = (): GoogleClientIds => {
   const envIosClientId = getString(process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID);
   const extraWebClientId = getString(googleExtra.webClientId);
   const extraIosClientId = getString(googleExtra.iosClientId);
+  const envWebDefined = Object.prototype.hasOwnProperty.call(
+    process.env,
+    "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID"
+  );
+  const extraWebDefined = typeof googleExtra.webClientId !== "undefined";
 
   const webClientId = envWebClientId || extraWebClientId;
   const iosClientId = envIosClientId || extraIosClientId || undefined;
 
   const source: GoogleClientIds["source"] =
-    envWebClientId && !extraWebClientId
+    !webClientId
+      ? "missing"
+      : envWebClientId && !extraWebClientId
       ? "process.env"
       : !envWebClientId && extraWebClientId
       ? "expo.extra"
       : "mixed";
 
-  return { webClientId, iosClientId, source };
+  return { webClientId, iosClientId, source, envWebDefined, extraWebDefined };
 };
 
 const decodeJwtPayload = (token: string) => {
@@ -87,13 +96,15 @@ export const initGoogleSigninOnce = async () => {
   if (configured) return;
   if (Constants.appOwnership === "expo") return;
 
-  const { webClientId, iosClientId, source } = resolveGoogleClientIds();
+  const { webClientId, iosClientId, source, envWebDefined, extraWebDefined } = resolveGoogleClientIds();
 
   if (__DEV__) {
     console.log("google: runtime client IDs resolved", {
       webClientIdPresent: Boolean(webClientId),
       iosClientIdPresent: Boolean(iosClientId),
       source,
+      envWebDefined,
+      extraWebDefined,
     });
   }
 
