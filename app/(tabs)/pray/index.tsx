@@ -66,6 +66,8 @@ const MIN_TRANSCRIBE_FILE_BYTES = 4096;
 const MIN_METERING_SAMPLES = 6;
 const SILENCE_AVG_DB_THRESHOLD = -52;
 const SILENCE_PEAK_DB_THRESHOLD = -40;
+const PERMISSION_SETTLE_DELAY_MS = 250;
+const APP_ACTIVE_WAIT_TIMEOUT_MS = 2000;
 const IOS_INTERRUPTION_DO_NOT_MIX = (Audio as any).InterruptionModeIOS?.DoNotMix ?? 1;
 const ANDROID_INTERRUPTION_DO_NOT_MIX = (Audio as any).InterruptionModeAndroid?.DoNotMix ?? 1;
 const SHORT_HALLUCINATION_PHRASES = new Set([
@@ -91,6 +93,7 @@ const makePrayerId = () => uuidv4();
 const IMAGE_MEDIA_TYPES: any = (ImagePicker as any)?.MediaType?.Images
   ? [(ImagePicker as any).MediaType.Images]
   : ImagePicker.MediaTypeOptions.Images;
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export default function PrayScreen() {
   const router = useRouter();
@@ -202,6 +205,94 @@ export default function PrayScreen() {
     }
     console.log(`[walk] ${event}`);
   }, []);
+
+  const waitForAppToBecomeActive = useCallback(
+    async (timeoutMs: number = APP_ACTIVE_WAIT_TIMEOUT_MS) => {
+      if (AppState.currentState === "active") return;
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        let timeoutId: NodeJS.Timeout | null = null;
+        const sub = AppState.addEventListener("change", (state) => {
+          if (state !== "active" || settled) return;
+          settled = true;
+          if (timeoutId) clearTimeout(timeoutId);
+          sub.remove();
+          resolve();
+        });
+        timeoutId = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          sub.remove();
+          resolve();
+        }, timeoutMs);
+      });
+    },
+    []
+  );
+
+  const settleAfterPermissionPrompts = useCallback(async () => {
+    await waitForAppToBecomeActive();
+    await wait(PERMISSION_SETTLE_DELAY_MS);
+  }, [waitForAppToBecomeActive]);
+
+  const configureRecordingAudioMode = useCallback(async () => {
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      interruptionModeIOS: IOS_INTERRUPTION_DO_NOT_MIX,
+      interruptionModeAndroid: ANDROID_INTERRUPTION_DO_NOT_MIX,
+      shouldDuckAndroid: false,
+      playThroughEarpieceAndroid: false,
+    });
+  }, []);
+
+  const startForegroundWalkWatcher = useCallback(
+    async (reason: string) => {
+      const sub = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          distanceInterval: 3,
+        },
+        (pos) => {
+          const next = {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            timestamp: pos.timestamp ?? Date.now(),
+          };
+          const prev = walkCoordsRef.current;
+          const last = prev[prev.length - 1];
+          if (last && last.latitude === next.latitude && last.longitude === next.longitude) return;
+          const updated = [...prev, next];
+          walkCoordsRef.current = updated;
+          setWalkCoords(updated);
+          void appendPrayerWalkRoutePoints([next]);
+        }
+      );
+      walkLocationSubRef.current = sub;
+      logWalk("location_fallback_watcher_started", { reason });
+    },
+    [logWalk]
+  );
+
+  const stopWalkLocationTracking = useCallback(async () => {
+    if (isPrayerWalkTaskManagerAvailable) {
+      try {
+        const started = await Location.hasStartedLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
+        if (started) {
+          await Location.stopLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
+          logWalk("location_task_stopped", { task: PRAYER_WALK_LOCATION_TASK });
+        }
+      } catch {}
+    }
+    try {
+      walkLocationSubRef.current?.remove();
+    } catch {}
+    if (walkLocationSubRef.current) {
+      logWalk("location_fallback_watcher_stopped");
+    }
+    walkLocationSubRef.current = null;
+  }, [logWalk]);
 
   const hasWalkRouteChanged = (
     prev: PrayerWalkRoutePoint[],
@@ -567,17 +658,6 @@ useEffect(() => {
       );
       return false;
     }
-
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-      interruptionModeIOS: IOS_INTERRUPTION_DO_NOT_MIX,
-      interruptionModeAndroid: ANDROID_INTERRUPTION_DO_NOT_MIX,
-      shouldDuckAndroid: false,
-      playThroughEarpieceAndroid: false,
-    });
-
     return true;
   };
 
@@ -629,19 +709,6 @@ useEffect(() => {
     };
   };
 
-  const configureWalkRecordingAudioMode = async () => {
-    // Background walk recording needs both runtime audio mode and iOS background capability.
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: true,
-      interruptionModeIOS: IOS_INTERRUPTION_DO_NOT_MIX,
-      interruptionModeAndroid: ANDROID_INTERRUPTION_DO_NOT_MIX,
-      shouldDuckAndroid: false,
-      playThroughEarpieceAndroid: false,
-    });
-  };
-
   const getRecordingStartErrorMessage = (code: string | null, rawMessage: string) => {
     const normalized = `${code ?? ""} ${rawMessage}`.toLowerCase();
     if (
@@ -660,6 +727,18 @@ useEffect(() => {
       return "Could not start recording while another audio source is active. Pause music and try again.";
     }
     return "Could not start recording. Please try again.";
+  };
+
+  const getWalkStartErrorMessage = (code: string | null, rawMessage: string) => {
+    const normalized = `${code ?? ""} ${rawMessage}`.toLowerCase();
+    if (
+      normalized.includes("location") ||
+      normalized.includes("gps") ||
+      normalized.includes("task")
+    ) {
+      return "Could not start route tracking. Please confirm Location Services are on and try again.";
+    }
+    return getRecordingStartErrorMessage(code, rawMessage);
   };
 
   const computeZoomForSpan = (span: number) => {
@@ -1012,8 +1091,11 @@ useEffect(() => {
 
     const locResult = await requestLocationPermission();
     if (!locResult.ok) return;
+    await settleAfterPermissionPrompts();
 
     const walkStartedAt = Date.now();
+    const hasBackgroundLocationPermission = locResult.has_background_location_permission ?? false;
+    let startupRecording: Audio.Recording | null = null;
     setIsProcessing(true);
     setWalkCoords([]);
     setWalkStartAt(walkStartedAt);
@@ -1072,9 +1154,10 @@ useEffect(() => {
         await activateKeepAwakeAsync();
       } catch {}
 
-      await configureWalkRecordingAudioMode();
+      await configureRecordingAudioMode();
 
       const recording = new Audio.Recording();
+      startupRecording = recording;
       walkMeteringSamplesRef.current = [];
       await recording.prepareToRecordAsync({
         ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
@@ -1122,39 +1205,46 @@ useEffect(() => {
       }
 
       if (isPrayerWalkTaskManagerAvailable) {
-        try {
-          const alreadyTracking = await Location.hasStartedLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
-          if (alreadyTracking) {
-            await Location.stopLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
+        if (hasBackgroundLocationPermission) {
+          try {
+            const alreadyTracking = await Location.hasStartedLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
+            if (alreadyTracking) {
+              await Location.stopLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
+            }
+            await Location.startLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK, {
+              accuracy: Location.Accuracy.High,
+              distanceInterval: 3,
+              timeInterval: 3000,
+              deferredUpdatesDistance: 3,
+              deferredUpdatesInterval: 3000,
+              pausesUpdatesAutomatically: false,
+              activityType: Location.ActivityType.Fitness,
+              showsBackgroundLocationIndicator: true,
+              ...(Platform.OS === "android"
+                ? {
+                    foregroundService: {
+                      notificationTitle: "Prayer Walk in progress",
+                      notificationBody: "Tracking your walk route in the background.",
+                    },
+                  }
+                : {}),
+            });
+          } catch (taskStartError: any) {
+            logWalk("location_task_start_failed", {
+              message: String(taskStartError?.message || taskStartError || "unknown"),
+              has_background_permission: hasBackgroundLocationPermission,
+            });
+            throw taskStartError;
           }
-          await Location.startLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK, {
-            accuracy: Location.Accuracy.High,
-            distanceInterval: 3,
-            timeInterval: 3000,
-            deferredUpdatesDistance: 3,
-            deferredUpdatesInterval: 3000,
-            pausesUpdatesAutomatically: false,
-            activityType: Location.ActivityType.Fitness,
-            showsBackgroundLocationIndicator: true,
-            ...(Platform.OS === "android"
-              ? {
-                  foregroundService: {
-                    notificationTitle: "Prayer Walk in progress",
-                    notificationBody: "Tracking your walk route in the background.",
-                  },
-                }
-              : {}),
+          logWalk("location_task_started", {
+            task: PRAYER_WALK_LOCATION_TASK,
           });
-        } catch (taskStartError: any) {
-          logWalk("location_task_start_failed", {
-            message: String(taskStartError?.message || taskStartError || "unknown"),
-            has_background_permission: locResult.has_background_location_permission ?? false,
+        } else {
+          await startForegroundWalkWatcher("background_permission_missing");
+          logWalk("location_task_skipped", {
+            reason: "background_permission_missing",
           });
-          throw taskStartError;
         }
-        logWalk("location_task_started", {
-          task: PRAYER_WALK_LOCATION_TASK,
-        });
         await writeActiveWalkSession({
           active: true,
           startedAt: walkStartedAt,
@@ -1163,31 +1253,7 @@ useEffect(() => {
           trackingStarted: true,
         });
       } else {
-        // Fallback for dev clients that do not yet contain ExpoTaskManager native module.
-        const sub = await Location.watchPositionAsync(
-          {
-            accuracy: Location.Accuracy.High,
-            distanceInterval: 3,
-          },
-          (pos) => {
-            const next = {
-              latitude: pos.coords.latitude,
-              longitude: pos.coords.longitude,
-              timestamp: pos.timestamp ?? Date.now(),
-            };
-            const prev = walkCoordsRef.current;
-            const last = prev[prev.length - 1];
-            if (last && last.latitude === next.latitude && last.longitude === next.longitude) return;
-            const updated = [...prev, next];
-            walkCoordsRef.current = updated;
-            setWalkCoords(updated);
-            void appendPrayerWalkRoutePoints([next]);
-          }
-        );
-        walkLocationSubRef.current = sub;
-        logWalk("location_fallback_watcher_started", {
-          reason: "task_manager_unavailable",
-        });
+        await startForegroundWalkWatcher("task_manager_unavailable");
         await writeActiveWalkSession({
           active: true,
           startedAt: walkStartedAt,
@@ -1218,29 +1284,54 @@ useEffect(() => {
           capture("walk_route_unavailable", { reason: "timeout" });
         }
       }, 30000);
-    } catch {
-      logWalk("start_failed");
-      Alert.alert("Error", "Could not start prayer walk.");
+    } catch (e) {
+      const err = e as { code?: string; message?: string };
+      const code = typeof err?.code === "string" ? err.code : null;
+      const message = typeof err?.message === "string" ? err.message : String(e ?? "unknown");
+      logWalk("start_failed", {
+        code: code ?? undefined,
+        message,
+        has_background_permission: hasBackgroundLocationPermission,
+      });
+      capture("walk_start_failed", {
+        code: code ?? undefined,
+        message,
+        has_background_location_permission: hasBackgroundLocationPermission,
+      });
+      Alert.alert("Error", getWalkStartErrorMessage(code, message));
+      const failedRecording = walkRecordingRef.current ?? startupRecording;
       walkRecordingRef.current = null;
+      if (failedRecording) {
+        try {
+          await failedRecording.stopAndUnloadAsync();
+          logWalk("failed_start_recording_cleaned_up");
+        } catch {}
+      }
       try {
-        if (isPrayerWalkTaskManagerAvailable) {
-          const started = await Location.hasStartedLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
-          if (started) {
-            await Location.stopLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
-          }
-        } else {
-          walkLocationSubRef.current?.remove();
-          walkLocationSubRef.current = null;
-        }
+        await stopWalkLocationTracking();
       } catch {}
-      await clearPrayerWalkRoutePoints();
-      await writeActiveWalkSession(null);
+      if (walkNoCoordsTimeoutRef.current) {
+        clearTimeout(walkNoCoordsTimeoutRef.current);
+        walkNoCoordsTimeoutRef.current = null;
+      }
+      try {
+        await clearPrayerWalkRoutePoints();
+      } catch {}
+      try {
+        await writeActiveWalkSession(null);
+      } catch {}
       stopWalkStepTracking();
-      capture("walk_route_unavailable", { reason: "unknown" });
+      capture("walk_route_unavailable", { reason: "start_failed" });
       try {
         deactivateKeepAwake();
       } catch {}
+      setIsWalking(false);
+      setWalkStartAt(null);
+      setWalkCoords([]);
+      setWalkStepCount(null);
+      setDraftWalkDistanceMeters(null);
     } finally {
+      startupRecording = null;
       setIsProcessing(false);
     }
   };
@@ -1276,20 +1367,8 @@ useEffect(() => {
 
     // Stop tracking immediately
     try {
-      if (isPrayerWalkTaskManagerAvailable) {
-        const started = await Location.hasStartedLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
-        if (started) {
-          await Location.stopLocationUpdatesAsync(PRAYER_WALK_LOCATION_TASK);
-        }
-      } else {
-        walkLocationSubRef.current?.remove();
-        walkLocationSubRef.current = null;
-      }
+      await stopWalkLocationTracking();
     } catch {}
-    logWalk(
-      isPrayerWalkTaskManagerAvailable ? "location_task_stopped" : "location_fallback_watcher_stopped",
-      isPrayerWalkTaskManagerAvailable ? { task: PRAYER_WALK_LOCATION_TASK } : undefined
-    );
     if (walkNoCoordsTimeoutRef.current) clearTimeout(walkNoCoordsTimeoutRef.current);
     stopWalkStepTracking();
 
@@ -1315,6 +1394,8 @@ useEffect(() => {
         } catch {
           logWalk("recording_status_before_stop_failed");
         }
+      }
+      if (recording) {
         await recording.stopAndUnloadAsync();
         logWalk("audio_recording_stopped");
         localAudioUri = recording.getURI();
@@ -1465,12 +1546,14 @@ useEffect(() => {
     try {
       const ok = await requestMicPermission();
       if (!ok) return;
+      await settleAfterPermissionPrompts();
       setWalkMapUri(null);
       setDraftWalkDistanceMeters(null);
       // Keep the screen awake while recording so the phone doesn't sleep mid-prayer.
       try {
         await activateKeepAwakeAsync();
       } catch {}
+      await configureRecordingAudioMode();
       
       const recording = new Audio.Recording();
       prayerMeteringSamplesRef.current = [];
