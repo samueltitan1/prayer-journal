@@ -5,8 +5,9 @@ import { trackOnboardingAction, trackOnboardingStepViewed, trackPaywallViewed, t
 import { getOnboardingProgress } from "@/lib/onboardingProgress";
 import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import {
-  getRevenueCatOfferings,
   getRevenueCatCustomerInfo,
+  getRevenueCatCustomerInfoVerificationSnapshot,
+  getRevenueCatOfferings,
   hasActiveRevenueCatEntitlement,
   restoreRevenueCatPurchases,
   syncRevenueCatIdentity,
@@ -19,6 +20,9 @@ import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import RevenueCatUI from "react-native-purchases-ui";
+
+const SUBSCRIPTION_VERIFY_ATTEMPTS = 3;
+const SUBSCRIPTION_VERIFY_DELAY_MS = 2000;
 
 export default function OnboardingPaywall() {
   const router = useRouter();
@@ -149,7 +153,7 @@ export default function OnboardingPaywall() {
       }
       await syncRevenueCatIdentity(user.id);
       const customerInfo = await restoreRevenueCatPurchases();
-      const active = hasActiveRevenueCatEntitlement(customerInfo);
+      const active = await verifySubscriptionWithRetry("restore_manual", customerInfo);
       if (!active) {
         setPurchaseError("No active subscription found to restore.");
         return;
@@ -200,6 +204,58 @@ export default function OnboardingPaywall() {
     void Linking.openURL("https://prayerjournal.app/privacy");
   };
 
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const logCustomerInfoSnapshot = (
+    source: "purchase" | "restore" | "restore_manual" | "dismiss",
+    attempt: number,
+    customerInfo: Awaited<ReturnType<typeof getRevenueCatCustomerInfo>>
+  ) => {
+    if (!__DEV__) return;
+    const snapshot = getRevenueCatCustomerInfoVerificationSnapshot(customerInfo);
+    console.log("paywall: customerInfo snapshot", {
+      source,
+      attempt,
+      configuredEntitlementId: snapshot.configuredEntitlementId,
+      entitlementsActive: customerInfo.entitlements.active,
+      entitlementsAll: customerInfo.entitlements.all,
+      activeSubscriptions: customerInfo.activeSubscriptions,
+      activeEntitlementIds: snapshot.activeEntitlementIds,
+      allEntitlementIds: snapshot.allEntitlementIds,
+    });
+  };
+
+  const verifySubscriptionWithRetry = async (
+    source: "purchase" | "restore" | "restore_manual",
+    initialCustomerInfo?: Awaited<ReturnType<typeof getRevenueCatCustomerInfo>>
+  ) => {
+    for (let attempt = 1; attempt <= SUBSCRIPTION_VERIFY_ATTEMPTS; attempt += 1) {
+      const customerInfo =
+        attempt === 1 && initialCustomerInfo ? initialCustomerInfo : await getRevenueCatCustomerInfo();
+
+      logCustomerInfoSnapshot(source, attempt, customerInfo);
+
+      if (hasActiveRevenueCatEntitlement(customerInfo)) {
+        if (__DEV__) {
+          console.log("paywall: subscription verified", { source, attempt });
+        }
+        return true;
+      }
+
+      if (attempt < SUBSCRIPTION_VERIFY_ATTEMPTS) {
+        await wait(SUBSCRIPTION_VERIFY_DELAY_MS);
+      }
+    }
+
+    if (__DEV__) {
+      console.warn("paywall: subscription verification failed", {
+        source,
+        attempts: SUBSCRIPTION_VERIFY_ATTEMPTS,
+      });
+    }
+    return false;
+  };
+
   return (
     <OnboardingShell showBack={false}>
       <OnboardingHeader
@@ -224,7 +280,7 @@ export default function OnboardingPaywall() {
             onPurchaseCompleted={({ customerInfo }) => {
               void (async () => {
                 setPurchaseError(null);
-                const active = hasActiveRevenueCatEntitlement(customerInfo);
+                const active = await verifySubscriptionWithRetry("purchase", customerInfo);
                 if (!active) {
                   setPurchaseError("We couldn’t verify your subscription yet. Please try again.");
                   trackPurchaseResult("error");
@@ -236,7 +292,7 @@ export default function OnboardingPaywall() {
             onRestoreCompleted={({ customerInfo }) => {
               void (async () => {
                 setPurchaseError(null);
-                const active = hasActiveRevenueCatEntitlement(customerInfo);
+                const active = await verifySubscriptionWithRetry("restore", customerInfo);
                 if (!active) {
                   setPurchaseError("No active subscription found to restore.");
                   return;
@@ -252,6 +308,7 @@ export default function OnboardingPaywall() {
               void (async () => {
                 try {
                   const info = await getRevenueCatCustomerInfo();
+                  logCustomerInfoSnapshot("dismiss", 1, info);
                   const active = hasActiveRevenueCatEntitlement(info);
                   if (active) {
                     await completeOnboardingAfterPurchase("revenuecat");

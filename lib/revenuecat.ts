@@ -237,11 +237,48 @@ export function hasActiveRevenueCatEntitlement(
   customerInfo: CustomerInfo,
   entitlementId = getEntitlementId()
 ) {
-  return Boolean(customerInfo.entitlements.active?.[entitlementId]);
+  const snapshot = getRevenueCatCustomerInfoVerificationSnapshot(customerInfo, entitlementId);
+  return (
+    snapshot.hasConfiguredActiveEntitlement ||
+    snapshot.activeEntitlementIds.length > 0 ||
+    snapshot.activeSubscriptions.length > 0
+  );
 }
 
 export function getRevenueCatEntitlementId() {
   return getEntitlementId();
+}
+
+export type RevenueCatCustomerInfoVerificationSnapshot = {
+  configuredEntitlementId: string;
+  hasConfiguredActiveEntitlement: boolean;
+  activeEntitlementIds: string[];
+  allEntitlementIds: string[];
+  activeSubscriptions: string[];
+};
+
+export function getRevenueCatCustomerInfoVerificationSnapshot(
+  customerInfo: CustomerInfo,
+  entitlementId = getEntitlementId()
+): RevenueCatCustomerInfoVerificationSnapshot {
+  const configuredEntitlementId = entitlementId.trim();
+  const activeEntitlements = customerInfo.entitlements.active ?? {};
+  const allEntitlements = customerInfo.entitlements.all ?? {};
+  const activeEntitlementIds = Object.keys(activeEntitlements);
+  const allEntitlementIds = Object.keys(allEntitlements);
+  const activeSubscriptions = Array.isArray(customerInfo.activeSubscriptions)
+    ? customerInfo.activeSubscriptions
+    : [];
+
+  return {
+    configuredEntitlementId,
+    hasConfiguredActiveEntitlement: Boolean(
+      configuredEntitlementId && activeEntitlements?.[configuredEntitlementId]
+    ),
+    activeEntitlementIds,
+    allEntitlementIds,
+    activeSubscriptions,
+  };
 }
 
 export async function syncRevenueCatSubscription(appUserId: string) {

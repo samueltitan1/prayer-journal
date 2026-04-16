@@ -24,7 +24,7 @@
           "audio",
           "location"
         ],
-        "NSMicrophoneUsageDescription": "This app uses the microphone to record your spoken prayers. For example, you can record a prayer during your day, which is then transcribed and saved in your private journal.",
+        "NSMicrophoneUsageDescription": "Prayer Journal records spoken prayers, transcribes them into private journal entries and saves audio when you choose.",
         "NSLocationWhenInUseUsageDescription": "Allow location access to map your Prayer Walk route.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Allow background location so Prayer Walk can keep tracking while your phone is locked.",
         "NSHealthShareUsageDescription": "We use Apple Health to enhance Prayer Walk insights (steps/distance) and show patterns over time.",
@@ -38,7 +38,7 @@
           }
         ]
       },
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.sinaiglobal.prayerjournal",
       "buildNumber": "1.1.0"
     },
@@ -77,7 +77,7 @@
       [
         "expo-av",
         {
-          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone"
+          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone to record and transcribe your spoken prayers"
         }
       ],
       "expo-web-browser"
