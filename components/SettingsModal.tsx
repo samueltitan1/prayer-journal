@@ -76,8 +76,14 @@ export default function SettingsModal({
   onClose,
   userId,
 }: SettingsModalProps) {
-  const { theme, setTheme, colors } = useTheme();
+  const { theme, themePreference, setTheme, colors } = useTheme();
   const isDark = theme === "dark";
+  const themeStatusLabel =
+    themePreference === "system"
+      ? `Following system (${theme === "dark" ? "Dark" : "Light"})`
+      : theme === "dark"
+      ? "Dark theme active"
+      : "Light theme active";
 
   // ==========================
   // State
@@ -259,10 +265,6 @@ export default function SettingsModal({
           data.delete_audio_after_transcription ?? false
         );
         setHasReflectiveSummary(data.has_reflective_summary ?? false);
-
-        if (data.dark_mode_preference && data.dark_mode_preference !== theme) {
-          setTheme(data.dark_mode_preference);
-        }
       }
 
       setLoadingSettings(false);
@@ -437,11 +439,16 @@ export default function SettingsModal({
   // ==========================
   // Handlers
   // ==========================
-  const handleDarkMode = async () => {
-    const newTheme = isDark ? "light" : "dark";
-    setTheme(newTheme);
-    await updateSetting("dark_mode_preference", newTheme);
-    showToast(newTheme === "dark" ? "Dark mode enabled" : "Light mode enabled");
+  const handleThemePreferenceChange = (nextTheme: "light" | "dark" | "system") => {
+    if (themePreference === nextTheme) return;
+    setTheme(nextTheme);
+
+    if (nextTheme === "system") {
+      showToast("Theme set to system");
+      return;
+    }
+
+    showToast(nextTheme === "dark" ? "Dark mode enabled" : "Light mode enabled");
   };
 
   const handleReminderToggle = async () => {
@@ -744,10 +751,46 @@ export default function SettingsModal({
               <Text
                 style={[styles.settingSub, { color: colors.textSecondary }]}
               >
-                {isDark ? "Dark theme active" : "Light theme active"}
+                {themeStatusLabel}
               </Text>
             </View>
-            <Switch value={isDark} onValueChange={handleDarkMode} />
+            <View style={styles.themeOptionGroup}>
+              {(["light", "dark", "system"] as const).map((option) => {
+                const selected = themePreference === option;
+                const label =
+                  option === "light" ? "Light" : option === "dark" ? "Dark" : "System";
+
+                return (
+                  <TouchableOpacity
+                    key={option}
+                    activeOpacity={0.85}
+                    style={[
+                      styles.themeOptionButton,
+                      {
+                        backgroundColor: selected
+                          ? colors.accent + "2B"
+                          : colors.background,
+                        borderColor: selected
+                          ? colors.accent
+                          : colors.textSecondary + "44",
+                      },
+                    ]}
+                    onPress={() => handleThemePreferenceChange(option)}
+                  >
+                    <Text
+                      style={[
+                        styles.themeOptionText,
+                        {
+                          color: selected ? colors.accent : colors.textSecondary,
+                        },
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
 
           {/* NOTIFICATIONS */}
@@ -993,7 +1036,7 @@ export default function SettingsModal({
               { backgroundColor: colors.card },
             ]}
           >
-            <View style={{ flex: 1, marginRight: spacing.md }}>
+            <View style={styles.subscriptionDetails}>
               <View style={styles.subscriptionRow}>
                 <Text style={[styles.subscriptionKey, { color: colors.textSecondary }]}>
                   Account:
@@ -1047,6 +1090,7 @@ export default function SettingsModal({
               <TouchableOpacity
                 style={[
                   styles.manageBtn,
+                  styles.manageBtnSpacing,
                   { backgroundColor: colors.accent + "22" },
                 ]}
                 onPress={() =>
@@ -1213,6 +1257,21 @@ const styles = StyleSheet.create({
   settingText: { flex: 1, marginLeft: spacing.sm, marginRight: spacing.sm },
   settingLabel: { fontFamily: fonts.heading, fontSize: 15 },
   settingSub: { fontFamily: fonts.body, fontSize: 11, marginTop: 2 },
+  themeOptionGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  themeOptionButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  themeOptionText: {
+    fontFamily: fonts.body,
+    fontSize: 11,
+  },
   timePickerContainer: {
     borderRadius: 16,
     paddingVertical: spacing.sm,
@@ -1222,15 +1281,15 @@ const styles = StyleSheet.create({
   subscriptionBox: {
     borderRadius: 16,
     padding: spacing.md,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
   },
+  subscriptionDetails: { width: "100%" },
   manageBtn: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: 12,
+    alignSelf: "flex-end",
   },
+  manageBtnSpacing: { marginTop: spacing.sm },
   manageText: { fontFamily: fonts.body, fontSize: 13 },
   subscriptionRow: {
     flexDirection: "row",

@@ -1,13 +1,15 @@
 // contexts/ThemeContext.tsx
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { Appearance } from "react-native";
+import { useColorScheme } from "react-native";
 
+type ThemePreference = "light" | "dark" | "system";
 type ThemeType = "light" | "dark";
 
 interface ThemeContextType {
   theme: ThemeType;
-  setTheme: (t: ThemeType) => void;
+  themePreference: ThemePreference;
+  setTheme: (t: ThemePreference) => void;
   toggleTheme: () => void;
   colors: Record<string, string>;
   loading: boolean;
@@ -15,15 +17,34 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType>({
   theme: "light",
+  themePreference: "system",
   setTheme: () => {},
   toggleTheme: () => {},
   colors: {},
   loading: true,
 });
 
+const THEME_STORAGE_KEY = "app_theme";
+
+const isThemePreference = (value: string | null): value is ThemePreference =>
+  value === "light" || value === "dark" || value === "system";
+
+const resolveTheme = (
+  preference: ThemePreference,
+  systemTheme: "light" | "dark" | null | undefined
+): ThemeType => {
+  if (preference === "light" || preference === "dark") {
+    return preference;
+  }
+
+  return systemTheme === "dark" ? "dark" : "light";
+};
+
 export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
-  const [theme, setThemeState] = useState<ThemeType>("light");
+  const systemTheme = useColorScheme();
+  const [themePreference, setThemePreference] = useState<ThemePreference>("system");
   const [loading, setLoading] = useState(true);
+  const theme = resolveTheme(themePreference, systemTheme);
 
   const colors =
     theme === "dark"
@@ -42,9 +63,9 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
           accent: "#C4A572",
         };
 
-  const applyTheme = (t: ThemeType) => {
-    setThemeState(t);
-    AsyncStorage.setItem("app_theme", t).catch(() => {});
+  const applyTheme = (preference: ThemePreference) => {
+    setThemePreference(preference);
+    AsyncStorage.setItem(THEME_STORAGE_KEY, preference).catch(() => {});
   };
 
   const toggleTheme = () => {
@@ -55,12 +76,9 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     (async () => {
       try {
-        const saved = await AsyncStorage.getItem("app_theme");
-        if (saved === "light" || saved === "dark") {
-          setThemeState(saved);
-        } else {
-          const sys = Appearance.getColorScheme();
-          if (sys) setThemeState(sys);
+        const saved = await AsyncStorage.getItem(THEME_STORAGE_KEY);
+        if (isThemePreference(saved)) {
+          setThemePreference(saved);
         }
       } finally {
         setLoading(false);
@@ -72,6 +90,7 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
     <ThemeContext.Provider
       value={{
         theme,
+        themePreference,
         setTheme: applyTheme,
         toggleTheme,
         colors,

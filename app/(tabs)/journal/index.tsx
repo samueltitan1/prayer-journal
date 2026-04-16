@@ -1728,10 +1728,13 @@ const closeReflection = () => {
                   style={{ marginRight: spacing.sm }}
                 />
                 <Text
-                  style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
+                  style={[styles.emptyCardText, { color: colors.textSecondary }]}
                 >
-                  Weekly reflections are created for the last completed week.
-                  Add journal entries throughout the week and your reflection will appear here automatically.
+                  Your weekly reflection appears every Sunday.
+                  {"\n\n"}
+                  Pray at least 3 times this week and we'll summarise your prayers
+                  {" "}
+                  — surfacing themes, patterns and moments where God was moving.
                 </Text>
               </View>
             )}
@@ -1752,7 +1755,7 @@ const closeReflection = () => {
                   style={{ marginRight: spacing.sm }}
                 />
                 <Text
-                  style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
+                  style={[styles.emptyCardText, { color: colors.textSecondary }]}
                 >
                   Bookmark prayers you want to revisit later.
                 </Text>
@@ -1921,11 +1924,13 @@ const closeReflection = () => {
                   style={{ marginRight: spacing.sm }}
                 />
                 <Text
-                  style={[styles.sectionSubtitle, { color: colors.textSecondary }]}
+                  style={[styles.emptyCardText, { color: colors.textSecondary }]}
                 >
-                  Monthly reflections are created for the last completed month.
-                  Keep praying - your reflection will appear here.
-                
+                  Your monthly reflection appears on the{" "}
+                  1st of each month.
+                  {"\n\n"}
+                  Pray at least 5 times this month and we'll create a deeper
+                  reflection on your journey with God over the past 30 days.
                 </Text>
               </View>
             )}
@@ -2136,9 +2141,16 @@ const styles = StyleSheet.create({
   // Empty / gamification cards
   emptyCard: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     borderRadius: 16,
     padding: spacing.md,
+  },
+  emptyCardText: {
+    flex: 1,
+    flexShrink: 1,
+    fontFamily: fonts.body,
+    fontSize: 14,
+    lineHeight: 20,
   },
 
   // Recent prayers
