@@ -1044,8 +1044,8 @@ useEffect(() => {
     if (appleHealthConnected === false && !healthKitNoticeShownRef.current) {
       healthKitNoticeShownRef.current = true;
       Alert.alert(
-        "Apple Health (Optional)",
-        "We can save workout details and route data to Apple Health. Your prayer content is never shared.",
+        "Connect Apple Health",
+        "Connect Apple Health to sync Prayer Walk workouts (distance, duration, and route). Prayer text and audio are never shared with Health.",
         [
           {
             text: "Continue without Apple Health",
@@ -2483,7 +2483,10 @@ useEffect(() => {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (perm.status !== "granted") {
-        Alert.alert("Permission needed", "Please allow photo library access to attach photos.");
+        Alert.alert(
+          "Permission needed",
+          "Please allow photo library access to choose photos to attach to your prayer entry."
+        );
         return;
       }
 
@@ -2511,7 +2514,10 @@ useEffect(() => {
       capture("attachment_add_clicked", { source: "camera" });
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (perm.status !== "granted") {
-        Alert.alert("Permission needed", "Please allow camera access to take a photo.");
+        Alert.alert(
+          "Permission needed",
+          "Please allow camera access to scan handwritten prayers or attach a photo to your prayer entry."
+        );
         return;
       }
 
@@ -2557,7 +2563,7 @@ useEffect(() => {
         if (camPerm.status !== "granted") {
           Alert.alert(
             "Permission needed",
-            "Please allow camera access to scan handwriting."
+            "Please allow camera access to scan handwritten prayers or attach a photo to your prayer entry."
           );
           return;
         }
@@ -2574,7 +2580,7 @@ useEffect(() => {
         if (libPerm.status !== "granted") {
           Alert.alert(
             "Permission needed",
-            "Please allow photo library access to scan handwriting."
+            "Please allow photo library access to choose handwritten prayer photos for scanning."
           );
           return;
         }

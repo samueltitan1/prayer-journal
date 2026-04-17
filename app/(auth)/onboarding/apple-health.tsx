@@ -12,7 +12,7 @@ import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { upsertUserSettingsOnboarding } from "@/lib/userSettings";
 import { colors, fonts, spacing } from "@/theme/theme";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 export default function OnboardingAppleHealth() {
   const router = useRouter();
@@ -71,7 +71,7 @@ export default function OnboardingAppleHealth() {
     
         <Text style={styles.title}>Connect to Apple Health</Text>
         <Text style={styles.subtitle}>
-          Combine your spiritual health with your physical health - Track your prayers and your steps. Enhance "Walk Mode" by syncing your Prayer Walk's with the Health app. 
+        Combine your spiritual health with your physical health by syncing Prayer Walk data. We use your steps and walking distance for walk summaries, and with your permission we save Prayer Walk workouts (distance, duration, and route) to the Health app.
         </Text>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
       </View>
