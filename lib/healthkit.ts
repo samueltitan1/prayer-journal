@@ -8,6 +8,16 @@ import type { QuantitySampleForSaving, QuantityTypeIdentifier } from "@kingstinc
 // npx pod-install
 // npx expo run:ios
 
+const HEALTHKIT_AUTH_REQUEST = {
+  toRead: [
+    "HKQuantityTypeIdentifierStepCount",
+    "HKQuantityTypeIdentifierDistanceWalkingRunning",
+  ],
+  toShare: ["HKWorkoutTypeIdentifier", "HKQuantityTypeIdentifierDistanceWalkingRunning"],
+} as const;
+
+export type HealthPermissionStatus = "unavailable" | "not_determined" | "denied" | "authorized";
+
 export async function isHealthKitAvailable(): Promise<boolean> {
   if (Platform.OS !== "ios") return false;
   if (Constants.appOwnership === "expo") return false;
@@ -19,19 +29,36 @@ export async function isHealthKitAvailable(): Promise<boolean> {
   }
 }
 
+export async function getHealthPermissionStatus(): Promise<HealthPermissionStatus> {
+  if (Platform.OS !== "ios") return "unavailable";
+  if (Constants.appOwnership === "expo") return "unavailable";
+  try {
+    const { AuthorizationStatus, authorizationStatusFor, isHealthDataAvailableAsync } = await import(
+      "@kingstinct/react-native-healthkit"
+    );
+    const available = await isHealthDataAvailableAsync();
+    if (!available) return "unavailable";
+    const status = authorizationStatusFor("HKWorkoutTypeIdentifier");
+    if (status === AuthorizationStatus.notDetermined) return "not_determined";
+    if (status === AuthorizationStatus.sharingAuthorized) return "authorized";
+    return "denied";
+  } catch {
+    return "unavailable";
+  }
+}
+
 export async function requestHealthPermissions(): Promise<boolean> {
   if (Platform.OS !== "ios") return false;
   if (Constants.appOwnership === "expo") return false;
   try {
-    const { requestAuthorization } = await import("@kingstinct/react-native-healthkit");
-    await requestAuthorization({
-      toRead: [
-        "HKQuantityTypeIdentifierStepCount",
-        "HKQuantityTypeIdentifierDistanceWalkingRunning",
-      ],
-      toShare: ["HKWorkoutTypeIdentifier", "HKQuantityTypeIdentifierDistanceWalkingRunning"],
-    });
-    return true;
+    const currentStatus = await getHealthPermissionStatus();
+    if (currentStatus === "authorized") return true;
+    if (currentStatus !== "not_determined") return false;
+    const { AuthorizationRequestStatus, getRequestStatusForAuthorization, requestAuthorization } =
+      await import("@kingstinct/react-native-healthkit");
+    const requestStatus = await getRequestStatusForAuthorization(HEALTHKIT_AUTH_REQUEST);
+    if (requestStatus !== AuthorizationRequestStatus.shouldRequest) return false;
+    return await requestAuthorization(HEALTHKIT_AUTH_REQUEST);
   } catch {
     return false;
   }

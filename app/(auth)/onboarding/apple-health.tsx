@@ -6,18 +6,15 @@ import {
   trackOnboardingAction,
   trackOnboardingStepViewed,
 } from "@/lib/analytics/onboarding";
-import { isHealthKitAvailable, requestHealthPermissions } from "@/lib/healthkit";
 import { getOnboardingProgress } from "@/lib/onboardingProgress";
 import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
-import { upsertUserSettingsOnboarding } from "@/lib/userSettings";
 import { colors, fonts, spacing } from "@/theme/theme";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
-import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useEffect } from "react";
+import { Image, StyleSheet, Text, View } from "react-native";
 export default function OnboardingAppleHealth() {
   const router = useRouter();
   const { user } = useAuth();
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     trackOnboardingStepViewed("apple-health");
@@ -27,29 +24,9 @@ export default function OnboardingAppleHealth() {
     });
   }, [user?.id]);
 
-  const handleConnect = async () => {
-    setError(null);
-    try {
-      const available = await isHealthKitAvailable();
-      if (!available) {
-        setError("Apple Health is only available on iOS devices.");
-        return;
-      }
-
-      const ok = await requestHealthPermissions();
-      if (!ok) {
-        setError("Could not connect to Apple Health. Please try again.");
-        return;
-      }
-
-      void upsertUserSettingsOnboarding(user?.id, {
-        apple_health_connected: true,
-      });
-      trackOnboardingAction("apple-health", "continue");
-      router.replace("/(auth)/onboarding/reminder");
-    } catch {
-      setError("Could not connect to Apple Health. Please try again.");
-    }
+  const handleConnect = () => {
+    trackOnboardingAction("apple-health", "continue");
+    router.replace("/(auth)/onboarding/reminder");
   };
 
   return (
@@ -73,20 +50,9 @@ export default function OnboardingAppleHealth() {
         <Text style={styles.subtitle}>
         Combine your spiritual health with your physical health by syncing Prayer Walk data. We use your steps and walking distance for walk summaries, and with your permission we save Prayer Walk workouts (distance, duration, and route) to the Health app.
         </Text>
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
       </View>
       <View style={styles.footer}>
         <PrimaryButton title="Continue" onPress={handleConnect} />
-        <View style={styles.skipWrap}>
-          <TouchableOpacity
-            onPress={() => {
-              trackOnboardingAction("apple-health", "skip");
-              router.replace("/(auth)/onboarding/reminder");
-            }}
-          >
-            <Text style={styles.skipText}>Skip</Text>
-          </TouchableOpacity>
-        </View>
       </View>
     </OnboardingShell>
   );
@@ -114,24 +80,8 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: "left",
   },
-  errorText: {
-    marginTop: spacing.md,
-    fontFamily: fonts.body,
-    fontSize: 13,
-    color: "#B00020",
-    textAlign: "center",
-  },
   footer: {
     paddingBottom: spacing.lg,
-  },
-  skipWrap: {
-    marginTop: spacing.md,
-    alignItems: "center",
-  },
-  skipText: {
-    fontFamily: fonts.body,
-    fontSize: 14,
-    color: colors.textPrimary,
   },
   logoContainer: {
     alignItems: "center",

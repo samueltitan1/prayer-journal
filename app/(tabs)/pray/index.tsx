@@ -38,7 +38,11 @@ import { v4 as uuidv4 } from "uuid";
 import SecurityNoticeModal, { shouldShowSecurityNotice } from "@/components/SecurityNoticeModal";
 import TranscriptEditor from "../../../components/TranscriptEditor";
 import { useTheme } from "../../../contexts/ThemeContext";
-import { isHealthKitAvailable, requestHealthPermissions, savePrayerWalkWorkout } from "../../../lib/healthkit";
+import {
+  getHealthPermissionStatus,
+  requestHealthPermissions,
+  savePrayerWalkWorkout,
+} from "../../../lib/healthkit";
 import { cancelStreakFollowupNotification, getDailyPrayerReminderStatus } from "../../../lib/notifications";
 import {
   appendPrayerWalkRoutePoints,
@@ -1058,14 +1062,19 @@ useEffect(() => {
           {
             text: "Connect Apple Health",
             onPress: async () => {
-              const available = await isHealthKitAvailable();
-              if (!available) {
+              const healthPermissionStatus = await getHealthPermissionStatus();
+              if (healthPermissionStatus === "unavailable") {
                 Alert.alert("Apple Health unavailable", "Apple Health is only available on iOS devices.");
                 healthKitOptInRef.current = false;
                 void startWalk();
                 return;
               }
-              const ok = await requestHealthPermissions();
+              const ok =
+                healthPermissionStatus === "authorized"
+                  ? true
+                  : healthPermissionStatus === "not_determined"
+                  ? await requestHealthPermissions()
+                  : false;
               if (ok) {
                 healthKitOptInRef.current = true;
                 setAppleHealthConnected(true);
@@ -1478,20 +1487,17 @@ useEffect(() => {
 
       if (startedAt && healthKitOptInRef.current) {
         try {
-          const available = await isHealthKitAvailable();
-          if (available) {
-            const ok = await requestHealthPermissions();
-            if (ok) {
-              // NOTE: @kingstinct/react-native-healthkit currently exposes saveWorkoutSample
-              // (and startWatchApp), but not a full live HKWorkoutSession lifecycle API
-              // (start/observe/end). We keep the stable end-of-walk save flow here.
-              await savePrayerWalkWorkout({
-                startDate: new Date(startedAt),
-                endDate: new Date(),
-                distanceMeters: distanceMeters > 0 ? distanceMeters : undefined,
-                route: coordsSnapshot,
-              });
-            }
+          const healthPermissionStatus = await getHealthPermissionStatus();
+          if (healthPermissionStatus === "authorized") {
+            // NOTE: @kingstinct/react-native-healthkit currently exposes saveWorkoutSample
+            // (and startWatchApp), but not a full live HKWorkoutSession lifecycle API
+            // (start/observe/end). We keep the stable end-of-walk save flow here.
+            await savePrayerWalkWorkout({
+              startDate: new Date(startedAt),
+              endDate: new Date(),
+              distanceMeters: distanceMeters > 0 ? distanceMeters : undefined,
+              route: coordsSnapshot,
+            });
           }
         } catch {}
       }
