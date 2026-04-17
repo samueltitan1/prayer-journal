@@ -28,6 +28,7 @@ export const getPrayerWalkTaskDiagnostics = () => ({
   taskName: PRAYER_WALK_LOCATION_TASK,
 });
 const PRAYER_WALK_ROUTE_STORAGE_KEY = "@prayer_walk_route_points_v1";
+const PRAYER_WALK_ACTIVE_SESSION_STORAGE_KEY = "@prayer_walk_active_session_v1";
 
 export type PrayerWalkRoutePoint = {
   latitude: number;
@@ -68,6 +69,13 @@ export const readPrayerWalkRoutePoints = async (): Promise<PrayerWalkRoutePoint[
 
 export const clearPrayerWalkRoutePoints = async () => {
   await AsyncStorage.removeItem(PRAYER_WALK_ROUTE_STORAGE_KEY);
+};
+
+export const clearPrayerWalkLocalState = async () => {
+  await AsyncStorage.multiRemove([
+    PRAYER_WALK_ROUTE_STORAGE_KEY,
+    PRAYER_WALK_ACTIVE_SESSION_STORAGE_KEY,
+  ]);
 };
 
 export const appendPrayerWalkRoutePoints = async (incoming: PrayerWalkRoutePoint[]) => {

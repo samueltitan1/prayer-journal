@@ -230,6 +230,45 @@ export async function clearQueue(userId?: string) {
   await writeQueue(queue.filter((q) => q.user_id !== userId));
 }
 
+export async function clearOfflineQueueData(userId?: string) {
+  const prayerQueue = await readQueue();
+  const attachmentQueue = await readAttachmentQueue();
+
+  const prayersToRemove = userId
+    ? prayerQueue.filter((q) => q.user_id === userId)
+    : prayerQueue;
+  const attachmentsToRemove = userId
+    ? attachmentQueue.filter((q) => q.user_id === userId)
+    : attachmentQueue;
+
+  for (const item of prayersToRemove) {
+    if (!item.local_audio_uri) continue;
+    try {
+      await FileSystem.deleteAsync(item.local_audio_uri, { idempotent: true });
+    } catch {
+      // ignore cleanup failures
+    }
+  }
+
+  for (const item of attachmentsToRemove) {
+    if (!item.local_image_uri) continue;
+    try {
+      await FileSystem.deleteAsync(item.local_image_uri, { idempotent: true });
+    } catch {
+      // ignore cleanup failures
+    }
+  }
+
+  if (!userId) {
+    await writeQueue([]);
+    await writeAttachmentQueue([]);
+    return;
+  }
+
+  await writeQueue(prayerQueue.filter((q) => q.user_id !== userId));
+  await writeAttachmentQueue(attachmentQueue.filter((q) => q.user_id !== userId));
+}
+
 async function tryAcquireLock(): Promise<boolean> {
   const now = Date.now();
   const raw = await AsyncStorage.getItem(LOCK_KEY);

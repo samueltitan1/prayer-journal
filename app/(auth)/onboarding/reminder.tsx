@@ -27,6 +27,7 @@ export default function OnboardingReminder() {
   const [showPicker, setShowPicker] = useState(Platform.OS === 'ios');
   const [modalVisible, setModalVisible] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
+  const getPendingReminderKey = (uid: string) => `pending_prayer_reminder:${uid}`;
 
   useEffect(() => {
     trackOnboardingStepViewed("reminder");
@@ -67,13 +68,12 @@ export default function OnboardingReminder() {
     }
     setPermissionError(null);
 
-    // Save pending reminder locally; we'll apply it after login once we have userId.
     const timeHHmm = formatHHmm(selectedTime);
-    await AsyncStorage.setItem(
-      "pending_prayer_reminder",
-      JSON.stringify({ enabled: true, time: timeHHmm })
-    );
     if (user?.id) {
+      await AsyncStorage.setItem(
+        getPendingReminderKey(user.id),
+        JSON.stringify({ enabled: true, time: timeHHmm, userId: user.id })
+      );
       void upsertUserSettingsOnboarding(user.id, {
         reminder_enabled: true,
         reminder_time: timeHHmm,

@@ -28,6 +28,10 @@ type AuthProviderProps = {
 
 // ---- Context ----
 const AuthContext = createContext<AuthContextType | null>(null);
+const PENDING_PRAYER_REMINDER_KEY_PREFIX = "pending_prayer_reminder";
+const LEGACY_PENDING_PRAYER_REMINDER_KEY = "pending_prayer_reminder";
+const getPendingPrayerReminderKey = (uid: string) =>
+  `${PENDING_PRAYER_REMINDER_KEY_PREFIX}:${uid}`;
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   // Keep a stable Supabase client instance for the lifetime of this provider.
@@ -65,16 +69,26 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
           if (didApplyPendingReminderRef.current) return;
     
           try {
-            const raw = await AsyncStorage.getItem("pending_prayer_reminder");
-            if (!raw) return;
+            const scopedKey = getPendingPrayerReminderKey(uid);
+            const raw = await AsyncStorage.getItem(scopedKey);
+            if (!raw) {
+              await AsyncStorage.removeItem(LEGACY_PENDING_PRAYER_REMINDER_KEY);
+              return;
+            }
     
-            const parsed = JSON.parse(raw) as { enabled?: boolean; time?: string };
+            const parsed = JSON.parse(raw) as {
+              enabled?: boolean;
+              time?: string;
+              userId?: string;
+            };
             const enabled = parsed?.enabled === true;
             const time = typeof parsed?.time === "string" ? parsed.time : null;
+            const ownerUserId =
+              typeof parsed?.userId === "string" ? parsed.userId : null;
     
             // If payload is incomplete, clear it so we don't retry forever.
-            if (!enabled || !time) {
-              await AsyncStorage.removeItem("pending_prayer_reminder");
+            if (!enabled || !time || (ownerUserId && ownerUserId !== uid)) {
+              await AsyncStorage.removeItem(scopedKey);
               didApplyPendingReminderRef.current = true;
               return;
             }
@@ -90,7 +104,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             });
     
             // Clean up
-            await AsyncStorage.removeItem("pending_prayer_reminder");
+            await AsyncStorage.removeItem(scopedKey);
+            await AsyncStorage.removeItem(LEGACY_PENDING_PRAYER_REMINDER_KEY);
             didApplyPendingReminderRef.current = true;
           } catch {
             // Never block auth flow

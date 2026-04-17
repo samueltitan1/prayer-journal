@@ -368,29 +368,39 @@ const [milestoneTimelineVisible, setMilestoneTimelineVisible] = useState(false);
 // Milestone unlock state and helpers
 const [unlockedMilestones, setUnlockedMilestones] = useState<number[]>([]);
 
-const UNLOCKED_MILESTONES_KEY = "unlocked_milestones_v1";
-const LAST_REFLECTION_CHECK_AT_KEY = "last_reflection_check_at_v1";
+const UNLOCKED_MILESTONES_KEY_PREFIX = "unlocked_milestones_v1";
+const LAST_REFLECTION_CHECK_AT_KEY_PREFIX = "last_reflection_check_at_v1";
 
-const loadUnlockedMilestones = async () => {
+const getUnlockedMilestonesKey = (uid: string) =>
+  `${UNLOCKED_MILESTONES_KEY_PREFIX}:${uid}`;
+const getLastReflectionCheckAtKey = (uid: string) =>
+  `${LAST_REFLECTION_CHECK_AT_KEY_PREFIX}:${uid}`;
+
+const loadUnlockedMilestones = async (uid: string) => {
   try {
-    const raw = await AsyncStorage.getItem(UNLOCKED_MILESTONES_KEY);
+    const raw = await AsyncStorage.getItem(getUnlockedMilestonesKey(uid));
     if (raw) setUnlockedMilestones(JSON.parse(raw));
+    if (!raw) setUnlockedMilestones([]);
   } catch {}
 };
 
 const persistUnlockedMilestones = async (next: number[]) => {
+  if (!userId) return;
   setUnlockedMilestones(next);
   try {
     await AsyncStorage.setItem(
-      UNLOCKED_MILESTONES_KEY,
+      getUnlockedMilestonesKey(userId),
       JSON.stringify(next)
     );
   } catch {}
 };
 // Load unlocked milestones when userId changes
 useEffect(() => {
-  if (!userId) return;
-  loadUnlockedMilestones();
+  if (!userId) {
+    setUnlockedMilestones([]);
+    return;
+  }
+  loadUnlockedMilestones(userId);
 }, [userId]);
 // ---- Full reflection modal (weekly/monthly) ----
 const [reflectionModalVisible, setReflectionModalVisible] = useState(false);
@@ -822,7 +832,7 @@ useEffect(() => {
 
   const shouldRunCheck = async (force: boolean) => {
     if (force) return true;
-    const raw = await AsyncStorage.getItem(LAST_REFLECTION_CHECK_AT_KEY);
+    const raw = await AsyncStorage.getItem(getLastReflectionCheckAtKey(userId));
     const last = raw ? Number(raw) : 0;
     if (!last || Number.isNaN(last)) return true;
     const hours = 12 * 60 * 60 * 1000;
@@ -831,7 +841,7 @@ useEffect(() => {
 
   const markChecked = async () => {
     await AsyncStorage.setItem(
-      LAST_REFLECTION_CHECK_AT_KEY,
+      getLastReflectionCheckAtKey(userId),
       String(Date.now())
     );
   };

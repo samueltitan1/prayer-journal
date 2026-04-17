@@ -79,8 +79,12 @@ serve(async (req: Request): Promise<Response> => {
     if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
     const expectedAuth = Deno.env.get("REVENUECAT_WEBHOOK_AUTH");
+    if (!expectedAuth) {
+      console.error("REVENUECAT_WEBHOOK_AUTH is not configured");
+      return json({ error: "Webhook auth is not configured" }, 500);
+    }
     const authHeader = req.headers.get("Authorization") ?? "";
-    if (expectedAuth && authHeader !== `Bearer ${expectedAuth}`) {
+    if (authHeader !== `Bearer ${expectedAuth}`) {
       return json({ error: "Unauthorized" }, 401);
     }
 

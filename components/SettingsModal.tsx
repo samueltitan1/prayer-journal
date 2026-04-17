@@ -35,7 +35,9 @@ import {
   scheduleDailyPrayerNotification,
   scheduleNightlyReflectionPrompt,
 } from "../lib/notifications";
+import { clearOfflineQueueData } from "../lib/offlineQueue";
 import { capture } from "../lib/posthog";
+import { clearPrayerWalkLocalState } from "../lib/prayerWalkLocationTask";
 
 import { router } from "expo-router";
 
@@ -439,16 +441,12 @@ export default function SettingsModal({
   // ==========================
   // Handlers
   // ==========================
-  const handleThemePreferenceChange = (nextTheme: "light" | "dark" | "system") => {
+  const handleDarkModeToggle = (enabled: boolean) => {
+    const nextTheme = enabled ? "dark" : "light";
     if (themePreference === nextTheme) return;
+
     setTheme(nextTheme);
-
-    if (nextTheme === "system") {
-      showToast("Theme set to system");
-      return;
-    }
-
-    showToast(nextTheme === "dark" ? "Dark mode enabled" : "Light mode enabled");
+    showToast(enabled ? "Dark mode enabled" : "Light mode enabled");
   };
 
   const handleReminderToggle = async () => {
@@ -597,6 +595,9 @@ export default function SettingsModal({
 
   const handleSignOut = async () => {
     try {
+      await clearOfflineQueueData(userId ?? undefined);
+      await clearPrayerWalkLocalState();
+
       const { error } = await getSupabase().auth.signOut();
       if (error) {
         throw error;
@@ -629,6 +630,9 @@ export default function SettingsModal({
           if (deletingAccount) return;
           setDeletingAccount(true);
           try {
+            await clearOfflineQueueData(userId ?? undefined);
+            await clearPrayerWalkLocalState();
+
             const { error } = await getSupabase().rpc("delete_user_and_settings");
             if (error) throw error;
 
@@ -754,43 +758,12 @@ export default function SettingsModal({
                 {themeStatusLabel}
               </Text>
             </View>
-            <View style={styles.themeOptionGroup}>
-              {(["light", "dark", "system"] as const).map((option) => {
-                const selected = themePreference === option;
-                const label =
-                  option === "light" ? "Light" : option === "dark" ? "Dark" : "System";
-
-                return (
-                  <TouchableOpacity
-                    key={option}
-                    activeOpacity={0.85}
-                    style={[
-                      styles.themeOptionButton,
-                      {
-                        backgroundColor: selected
-                          ? colors.accent + "2B"
-                          : colors.background,
-                        borderColor: selected
-                          ? colors.accent
-                          : colors.textSecondary + "44",
-                      },
-                    ]}
-                    onPress={() => handleThemePreferenceChange(option)}
-                  >
-                    <Text
-                      style={[
-                        styles.themeOptionText,
-                        {
-                          color: selected ? colors.accent : colors.textSecondary,
-                        },
-                      ]}
-                    >
-                      {label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+            <Switch
+              value={isDark}
+              onValueChange={handleDarkModeToggle}
+              trackColor={{ false: "#777", true: colors.accent }}
+              thumbColor={isDark ? "#fff" : "#ccc"}
+            />
           </View>
 
           {/* NOTIFICATIONS */}
@@ -1257,21 +1230,6 @@ const styles = StyleSheet.create({
   settingText: { flex: 1, marginLeft: spacing.sm, marginRight: spacing.sm },
   settingLabel: { fontFamily: fonts.heading, fontSize: 15 },
   settingSub: { fontFamily: fonts.body, fontSize: 11, marginTop: 2 },
-  themeOptionGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  themeOptionButton: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  themeOptionText: {
-    fontFamily: fonts.body,
-    fontSize: 11,
-  },
   timePickerContainer: {
     borderRadius: 16,
     paddingVertical: spacing.sm,
@@ -1287,7 +1245,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: 12,
-    alignSelf: "flex-end",
+    alignSelf: "center",
+    minWidth: 170,
   },
   manageBtnSpacing: { marginTop: spacing.sm },
   manageText: { fontFamily: fonts.body, fontSize: 13 },
