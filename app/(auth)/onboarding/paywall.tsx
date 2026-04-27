@@ -1,7 +1,15 @@
 import OnboardingHeader from "@/components/onboarding/OnboardingHeader";
 import OnboardingShell from "@/components/onboarding/OnboardingShell";
 import { useAuth } from "@/contexts/AuthProvider";
-import { trackOnboardingAction, trackOnboardingStepViewed, trackPaywallViewed, trackPurchaseResult } from "@/lib/analytics/onboarding";
+import {
+  markOnboardingSessionCompleted,
+  trackOnboardingAction,
+  trackOnboardingScreenViewed,
+  trackOnboardingStepCompleted,
+  trackOnboardingStepViewed,
+  trackPaywallViewed,
+  trackPurchaseResult,
+} from "@/lib/analytics/onboarding";
 import { getOnboardingProgress } from "@/lib/onboardingProgress";
 import { upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import {
@@ -126,6 +134,9 @@ export default function OnboardingPaywall() {
     try {
       await syncRevenueCatSubscription(user.id);
       trackPurchaseResult("success", source);
+      trackOnboardingStepCompleted("paywall", "paywall");
+      trackOnboardingScreenViewed("first_prayer", "paywall");
+      markOnboardingSessionCompleted();
       await upsertOnboardingResponses(user.id, {
         onboarding_step: null,
         onboarding_completed_at: new Date().toISOString(),

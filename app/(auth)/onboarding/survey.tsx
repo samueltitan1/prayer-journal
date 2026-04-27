@@ -362,7 +362,7 @@ export default function OnboardingSurvey() {
         trackSurveyQuestionAnswered(
           surveyIndex,
           QUESTION_KEY_MAP[question.storageKey],
-          1
+          value
         );
       }
       return;
@@ -376,7 +376,7 @@ export default function OnboardingSurvey() {
         trackSurveyQuestionAnswered(
           surveyIndex,
           QUESTION_KEY_MAP[question.storageKey],
-          next.length
+          next
         );
       }
       return next;

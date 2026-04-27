@@ -1150,12 +1150,12 @@ export default function SettingsModal({
             </Text>
           </TouchableOpacity>
 
-          {/* VERSION */}
+          {/* VERSION 
           <Text
             style={[styles.version, { color: colors.textSecondary }]}
           >
             Prayer Journal {version}
-          </Text>
+          </Text> */}
         </ScrollView>
 
         {/* Toast */}

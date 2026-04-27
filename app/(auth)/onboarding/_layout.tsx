@@ -1,6 +1,21 @@
 import { Stack } from 'expo-router';
+import { useEffect } from "react";
+import { AppState } from "react-native";
+import { trackOnboardingAbandoned } from "@/lib/analytics/onboarding";
 
 export default function OnboardingLayout() {
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "background" || nextState === "inactive") {
+        trackOnboardingAbandoned("app_background");
+      }
+    });
+    return () => {
+      subscription.remove();
+      trackOnboardingAbandoned("screen_unmount");
+    };
+  }, []);
+
   return (
     <Stack
       screenOptions={{

@@ -1,4 +1,5 @@
 import { getOnboardingResponsesSnapshot, upsertOnboardingResponses } from "@/lib/onboardingResponses";
+import { markOnboardingSessionCompleted } from "@/lib/analytics/onboarding";
 import { getEntitlement } from "@/lib/subscriptions";
 import { getSupabase } from "@/lib/supabaseClient";
 import { useRouter } from "expo-router";
@@ -28,6 +29,7 @@ export default function OnboardingIndex() {
             router.replace("/(auth)/onboarding/paywall");
             return;
           }
+          markOnboardingSessionCompleted();
           router.replace("/(tabs)/journal");
           return;
         }
@@ -47,6 +49,7 @@ export default function OnboardingIndex() {
         if (step === "login" || step === "signup") {
           const entitlement = await getEntitlement(userId);
           if (entitlement.active) {
+            markOnboardingSessionCompleted();
             router.replace("/(tabs)/journal");
             return;
           }

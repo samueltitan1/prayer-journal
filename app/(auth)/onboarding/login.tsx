@@ -2,6 +2,7 @@ import AuthCard from "@/components/AuthCard";
 import OrDivider from "@/components/OrDivider";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
+  markOnboardingSessionCompleted,
   trackAuthResult,
   trackOnboardingAction,
   trackOnboardingStepViewed,
@@ -106,6 +107,7 @@ export default function Login() {
       }
 
       // Route straight into the app shell to avoid splash/onboarding flash races.
+      markOnboardingSessionCompleted();
       router.replace("/(tabs)/journal");
     } catch {
       trackAuthResult("email", "error", "unexpected_exception");
@@ -184,6 +186,7 @@ export default function Login() {
       }
 
       // Hand off to tabs so the tabs guard can enforce paywall vs journal.
+      markOnboardingSessionCompleted();
       router.replace("/(tabs)/journal");
       return;
     } catch (e: any) {
@@ -216,6 +219,7 @@ export default function Login() {
       trackOnboardingAction("login", "continue");
 
       // Hand off to tabs so the tabs guard can enforce paywall vs journal.
+      markOnboardingSessionCompleted();
       router.replace("/(tabs)/journal");
       return;
     } catch (err: any) {
