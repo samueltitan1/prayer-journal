@@ -1,12 +1,14 @@
 import { getSupabase } from "@/lib/supabaseClient";
 
 export type OnboardingUserSettingsPayload = {
+  daily_reminder_enabled?: boolean;
   reminder_enabled?: boolean;
   reminder_time?: string;
   apple_health_connected?: boolean;
 };
 
 export type UserSettingsSnapshot = {
+  daily_reminder_enabled?: boolean | null;
   reminder_enabled?: boolean | null;
   reminder_time?: string | null;
   apple_health_connected?: boolean | null;
@@ -46,7 +48,7 @@ export async function upsertUserSettingsOnboarding(
   try {
     const { data, error } = await supabase
       .from("user_settings")
-      .select("reminder_enabled, reminder_time, apple_health_connected")
+      .select("daily_reminder_enabled, reminder_enabled, reminder_time, apple_health_connected")
       .eq("user_id", userId)
       .maybeSingle();
     if (error) {
@@ -83,7 +85,7 @@ export async function getUserSettingsSnapshot(userId: string | null | undefined)
   try {
     const { data, error } = await getSupabase()
       .from("user_settings")
-      .select("reminder_enabled, reminder_time, apple_health_connected")
+      .select("daily_reminder_enabled, reminder_enabled, reminder_time, apple_health_connected")
       .eq("user_id", userId)
       .maybeSingle();
     if (error) {

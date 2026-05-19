@@ -4,6 +4,7 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
+import { enqueuePrayerThemeExtraction } from "./prayerThemes";
 
 export type OfflineQueuedPrayer = {
   id: string; // local id
@@ -349,6 +350,16 @@ export async function syncQueuedPrayers(args: {
               .from("bookmarked_prayers")
               .insert({ user_id: args.userId, prayer_id: insertedPrayer.id });
             if (bmErr) throw bmErr;
+          }
+
+          if (insertedPrayer?.id) {
+            void enqueuePrayerThemeExtraction({
+              supabase: args.supabase,
+              prayerId: insertedPrayer.id,
+              userId: args.userId,
+              prayerText: queue[idx].transcript_text,
+              maxRetries: 2,
+            });
           }
   
           // remove local audio file (best-effort)

@@ -9,3 +9,13 @@ entrypoint = "./functions/transcribe/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/transcribe/*.html" ]
+
+[functions.extract_prayer_themes]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/extract_prayer_themes/index.ts"
+
+[functions.send_reflection_notifications]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send_reflection_notifications/index.ts"

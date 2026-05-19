@@ -253,15 +253,18 @@ export default function SettingsModal({
         .maybeSingle();
 
       if (!error && data) {
-        const reminderColumn = DAILY_REMINDER_COLUMN_CANDIDATES.find(
-          (key) => typeof (data as any)?.[key] === "boolean"
-        );
+        const reminderColumn =
+          typeof (data as any)?.daily_reminder_enabled === "boolean"
+            ? "daily_reminder_enabled"
+            : typeof (data as any)?.reminder_enabled === "boolean"
+            ? "reminder_enabled"
+            : null;
         if (reminderColumn) {
           dailyReminderColumnRef.current = reminderColumn;
         }
-        setDailyReminderEnabled(
-          (data as any)?.[dailyReminderColumnRef.current] ?? false
-        );
+        const hasDailyReminderEnabled = (data as any)?.daily_reminder_enabled === true;
+        const hasLegacyReminderEnabled = (data as any)?.reminder_enabled === true;
+        setDailyReminderEnabled(hasDailyReminderEnabled || hasLegacyReminderEnabled);
         setReminderTime(data.reminder_time ?? "08:00");
         setDeleteAudioAfterTranscription(
           data.delete_audio_after_transcription ?? false

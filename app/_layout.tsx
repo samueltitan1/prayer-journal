@@ -21,11 +21,11 @@ import {
   promptBiometricAuth,
 } from "@/lib/biometricLock";
 import {
-  requestNotificationPermissions,
   scheduleTrialEndingReminderNotification,
 } from "@/lib/notifications";
 import { getOnboardingResponsesSnapshot, upsertOnboardingResponses } from "@/lib/onboardingResponses";
 import { identifyUser, initPostHog, resetAnalytics } from "@/lib/posthog";
+import { syncUserNotificationContext } from "@/lib/pushNotifications";
 import "@/lib/prayerWalkLocationTask";
 import { refreshSubscriptionIfNeeded } from "@/lib/refreshSubscription";
 import { DevBuildGate } from "@/lib/runtime/requireDevBuild";
@@ -132,6 +132,23 @@ function RootNavigator() {
       void upsertOnboardingResponses(userId, { onboarding_step: "paywall" });
     }
   }, [entitled, onboardingComplete, userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    void syncUserNotificationContext(userId);
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const sub = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "active") {
+        void syncUserNotificationContext(userId);
+      }
+    });
+    return () => {
+      sub.remove();
+    };
+  }, [userId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -354,7 +371,6 @@ export default function RootLayout() {
   );
 
   useEffect(() => {
-    requestNotificationPermissions();
     initPostHog();
   }, []);
 

@@ -54,6 +54,7 @@ import {
   type PrayerWalkRoutePoint,
 } from "../../../lib/prayerWalkLocationTask";
 import { capture } from "../../../lib/posthog";
+import { enqueuePrayerThemeExtraction } from "../../../lib/prayerThemes";
 import { getSupabase } from "../../../lib/supabaseClient";
 import { upsertUserSettingsOnboarding } from "../../../lib/userSettings";
 import { fonts, spacing } from "../../../theme/theme";
@@ -485,7 +486,7 @@ useEffect(() => {
     const fetchSettings = async () => {
       const { data, error } = await getSupabase()
         .from("user_settings")
-        .select("daily_reminder_enabled, reminder_time")
+        .select("*")
         .eq("user_id", userId)
         .order("updated_at", { ascending: false })
         .limit(1)
@@ -499,7 +500,9 @@ useEffect(() => {
         return;
       }
 
-      const dbDailyEnabled = data?.daily_reminder_enabled ?? false;
+      const dbDailyEnabled =
+        (data as any)?.daily_reminder_enabled === true ||
+        (data as any)?.reminder_enabled === true;
       const dbReminderTime = (data as any)?.reminder_time ?? null;
 
       // If DB says OFF but a reminder is actually scheduled on-device,
@@ -515,6 +518,7 @@ useEffect(() => {
             const payload: any = {
               user_id: userId,
               daily_reminder_enabled: true,
+              reminder_enabled: true,
             };
 
             // Only write reminder_time if we actually know it.
@@ -2189,6 +2193,14 @@ useEffect(() => {
         }, 3000);
 
         // 3) Fire-and-forget uploads in background
+        void enqueuePrayerThemeExtraction({
+          supabase: getSupabase(),
+          prayerId,
+          userId,
+          prayerText: draftTranscript || null,
+          maxRetries: 2,
+        });
+
         // Audio upload (if applicable): upload then update prayer row
         if (editorMode === "audio" && keepAudioToSave && draftAudioUri) {
           (async () => {

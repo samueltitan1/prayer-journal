@@ -144,7 +144,7 @@ export default function OnboardingPaywall() {
       if (user.email && !user.email_confirmed_at) {
         setShowVerifyReminder(true);
       } else {
-        router.replace("/(tabs)/journal");
+        router.replace("/(tabs)/pray");
       }
     } catch {
       setPurchaseError("Purchase completed, but syncing failed. Please try again.");
@@ -181,7 +181,7 @@ export default function OnboardingPaywall() {
   const handleDismissVerify = () => {
     void Haptics.selectionAsync();
     setShowVerifyReminder(false);
-    router.replace("/(tabs)/journal");
+    router.replace("/(tabs)/pray");
   };
 
   const handleResendVerify = async () => {
@@ -201,7 +201,7 @@ export default function OnboardingPaywall() {
         return;
       }
       setShowVerifyReminder(false);
-      router.replace("/(tabs)/journal");
+      router.replace("/(tabs)/pray");
     } catch {
       setVerifyError("Could not resend verification email.");
     }

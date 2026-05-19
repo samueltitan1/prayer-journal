@@ -70,9 +70,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     
           try {
             const scopedKey = getPendingPrayerReminderKey(uid);
-            const raw = await AsyncStorage.getItem(scopedKey);
+            const scopedRaw = await AsyncStorage.getItem(scopedKey);
+            const legacyRaw = await AsyncStorage.getItem(LEGACY_PENDING_PRAYER_REMINDER_KEY);
+            const raw = scopedRaw ?? legacyRaw;
             if (!raw) {
-              await AsyncStorage.removeItem(LEGACY_PENDING_PRAYER_REMINDER_KEY);
+              didApplyPendingReminderRef.current = true;
               return;
             }
     
@@ -89,6 +91,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             // If payload is incomplete, clear it so we don't retry forever.
             if (!enabled || !time || (ownerUserId && ownerUserId !== uid)) {
               await AsyncStorage.removeItem(scopedKey);
+              await AsyncStorage.removeItem(LEGACY_PENDING_PRAYER_REMINDER_KEY);
               didApplyPendingReminderRef.current = true;
               return;
             }
@@ -97,11 +100,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             await scheduleDailyPrayerNotification(time);
     
             // Persist to DB now that we have userId.
-            await supabase.from("user_settings").upsert({
-              user_id: uid,
-              daily_reminder_enabled: true,
-              reminder_time: time,
-            });
+            await supabase.from("user_settings").upsert(
+              {
+                user_id: uid,
+                daily_reminder_enabled: true,
+                reminder_enabled: true,
+                reminder_time: time,
+              },
+              { onConflict: "user_id" }
+            );
     
             // Clean up
             await AsyncStorage.removeItem(scopedKey);

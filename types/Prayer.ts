@@ -15,5 +15,6 @@ export type Prayer = {
     walk_map_path?: string | null;
     walk_distance_meters?: number | null;
     walk_steps?: number | null;
+    themes?: string[] | null;
     attachment_urls?: string[]; // or string[] | null
   };

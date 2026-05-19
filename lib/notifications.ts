@@ -16,6 +16,8 @@ const PRAY_DEEP_LINK = "prayer-journal://pray";
 const REFLECTION_NOTIFY_TIME_LOCAL = "09:00";
 const INACTIVE_NUDGE_STORAGE_PREFIX = "inactive_nudge_last_date_v1";
 const TRIAL_REMINDER_KIND = "trial_end_reminder";
+const NOTIFICATION_DENIAL_COUNT_KEY = "notification_denial_count_v1";
+const NOTIFICATION_STARTUP_DENIED_KEY = "notification_startup_denied_v1";
 
 const EXAMEN_QUESTIONS: string[] = [
   "Where did you see God today?",
@@ -210,17 +212,86 @@ Notifications.setNotificationHandler({
   }),
 });
 
+export type NotificationPermissionContext = "startup" | "reminder_setup" | "generic";
+
+export type NotificationPermissionResult = {
+  granted: boolean;
+  status: Notifications.PermissionStatus;
+  canAskAgain: boolean;
+  prompted: boolean;
+  denialCount: number;
+};
+
+const parseStoredInteger = (raw: string | null) => {
+  if (!raw) return 0;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.floor(value);
+};
+
+export async function getStoredNotificationDenialCount() {
+  return parseStoredInteger(await AsyncStorage.getItem(NOTIFICATION_DENIAL_COUNT_KEY));
+}
+
+export async function wasStartupNotificationDenied() {
+  return (await AsyncStorage.getItem(NOTIFICATION_STARTUP_DENIED_KEY)) === "1";
+}
+
+export async function requestNotificationPermissionsDetailed(params?: {
+  context?: NotificationPermissionContext;
+  forceRequest?: boolean;
+}): Promise<NotificationPermissionResult> {
+  if (Platform.OS === "web") {
+    return {
+      granted: false,
+      status: "denied" as Notifications.PermissionStatus,
+      canAskAgain: false,
+      prompted: false,
+      denialCount: await getStoredNotificationDenialCount(),
+    };
+  }
+
+  const context = params?.context ?? "generic";
+  const forceRequest = params?.forceRequest ?? false;
+  const before = await Notifications.getPermissionsAsync();
+  let after = before;
+  let prompted = false;
+
+  if (before.status !== "granted" && (forceRequest || before.canAskAgain)) {
+    prompted = true;
+    after = await Notifications.requestPermissionsAsync();
+  }
+
+  let denialCount = await getStoredNotificationDenialCount();
+  if (after.status !== "granted" && prompted) {
+    denialCount += 1;
+    await AsyncStorage.setItem(NOTIFICATION_DENIAL_COUNT_KEY, String(denialCount));
+    if (context === "startup") {
+      await AsyncStorage.setItem(NOTIFICATION_STARTUP_DENIED_KEY, "1");
+    }
+  }
+
+  if (after.status === "granted") {
+    await AsyncStorage.removeItem(NOTIFICATION_DENIAL_COUNT_KEY);
+    denialCount = 0;
+  }
+
+  return {
+    granted: after.status === "granted",
+    status: after.status,
+    canAskAgain: after.canAskAgain,
+    prompted,
+    denialCount,
+  };
+}
+
 export async function requestNotificationPermissions() {
   if (Platform.OS === "web") {
     console.log("Notifications permissions not supported on web; skipping request.");
     return false;
   }
-  const { status } = await Notifications.getPermissionsAsync();
-  if (status !== "granted") {
-    const { status: newStatus } = await Notifications.requestPermissionsAsync();
-    return newStatus === "granted";
-  }
-  return true;
+  const result = await requestNotificationPermissionsDetailed();
+  return result.granted;
 }
 
 export async function getNotificationPermissionStatus() {
