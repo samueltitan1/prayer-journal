@@ -1,5 +1,6 @@
 import AuthCard from "@/components/AuthCard";
 import OnboardingHeader from "@/components/onboarding/OnboardingHeader";
+import OnboardingShell from "@/components/onboarding/OnboardingShell";
 import OrDivider from "@/components/OrDivider";
 import {
   trackAuthResult,
@@ -22,7 +23,6 @@ import {
   Alert,
   Image,
   Platform,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
@@ -236,7 +236,7 @@ export default function SignUp() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <OnboardingShell showBack={false}>
       <OnboardingHeader
         progress={getOnboardingProgress("signup")}
         onBack={() => {
@@ -244,7 +244,8 @@ export default function SignUp() {
           router.replace("/(auth)/onboarding/reminder");
         }}
       />
-      
+
+      <View style={styles.content}>
       <Text style={[styles.appTitle, { color: colors.textPrimary }]}>Save your progress</Text>
 
       <AuthCard style={styles.AuthCard}>
@@ -389,16 +390,16 @@ export default function SignUp() {
           </Text>
         </Text>
       </AuthCard>
-    </SafeAreaView>
+      </View>
+    </OnboardingShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  content: {
     flex: 1,
+    width: "100%",
     alignItems: "center",
-    paddingTop: spacing.xl,
-    backgroundColor: colors.backgroundLight,
   },
   logo: {
     width: 48,

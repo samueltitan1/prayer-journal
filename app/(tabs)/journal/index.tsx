@@ -38,6 +38,7 @@ import { Prayer } from "@/types/Prayer";
 import { Portal, PortalProvider } from "@gorhom/portal";
 import { useTheme } from "../../../contexts/ThemeContext";
 import {
+  scheduleFirstEntryNudgeIfNeeded,
   scheduleInactiveNudgeIfNeeded,
   scheduleReflectionReadyNotificationsForUser,
 } from "../../../lib/notifications";
@@ -822,6 +823,7 @@ const bookmarkedPrayers = useMemo(() => {
       if (userId) {
         void scheduleReflectionReadyNotificationsForUser(userId);
         void scheduleInactiveNudgeIfNeeded(userId);
+        void scheduleFirstEntryNudgeIfNeeded(userId);
       }
     }, [refreshBookmarkedPrayers, userId])
   );

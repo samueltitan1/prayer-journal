@@ -43,7 +43,11 @@ import {
   requestHealthPermissions,
   savePrayerWalkWorkout,
 } from "../../../lib/healthkit";
-import { cancelStreakFollowupNotification, getDailyPrayerReminderStatus } from "../../../lib/notifications";
+import {
+  cancelFirstEntryNudgeNotification,
+  cancelStreakFollowupNotification,
+  getDailyPrayerReminderStatus,
+} from "../../../lib/notifications";
 import {
   appendPrayerWalkRoutePoints,
   clearPrayerWalkRoutePoints,
@@ -2147,6 +2151,9 @@ useEffect(() => {
         insertSucceeded = true;
         savedLocallyOrRemotely = true;
         await cancelStreakFollowupNotification();
+        if (userId) {
+          await cancelFirstEntryNudgeNotification(userId);
+        }
         capture("prayer_save_succeeded", {
           ...baseSaveProps,
           save_ms: Date.now() - saveStart,

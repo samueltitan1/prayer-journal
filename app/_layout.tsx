@@ -21,6 +21,8 @@ import {
   promptBiometricAuth,
 } from "@/lib/biometricLock";
 import {
+  recordAppFirstOpenIfNeeded,
+  scheduleFirstEntryNudgeIfNeeded,
   scheduleTrialEndingReminderNotification,
 } from "@/lib/notifications";
 import { getOnboardingResponsesSnapshot, upsertOnboardingResponses } from "@/lib/onboardingResponses";
@@ -136,6 +138,7 @@ function RootNavigator() {
   useEffect(() => {
     if (!userId) return;
     void syncUserNotificationContext(userId);
+    void scheduleFirstEntryNudgeIfNeeded(userId);
   }, [userId]);
 
   useEffect(() => {
@@ -143,6 +146,7 @@ function RootNavigator() {
     const sub = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active") {
         void syncUserNotificationContext(userId);
+        void scheduleFirstEntryNudgeIfNeeded(userId);
       }
     });
     return () => {
@@ -372,6 +376,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     initPostHog();
+    void recordAppFirstOpenIfNeeded();
   }, []);
 
   useEffect(() => {

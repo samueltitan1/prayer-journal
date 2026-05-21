@@ -15,6 +15,11 @@ const INACTIVE_KIND = "inactive_nudge";
 const PRAY_DEEP_LINK = "prayer-journal://pray";
 const REFLECTION_NOTIFY_TIME_LOCAL = "09:00";
 const INACTIVE_NUDGE_STORAGE_PREFIX = "inactive_nudge_last_date_v1";
+const FIRST_ENTRY_NUDGE_ID = "first-entry-nudge";
+const FIRST_ENTRY_NUDGE_KIND = "first_entry_nudge";
+const APP_FIRST_OPEN_AT_KEY = "app_first_open_at_v1";
+const FIRST_ENTRY_NUDGE_SENT_PREFIX = "first_entry_nudge_sent_v1";
+const FIRST_ENTRY_NUDGE_DELAY_MS = 48 * 60 * 60 * 1000;
 const TRIAL_REMINDER_KIND = "trial_end_reminder";
 const NOTIFICATION_DENIAL_COUNT_KEY = "notification_denial_count_v1";
 const NOTIFICATION_STARTUP_DENIED_KEY = "notification_startup_denied_v1";
@@ -397,8 +402,136 @@ export async function cancelDailyPrayerNotification() {
   await cancelStreakFollowupNotification();
 }
 
+async function shouldScheduleStreakFollowup(): Promise<boolean> {
+  const {
+    data: { user },
+  } = await getSupabase().auth.getUser();
+  if (!user?.id) return false;
+
+  const { data, error } = await getSupabase()
+    .from("user_stats")
+    .select("current_streak")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (error || !data) return false;
+  return (data.current_streak ?? 0) >= 1;
+}
+
+export async function recordAppFirstOpenIfNeeded() {
+  if (Platform.OS === "web") return;
+  const existing = await AsyncStorage.getItem(APP_FIRST_OPEN_AT_KEY);
+  if (existing) return;
+  await AsyncStorage.setItem(APP_FIRST_OPEN_AT_KEY, new Date().toISOString());
+}
+
+function firstEntryNudgeSentKey(userId: string) {
+  return `${FIRST_ENTRY_NUDGE_SENT_PREFIX}:${userId}`;
+}
+
+export async function markFirstEntryNudgeSent(userId: string) {
+  if (Platform.OS === "web") return;
+  await AsyncStorage.setItem(firstEntryNudgeSentKey(userId), "1");
+}
+
+export async function cancelFirstEntryNudgeNotification(userId?: string) {
+  if (Platform.OS === "web") return;
+
+  try {
+    await Notifications.cancelScheduledNotificationAsync(FIRST_ENTRY_NUDGE_ID);
+    await cancelScheduledByKind(FIRST_ENTRY_NUDGE_KIND);
+    if (userId) {
+      await markFirstEntryNudgeSent(userId);
+    }
+    if (__DEV__) console.log("First-entry nudge cancelled");
+  } catch (e) {
+    console.warn("Failed to cancel first-entry nudge notification", e);
+  }
+}
+
+export async function scheduleFirstEntryNudgeIfNeeded(userId: string) {
+  if (Platform.OS === "web") return;
+
+  const sent = await AsyncStorage.getItem(firstEntryNudgeSentKey(userId));
+  if (sent === "1") return;
+
+  const granted = await requestNotificationPermissions();
+  if (!granted) return;
+
+  const { data, error } = await getSupabase()
+    .from("user_stats")
+    .select("last_prayer_date")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) return;
+
+  if (data?.last_prayer_date) {
+    await cancelFirstEntryNudgeNotification(userId);
+    return;
+  }
+
+  await recordAppFirstOpenIfNeeded();
+  const firstOpenRaw = await AsyncStorage.getItem(APP_FIRST_OPEN_AT_KEY);
+  if (!firstOpenRaw) return;
+
+  const firstOpenAt = new Date(firstOpenRaw);
+  if (Number.isNaN(firstOpenAt.getTime())) return;
+
+  const triggerAt = new Date(firstOpenAt.getTime() + FIRST_ENTRY_NUDGE_DELAY_MS);
+  const now = Date.now();
+
+  if (now < triggerAt.getTime()) {
+    if (await isScheduledKind(FIRST_ENTRY_NUDGE_KIND)) return;
+
+    try {
+      await Notifications.cancelScheduledNotificationAsync(FIRST_ENTRY_NUDGE_ID);
+    } catch {
+      // noop
+    }
+    await cancelScheduledByKind(FIRST_ENTRY_NUDGE_KIND);
+
+    await Notifications.scheduleNotificationAsync({
+      identifier: FIRST_ENTRY_NUDGE_ID,
+      content: {
+        title: "Start your prayer journal",
+        body: "Make your first entry — even a short prayer is a great place to begin.",
+        sound: Platform.OS === "ios" ? "default" : undefined,
+        data: { kind: FIRST_ENTRY_NUDGE_KIND, url: PRAY_DEEP_LINK },
+      },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: triggerAt },
+    } as any);
+
+    await markFirstEntryNudgeSent(userId);
+    capture("first_entry_nudge_scheduled", {
+      scheduled_for: triggerAt.toISOString(),
+    });
+    if (__DEV__) console.log("First-entry nudge scheduled");
+    return;
+  }
+
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: "Start your prayer journal",
+      body: "Make your first entry — even a short prayer is a great place to begin.",
+      sound: Platform.OS === "ios" ? "default" : undefined,
+      data: { kind: FIRST_ENTRY_NUDGE_KIND, url: PRAY_DEEP_LINK },
+    },
+    trigger: null,
+  });
+
+  await markFirstEntryNudgeSent(userId);
+  capture("first_entry_nudge_sent", { hours_since_install: 48 });
+  if (__DEV__) console.log("First-entry nudge sent immediately");
+}
+
 export async function scheduleStreakFollowupNotification(reminderDate: Date) {
   if (Platform.OS === "web") return null;
+
+  if (!(await shouldScheduleStreakFollowup())) {
+    await cancelStreakFollowupNotification();
+    return null;
+  }
 
   try {
     const triggerDate = new Date(reminderDate.getTime() + 30 * 60 * 1000);
