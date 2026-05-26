@@ -22,6 +22,7 @@ import {
 } from "@/lib/biometricLock";
 import {
   recordAppFirstOpenIfNeeded,
+  resyncDailyPrayerReminderFromSettings,
   scheduleFirstEntryNudgeIfNeeded,
   scheduleTrialEndingReminderNotification,
 } from "@/lib/notifications";
@@ -138,6 +139,7 @@ function RootNavigator() {
   useEffect(() => {
     if (!userId) return;
     void syncUserNotificationContext(userId);
+    void resyncDailyPrayerReminderFromSettings(userId);
     void scheduleFirstEntryNudgeIfNeeded(userId);
   }, [userId]);
 
@@ -146,6 +148,7 @@ function RootNavigator() {
     const sub = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active") {
         void syncUserNotificationContext(userId);
+        void resyncDailyPrayerReminderFromSettings(userId);
         void scheduleFirstEntryNudgeIfNeeded(userId);
       }
     });

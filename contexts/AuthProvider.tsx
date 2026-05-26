@@ -1,5 +1,8 @@
 // contexts/AuthProvider.tsx
-import { scheduleDailyPrayerNotification } from "@/lib/notifications";
+import {
+  getDailyPrayerReminderStatus,
+  scheduleDailyPrayerNotification,
+} from "@/lib/notifications";
 import { syncRevenueCatIdentity } from "@/lib/revenuecat";
 import { getSupabase } from "@/lib/supabaseClient";
 import { setWidgetSignedInState } from "@/lib/widgetAuthState";
@@ -96,9 +99,14 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
               return;
             }
     
-            // Schedule local daily reminder.
-            await scheduleDailyPrayerNotification(time);
-    
+            const status = await getDailyPrayerReminderStatus();
+            const alreadyScheduled =
+              status.enabled && (!status.time || status.time === time);
+
+            if (!alreadyScheduled) {
+              await scheduleDailyPrayerNotification(time);
+            }
+
             // Persist to DB now that we have userId.
             await supabase.from("user_settings").upsert(
               {

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Prayer Journal",
     "slug": "prayer-journal",
-    "version": "1.14",
+    "version": "1.15",
     "orientation": "portrait",
     "icon": "./assets/appicon.png",
     "userInterfaceStyle": "automatic",
@@ -44,7 +44,7 @@
       },
       "supportsTablet": false,
       "bundleIdentifier": "com.sinaiglobal.prayerjournal",
-      "buildNumber": "1.14"
+      "buildNumber": "1.15"
     },
     "android": {
       "adaptiveIcon": {

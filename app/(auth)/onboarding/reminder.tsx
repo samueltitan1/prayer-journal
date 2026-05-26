@@ -99,10 +99,7 @@ export default function OnboardingReminder() {
     await scheduleDailyPrayerNotification(timeHHmm);
 
     if (user?.id) {
-      await AsyncStorage.setItem(
-        getPendingReminderKey(user.id),
-        JSON.stringify({ enabled: true, time: timeHHmm, userId: user.id })
-      );
+      await AsyncStorage.removeItem(getPendingReminderKey(user.id));
       await AsyncStorage.removeItem(LEGACY_PENDING_PRAYER_REMINDER_KEY);
       void upsertUserSettingsOnboarding(user.id, {
         daily_reminder_enabled: true,

@@ -1,12 +1,6 @@
 // contexts/settingsContext.tsx
-import {
-  cancelDailyPrayerNotification,
-  requestNotificationPermissions,
-  scheduleDailyPrayerNotification,
-} from "@/lib/notifications";
 import { getSupabase } from "@/lib/supabaseClient";
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { Alert } from "react-native";
 
 type Settings = {
   dailyReminderEnabled: boolean;
@@ -72,35 +66,6 @@ export function SettingsProvider({
   useEffect(() => {
     refreshSettings();
   }, [userId]);
-
-  /**
-   * === Automatic side effects ===
-   * These run automatically whenever reminder settings change.
-   */
-  useEffect(() => {
-    const syncNotifications = async () => {
-      if (!settings.dailyReminderEnabled) {
-        await cancelDailyPrayerNotification();
-        return;
-      }
-
-      const granted = await requestNotificationPermissions();
-      if (!granted) {
-        Alert.alert(
-          "Notifications Disabled",
-          "Enable notifications in Settings to receive your daily prayer reminder."
-        );
-        await updateSetting("dailyReminderEnabled", false);
-        return;
-      }
-
-      await scheduleDailyPrayerNotification(settings.reminderTime);
-    };
-
-    // Only trigger when these two values change
-    syncNotifications();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.dailyReminderEnabled, settings.reminderTime]);
 
   return (
     <SettingsContext.Provider value={{ ...settings, refreshSettings, updateSetting }}>

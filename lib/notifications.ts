@@ -6,6 +6,7 @@ import { capture } from "./posthog";
 import { getSupabase } from "./supabaseClient";
 
 const DAILY_KIND = "daily_prayer_reminder";
+const DAILY_PRAYER_REMINDER_ID = "daily-prayer-reminder";
 const DAILY_NOTIFICATION_ID_KEY = "daily_prayer_notification_id_v1";
 const STREAK_FOLLOWUP_ID = "streak-followup";
 const STREAK_FOLLOWUP_KIND = "streak_followup";
@@ -206,6 +207,79 @@ function parseTimeString(time: string) {
   return { hour, minute };
 }
 
+let scheduleDailyPrayerQueue: Promise<string | null> = Promise.resolve(null);
+let firstEntryNudgeInFlight: Promise<void> | null = null;
+
+function isDailyPrayerReminderTitle(title: unknown) {
+  return (title ?? "").toString().includes("Time to pray");
+}
+
+async function cancelAllDailyPrayerReminders() {
+  await cancelScheduledByKind(DAILY_KIND);
+
+  try {
+    await Notifications.cancelScheduledNotificationAsync(DAILY_PRAYER_REMINDER_ID);
+  } catch {
+    // noop
+  }
+
+  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+  const legacy = scheduled.filter((n: any) => {
+    const id = n?.identifier;
+    if (id === DAILY_PRAYER_REMINDER_ID) return false;
+    if (n?.content?.data?.kind === DAILY_KIND) return false;
+    return isDailyPrayerReminderTitle(n?.content?.title);
+  });
+  await Promise.all(
+    legacy.map((n: any) => Notifications.cancelScheduledNotificationAsync(n.identifier))
+  );
+
+  const existingId = await AsyncStorage.getItem(DAILY_NOTIFICATION_ID_KEY);
+  if (existingId && existingId !== DAILY_PRAYER_REMINDER_ID) {
+    try {
+      await Notifications.cancelScheduledNotificationAsync(existingId);
+    } catch {
+      // noop
+    }
+  }
+  await AsyncStorage.removeItem(DAILY_NOTIFICATION_ID_KEY);
+}
+
+async function scheduleDailyPrayerNotificationInner(time: string): Promise<string | null> {
+  const granted = await requestNotificationPermissions();
+  if (!granted) return null;
+
+  await cancelAllDailyPrayerReminders();
+
+  const { hour, minute } = parseTimeString(time);
+
+  const id = await Notifications.scheduleNotificationAsync({
+    identifier: DAILY_PRAYER_REMINDER_ID,
+    content: {
+      title: "Time to pray 🙏",
+      body: "Take a moment to pause and pray.",
+      sound: Platform.OS === "ios" ? "default" : undefined,
+      data: { kind: DAILY_KIND },
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
+      hour,
+      minute,
+      repeats: true,
+    },
+  } as any);
+
+  await AsyncStorage.setItem(DAILY_NOTIFICATION_ID_KEY, id);
+
+  const reminderDate = new Date();
+  reminderDate.setHours(hour, minute, 0, 0);
+  if (reminderDate.getTime() <= Date.now()) {
+    reminderDate.setDate(reminderDate.getDate() + 1);
+  }
+  await scheduleStreakFollowupNotification(reminderDate);
+  return id;
+}
+
 // Global handler – how notifications behave when received
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -354,52 +428,43 @@ export async function scheduleTrialEndingReminderNotification(params: {
 export async function scheduleDailyPrayerNotification(time: string) {
   if (Platform.OS === "web") return null;
 
-  const granted = await requestNotificationPermissions();
-  if (!granted) return null;
-
-  // Cancel previously scheduled reminder (by stored ID)
-  const existingId = await AsyncStorage.getItem(DAILY_NOTIFICATION_ID_KEY);
-  if (existingId) {
-    await Notifications.cancelScheduledNotificationAsync(existingId);
-    await AsyncStorage.removeItem(DAILY_NOTIFICATION_ID_KEY);
-  }
-
-  const { hour, minute } = parseTimeString(time);
-
-  const id = await Notifications.scheduleNotificationAsync({
-    content: {
-      title: "Time to pray 🙏",
-      body: "Take a moment to pause and pray.",
-      sound: Platform.OS === "ios" ? "default" : undefined,
-      data: { kind: DAILY_KIND },
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
-      hour,
-      minute,
-      repeats: true,
-    },
-  });
-
-  await AsyncStorage.setItem(DAILY_NOTIFICATION_ID_KEY, id);
-  const reminderDate = new Date();
-  reminderDate.setHours(hour, minute, 0, 0);
-  if (reminderDate.getTime() <= Date.now()) {
-    reminderDate.setDate(reminderDate.getDate() + 1);
-  }
-  await scheduleStreakFollowupNotification(reminderDate);
-  return id;
+  const task = scheduleDailyPrayerQueue.then(() => scheduleDailyPrayerNotificationInner(time));
+  scheduleDailyPrayerQueue = task.catch(() => null);
+  return task;
 }
 
 export async function cancelDailyPrayerNotification() {
   if (Platform.OS === "web") return;
 
-  const existingId = await AsyncStorage.getItem(DAILY_NOTIFICATION_ID_KEY);
-  if (existingId) {
-    await Notifications.cancelScheduledNotificationAsync(existingId);
-    await AsyncStorage.removeItem(DAILY_NOTIFICATION_ID_KEY);
-  }
+  await cancelAllDailyPrayerReminders();
   await cancelStreakFollowupNotification();
+}
+
+export async function resyncDailyPrayerReminderFromSettings(userId: string) {
+  if (Platform.OS === "web" || !userId) return;
+
+  const { data, error } = await getSupabase()
+    .from("user_settings")
+    .select("daily_reminder_enabled, reminder_enabled, reminder_time")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error || !data) return;
+
+  const enabled =
+    data.daily_reminder_enabled === true || data.reminder_enabled === true;
+
+  if (!enabled) {
+    await cancelDailyPrayerNotification();
+    return;
+  }
+
+  const time =
+    typeof data.reminder_time === "string" && data.reminder_time.trim()
+      ? data.reminder_time
+      : "08:00";
+
+  await scheduleDailyPrayerNotification(time);
 }
 
 async function shouldScheduleStreakFollowup(): Promise<boolean> {
@@ -452,37 +517,76 @@ export async function cancelFirstEntryNudgeNotification(userId?: string) {
 export async function scheduleFirstEntryNudgeIfNeeded(userId: string) {
   if (Platform.OS === "web") return;
 
-  const sent = await AsyncStorage.getItem(firstEntryNudgeSentKey(userId));
-  if (sent === "1") return;
-
-  const granted = await requestNotificationPermissions();
-  if (!granted) return;
-
-  const { data, error } = await getSupabase()
-    .from("user_stats")
-    .select("last_prayer_date")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error) return;
-
-  if (data?.last_prayer_date) {
-    await cancelFirstEntryNudgeNotification(userId);
+  if (firstEntryNudgeInFlight) {
+    await firstEntryNudgeInFlight;
     return;
   }
 
-  await recordAppFirstOpenIfNeeded();
-  const firstOpenRaw = await AsyncStorage.getItem(APP_FIRST_OPEN_AT_KEY);
-  if (!firstOpenRaw) return;
+  firstEntryNudgeInFlight = (async () => {
+    const sent = await AsyncStorage.getItem(firstEntryNudgeSentKey(userId));
+    if (sent === "1") return;
 
-  const firstOpenAt = new Date(firstOpenRaw);
-  if (Number.isNaN(firstOpenAt.getTime())) return;
+    const granted = await requestNotificationPermissions();
+    if (!granted) return;
 
-  const triggerAt = new Date(firstOpenAt.getTime() + FIRST_ENTRY_NUDGE_DELAY_MS);
-  const now = Date.now();
+    const { data, error } = await getSupabase()
+      .from("user_stats")
+      .select("last_prayer_date")
+      .eq("user_id", userId)
+      .maybeSingle();
 
-  if (now < triggerAt.getTime()) {
-    if (await isScheduledKind(FIRST_ENTRY_NUDGE_KIND)) return;
+    if (error) return;
+
+    if (data?.last_prayer_date) {
+      await cancelFirstEntryNudgeNotification(userId);
+      return;
+    }
+
+    await recordAppFirstOpenIfNeeded();
+    const firstOpenRaw = await AsyncStorage.getItem(APP_FIRST_OPEN_AT_KEY);
+    if (!firstOpenRaw) return;
+
+    const firstOpenAt = new Date(firstOpenRaw);
+    if (Number.isNaN(firstOpenAt.getTime())) return;
+
+    const triggerAt = new Date(firstOpenAt.getTime() + FIRST_ENTRY_NUDGE_DELAY_MS);
+    const now = Date.now();
+
+    const nudgeContent = {
+      title: "Start your prayer journal",
+      body: "Make your first entry — even a short prayer is a great place to begin.",
+      sound: Platform.OS === "ios" ? "default" : undefined,
+      data: { kind: FIRST_ENTRY_NUDGE_KIND, url: PRAY_DEEP_LINK },
+    };
+
+    if (now < triggerAt.getTime()) {
+      if (await isScheduledKind(FIRST_ENTRY_NUDGE_KIND)) return;
+
+      try {
+        await Notifications.cancelScheduledNotificationAsync(FIRST_ENTRY_NUDGE_ID);
+      } catch {
+        // noop
+      }
+      await cancelScheduledByKind(FIRST_ENTRY_NUDGE_KIND);
+
+      try {
+        await Notifications.scheduleNotificationAsync({
+          identifier: FIRST_ENTRY_NUDGE_ID,
+          content: nudgeContent,
+          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: triggerAt },
+        } as any);
+      } catch (e) {
+        console.warn("Failed to schedule first-entry nudge", e);
+        return;
+      }
+
+      await markFirstEntryNudgeSent(userId);
+      capture("first_entry_nudge_scheduled", {
+        scheduled_for: triggerAt.toISOString(),
+      });
+      if (__DEV__) console.log("First-entry nudge scheduled");
+      return;
+    }
 
     try {
       await Notifications.cancelScheduledNotificationAsync(FIRST_ENTRY_NUDGE_ID);
@@ -491,38 +595,27 @@ export async function scheduleFirstEntryNudgeIfNeeded(userId: string) {
     }
     await cancelScheduledByKind(FIRST_ENTRY_NUDGE_KIND);
 
-    await Notifications.scheduleNotificationAsync({
-      identifier: FIRST_ENTRY_NUDGE_ID,
-      content: {
-        title: "Start your prayer journal",
-        body: "Make your first entry — even a short prayer is a great place to begin.",
-        sound: Platform.OS === "ios" ? "default" : undefined,
-        data: { kind: FIRST_ENTRY_NUDGE_KIND, url: PRAY_DEEP_LINK },
-      },
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: triggerAt },
-    } as any);
+    try {
+      await Notifications.scheduleNotificationAsync({
+        identifier: FIRST_ENTRY_NUDGE_ID,
+        content: nudgeContent,
+        trigger: null,
+      } as any);
+    } catch (e) {
+      console.warn("Failed to send first-entry nudge immediately", e);
+      return;
+    }
 
     await markFirstEntryNudgeSent(userId);
-    capture("first_entry_nudge_scheduled", {
-      scheduled_for: triggerAt.toISOString(),
-    });
-    if (__DEV__) console.log("First-entry nudge scheduled");
-    return;
+    capture("first_entry_nudge_sent", { hours_since_install: 48 });
+    if (__DEV__) console.log("First-entry nudge sent immediately");
+  })();
+
+  try {
+    await firstEntryNudgeInFlight;
+  } finally {
+    firstEntryNudgeInFlight = null;
   }
-
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: "Start your prayer journal",
-      body: "Make your first entry — even a short prayer is a great place to begin.",
-      sound: Platform.OS === "ios" ? "default" : undefined,
-      data: { kind: FIRST_ENTRY_NUDGE_KIND, url: PRAY_DEEP_LINK },
-    },
-    trigger: null,
-  });
-
-  await markFirstEntryNudgeSent(userId);
-  capture("first_entry_nudge_sent", { hours_since_install: 48 });
-  if (__DEV__) console.log("First-entry nudge sent immediately");
 }
 
 export async function scheduleStreakFollowupNotification(reminderDate: Date) {
@@ -717,15 +810,20 @@ export async function scheduleReflectionReadyNotificationsForUser(userId: string
 
     const scheduledDate = now > triggerAt ? new Date(now.getTime() + 60 * 1000) : triggerAt;
 
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: "Your reflection is ready",
-        body: "Open Prayer Journal to read it.",
-        sound: Platform.OS === "ios" ? "default" : undefined,
-        data: { kind: REFLECTION_KIND, reflection_id: reflection.id },
-      },
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: scheduledDate },
-    });
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: "Your reflection is ready",
+          body: "Open Prayer Journal to read it.",
+          sound: Platform.OS === "ios" ? "default" : undefined,
+          data: { kind: REFLECTION_KIND, reflection_id: reflection.id },
+        },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: scheduledDate },
+      });
+    } catch (e) {
+      console.warn("Failed to schedule reflection ready notification", e);
+      continue;
+    }
 
     await getSupabase()
       .from("reflections")
