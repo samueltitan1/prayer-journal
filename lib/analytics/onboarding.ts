@@ -127,8 +127,11 @@ export const trackAuthResult = (
   });
 };
 
-export const trackPaywallViewed = () => {
-  capture("paywall_viewed");
+export const trackPaywallViewed = (props: {
+  email: string | null;
+  first_name: string | null;
+}) => {
+  capture("paywall_viewed", props);
 };
 
 export const trackPaywallExitedWithoutTrial = (props: {

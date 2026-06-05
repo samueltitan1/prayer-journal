@@ -48,14 +48,26 @@ export default function OnboardingPaywall() {
   userRef.current = user;
 
   useEffect(() => {
+    trackPaywallViewed({
+      email:
+        user?.email ??
+        (user?.user_metadata?.email as string | undefined) ??
+        null,
+      first_name: user?.user_metadata?.full_name ?? null,
+    });
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (trialStartedRef.current) return;
       const currentUser = userRef.current;
-      if (!currentUser?.id) return;
       trackPaywallExitedWithoutTrial({
-        email: currentUser.email ?? null,
+        email:
+          currentUser?.email ??
+          (currentUser?.user_metadata?.email as string | undefined) ??
+          null,
         first_name:
-          (currentUser.user_metadata?.full_name as string | undefined) ?? null,
+          (currentUser?.user_metadata?.full_name as string | undefined) ?? null,
       });
     };
   }, []);
@@ -133,7 +145,6 @@ export default function OnboardingPaywall() {
     if (__DEV__) {
       console.log("paywall: auth context ready", { userId: user.id });
     }
-    trackPaywallViewed();
     trackOnboardingStepViewed("paywall");
     void initializePaywall();
     void upsertOnboardingResponses(user.id, {
@@ -307,7 +318,10 @@ export default function OnboardingPaywall() {
             onPurchaseCancelled={() => {
               trackPurchaseResult("cancel");
               trackPaywallExitedWithoutTrial({
-                email: user?.email ?? null,
+                email:
+                  user?.email ??
+                  (user?.user_metadata?.email as string | undefined) ??
+                  null,
                 first_name:
                   (user?.user_metadata?.full_name as string | undefined) ?? null,
               });

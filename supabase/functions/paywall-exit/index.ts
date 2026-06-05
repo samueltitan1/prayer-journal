@@ -6,10 +6,17 @@ import { normalizePaywallFirstName } from "../_shared/normalizePaywallFirstName.
 
 type PostHogWebhookPayload = {
   event?: {
+    event?: string;
     distinct_id?: string;
     properties?: {
       email?: string;
       first_name?: string;
+    };
+  };
+  person?: {
+    properties?: {
+      email?: string;
+      name?: string;
     };
   };
 };
@@ -33,9 +40,25 @@ serve(async (req) => {
     return json(400, { error: "Invalid JSON body" });
   }
 
+  const eventName = payload.event?.event;
+  if (eventName && eventName !== "paywall_exited_without_trial") {
+    return new Response("ignored", { status: 200 });
+  }
+
   const userId = payload.event?.distinct_id?.trim();
-  const email = payload.event?.properties?.email?.trim();
-  const rawName = payload.event?.properties?.first_name ?? null;
+  const email =
+    payload.person?.properties?.email?.trim() ??
+    payload.event?.properties?.email?.trim();
+  const rawName =
+    payload.person?.properties?.name ??
+    payload.event?.properties?.first_name ??
+    null;
+
+  // @privaterelay.appleid.com addresses are valid — store as-is; Apple relay
+  // handles delivery when the sending domain is registered. Never discard.
+  if (email?.endsWith("@privaterelay.appleid.com")) {
+    // Proceed to upsert below with the relay address unchanged.
+  }
 
   if (!userId || !email) {
     return json(400, { error: "Missing distinct_id or email" });

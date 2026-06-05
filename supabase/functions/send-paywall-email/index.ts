@@ -1,12 +1,7 @@
 // @ts-nocheck
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.43.4";
-import { renderAsync } from "https://esm.sh/@react-email/render@1.0.3";
-import React from "https://esm.sh/react@18.3.1";
-import {
-  PAYWALL_EMAIL_SUBJECT,
-  PaywallEmail,
-} from "../_templates/paywall-email.tsx";
+import { renderPaywallEmail } from "../_templates/paywall-email-html.ts";
 
 type QueueRow = {
   id: string;
@@ -15,6 +10,7 @@ type QueueRow = {
   first_name: string;
 };
 
+const PAYWALL_EMAIL_SUBJECT = "Your trial is still waiting for you 🕊️";
 const FROM_ADDRESS = "Samuel from Prayer Journal <samuel@prayerjournal.app>";
 const BATCH_LIMIT = 50;
 
@@ -23,10 +19,6 @@ function json(status: number, body: Record<string, unknown>) {
     status,
     headers: { "Content-Type": "application/json" },
   });
-}
-
-function buildUnsubscribeUrl(userId: string): string {
-  return `https://prayerjournal.app/email/unsubscribe?user_id=${encodeURIComponent(userId)}`;
 }
 
 async function sendWithResend(apiKey: string, to: string, subject: string, html: string) {
@@ -109,12 +101,8 @@ serve(async (req) => {
     }
 
     try {
-      const html = await renderAsync(
-        React.createElement(PaywallEmail, {
-          firstName: row.first_name,
-          unsubscribeUrl: buildUnsubscribeUrl(row.user_id),
-        })
-      );
+      const unsubscribeUrl = `https://prayerjournal.app/email/unsubscribe?user_id=${row.user_id}`;
+      const html = renderPaywallEmail(row.first_name, unsubscribeUrl);
 
       await sendWithResend(resendApiKey, row.email, PAYWALL_EMAIL_SUBJECT, html);
 
