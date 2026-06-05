@@ -306,6 +306,11 @@ export default function OnboardingPaywall() {
             options={{ displayCloseButton: true }}
             onPurchaseCancelled={() => {
               trackPurchaseResult("cancel");
+              trackPaywallExitedWithoutTrial({
+                email: user?.email ?? null,
+                first_name:
+                  (user?.user_metadata?.full_name as string | undefined) ?? null,
+              });
             }}
             onPurchaseError={() => {
               setPurchaseError("Could not complete purchase. Please try again.");
