@@ -27,7 +27,15 @@ import { colors, fonts, spacing } from "@/theme/theme";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  AppState,
+  Linking,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import RevenueCatUI from "react-native-purchases-ui";
 
 const SUBSCRIPTION_VERIFY_ATTEMPTS = 3;
@@ -44,8 +52,24 @@ export default function OnboardingPaywall() {
   const [paywallInitError, setPaywallInitError] = useState<string | null>(null);
   const [paywallInitStage, setPaywallInitStage] = useState<"auth" | "revenuecat" | "offerings" | "ready">("auth");
   const trialStartedRef = useRef(false);
+  const exitEventSentRef = useRef(false);
   const userRef = useRef(user);
   userRef.current = user;
+
+  const fireExitEvent = () => {
+    if (trialStartedRef.current) return;
+    if (exitEventSentRef.current) return;
+    exitEventSentRef.current = true;
+    const currentUser = userRef.current;
+    trackPaywallExitedWithoutTrial({
+      email:
+        currentUser?.email ??
+        (currentUser?.user_metadata?.email as string | undefined) ??
+        null,
+      first_name:
+        (currentUser?.user_metadata?.full_name as string | undefined) ?? null,
+    });
+  };
 
   useEffect(() => {
     trackPaywallViewed({
@@ -59,17 +83,17 @@ export default function OnboardingPaywall() {
 
   useEffect(() => {
     return () => {
-      if (trialStartedRef.current) return;
-      const currentUser = userRef.current;
-      trackPaywallExitedWithoutTrial({
-        email:
-          currentUser?.email ??
-          (currentUser?.user_metadata?.email as string | undefined) ??
-          null,
-        first_name:
-          (currentUser?.user_metadata?.full_name as string | undefined) ?? null,
-      });
+      fireExitEvent();
     };
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      if (nextState === "background" || nextState === "inactive") {
+        fireExitEvent();
+      }
+    });
+    return () => subscription.remove();
   }, []);
 
   const getPaywallInitErrorMessage = (error: unknown) => {

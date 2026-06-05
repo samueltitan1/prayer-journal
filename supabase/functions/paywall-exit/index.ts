@@ -45,7 +45,6 @@ serve(async (req) => {
     return new Response("ignored", { status: 200 });
   }
 
-  const userId = payload.event?.distinct_id?.trim();
   const email =
     payload.person?.properties?.email?.trim() ??
     payload.event?.properties?.email?.trim();
@@ -60,8 +59,8 @@ serve(async (req) => {
     // Proceed to upsert below with the relay address unchanged.
   }
 
-  if (!userId || !email) {
-    return json(400, { error: "Missing distinct_id or email" });
+  if (!email) {
+    return json(400, { error: "Missing email" });
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -72,10 +71,24 @@ serve(async (req) => {
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
 
+  const { data: lookupData, error: lookupError } =
+    await supabase.auth.admin.listUsers({ filter: `email.eq.${email}` });
+
+  if (lookupError) {
+    console.error("paywall-exit: user lookup failed", lookupError);
+    return json(500, { error: lookupError.message });
+  }
+
+  const supabaseUserId = lookupData?.users?.[0]?.id;
+  if (!supabaseUserId) {
+    console.log("paywall-exit: no Supabase user found for email", email);
+    return json(200, { ok: true, skipped: true });
+  }
+
   const { data: settings } = await supabase
     .from("user_settings")
     .select("timezone")
-    .eq("user_id", userId)
+    .eq("user_id", supabaseUserId)
     .maybeSingle();
 
   const sendAfter = computePaywallSendAfter(new Date(), settings?.timezone ?? null);
@@ -83,7 +96,7 @@ serve(async (req) => {
 
   const { error } = await supabase.from("paywall_email_queue").upsert(
     {
-      user_id: userId,
+      user_id: supabaseUserId,
       email,
       first_name: firstName,
       send_after: sendAfter.toISOString(),

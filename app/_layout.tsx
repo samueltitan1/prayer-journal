@@ -21,7 +21,6 @@ import {
   promptBiometricAuth,
 } from "@/lib/biometricLock";
 import {
-  recordAppFirstOpenIfNeeded,
   resyncDailyPrayerReminderFromSettings,
   scheduleFirstEntryNudgeIfNeeded,
   scheduleTrialEndingReminderNotification,
@@ -394,7 +393,6 @@ export default function RootLayout() {
 
   useEffect(() => {
     initPostHog();
-    void recordAppFirstOpenIfNeeded();
   }, []);
 
   useEffect(() => {

@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { capture } from "./posthog";
+import { getEntitlement } from "./subscriptions";
 import { getSupabase } from "./supabaseClient";
 
 const DAILY_KIND = "daily_prayer_reminder";
@@ -18,9 +19,13 @@ const REFLECTION_NOTIFY_TIME_LOCAL = "09:00";
 const INACTIVE_NUDGE_STORAGE_PREFIX = "inactive_nudge_last_date_v1";
 const FIRST_ENTRY_NUDGE_ID = "first-entry-nudge";
 const FIRST_ENTRY_NUDGE_KIND = "first_entry_nudge";
-const APP_FIRST_OPEN_AT_KEY = "app_first_open_at_v1";
+const FIRST_ENTITLED_AT_PREFIX = "first_entitled_at_v1";
+const FIRST_ENTRY_NUDGE_LAST_AT_PREFIX = "first_entry_nudge_last_at_v1";
+const FIRST_ENTRY_NUDGE_PENDING_AT_PREFIX = "first_entry_nudge_pending_at_v1";
 const FIRST_ENTRY_NUDGE_SENT_PREFIX = "first_entry_nudge_sent_v1";
 const FIRST_ENTRY_NUDGE_DELAY_MS = 48 * 60 * 60 * 1000;
+const FIRST_ENTRY_NUDGE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+const FIRST_ENTRY_MIN_TRIGGER_LEAD_MS = 60 * 1000;
 const TRIAL_REMINDER_KIND = "trial_end_reminder";
 const NOTIFICATION_DENIAL_COUNT_KEY = "notification_denial_count_v1";
 const NOTIFICATION_STARTUP_DENIED_KEY = "notification_startup_denied_v1";
@@ -483,20 +488,140 @@ async function shouldScheduleStreakFollowup(): Promise<boolean> {
   return (data.current_streak ?? 0) >= 1;
 }
 
-export async function recordAppFirstOpenIfNeeded() {
-  if (Platform.OS === "web") return;
-  const existing = await AsyncStorage.getItem(APP_FIRST_OPEN_AT_KEY);
-  if (existing) return;
-  await AsyncStorage.setItem(APP_FIRST_OPEN_AT_KEY, new Date().toISOString());
+function firstEntitledAtKey(userId: string) {
+  return `${FIRST_ENTITLED_AT_PREFIX}:${userId}`;
 }
 
-function firstEntryNudgeSentKey(userId: string) {
+function firstEntryNudgeLastAtKey(userId: string) {
+  return `${FIRST_ENTRY_NUDGE_LAST_AT_PREFIX}:${userId}`;
+}
+
+function firstEntryNudgePendingAtKey(userId: string) {
+  return `${FIRST_ENTRY_NUDGE_PENDING_AT_PREFIX}:${userId}`;
+}
+
+function firstEntryNudgeLegacySentKey(userId: string) {
   return `${FIRST_ENTRY_NUDGE_SENT_PREFIX}:${userId}`;
 }
 
-export async function markFirstEntryNudgeSent(userId: string) {
-  if (Platform.OS === "web") return;
-  await AsyncStorage.setItem(firstEntryNudgeSentKey(userId), "1");
+async function getOrRecordFirstEntitledAt(userId: string): Promise<Date | null> {
+  const entitlement = await getEntitlement(userId);
+  if (!entitlement.active) return null;
+
+  const storageKey = firstEntitledAtKey(userId);
+  const existing = await AsyncStorage.getItem(storageKey);
+  if (existing) {
+    const parsed = new Date(existing);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+
+  let anchor: Date | null = null;
+  try {
+    const { data } = await getSupabase()
+      .from("subscriptions")
+      .select("trial_started_at")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (data?.trial_started_at) {
+      const parsed = new Date(data.trial_started_at);
+      if (!Number.isNaN(parsed.getTime())) anchor = parsed;
+    }
+  } catch {
+    // noop
+  }
+
+  if (!anchor) anchor = new Date();
+  await AsyncStorage.setItem(storageKey, anchor.toISOString());
+  return anchor;
+}
+
+async function getFirstEntryNudgeLastAt(userId: string): Promise<Date | null> {
+  const lastAtRaw = await AsyncStorage.getItem(firstEntryNudgeLastAtKey(userId));
+  if (lastAtRaw) {
+    const parsed = new Date(lastAtRaw);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+
+  const legacySent = await AsyncStorage.getItem(firstEntryNudgeLegacySentKey(userId));
+  if (legacySent === "1") {
+    const now = new Date();
+    await AsyncStorage.setItem(firstEntryNudgeLastAtKey(userId), now.toISOString());
+    return now;
+  }
+
+  return null;
+}
+
+async function recordFirstEntryNudgeFired(userId: string, at: Date) {
+  await AsyncStorage.setItem(firstEntryNudgeLastAtKey(userId), at.toISOString());
+}
+
+async function getPendingFirstEntryNudgeAt(userId: string): Promise<Date | null> {
+  const raw = await AsyncStorage.getItem(firstEntryNudgePendingAtKey(userId));
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+async function setPendingFirstEntryNudgeAt(userId: string, at: Date | null) {
+  const key = firstEntryNudgePendingAtKey(userId);
+  if (!at) {
+    await AsyncStorage.removeItem(key);
+    return;
+  }
+  await AsyncStorage.setItem(key, at.toISOString());
+}
+
+function buildFirstEntryNudgeContent() {
+  return {
+    title: "Start your prayer journal",
+    body: "Make your first entry — even a short prayer is a great place to begin.",
+    sound: Platform.OS === "ios" ? "default" : undefined,
+    data: { kind: FIRST_ENTRY_NUDGE_KIND, url: PRAY_DEEP_LINK },
+  };
+}
+
+async function scheduleFirstEntryNudgeAt(
+  userId: string,
+  triggerAt: Date,
+  options: { recordFired: boolean; setPending: boolean }
+) {
+  if (await isScheduledKind(FIRST_ENTRY_NUDGE_KIND)) return false;
+
+  try {
+    await Notifications.cancelScheduledNotificationAsync(FIRST_ENTRY_NUDGE_ID);
+  } catch {
+    // noop
+  }
+  await cancelScheduledByKind(FIRST_ENTRY_NUDGE_KIND);
+
+  try {
+    await Notifications.scheduleNotificationAsync({
+      identifier: FIRST_ENTRY_NUDGE_ID,
+      content: buildFirstEntryNudgeContent(),
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: triggerAt },
+    } as any);
+  } catch (e) {
+    console.warn("Failed to schedule first-entry nudge", e);
+    return false;
+  }
+
+  if (options.setPending) {
+    await setPendingFirstEntryNudgeAt(userId, triggerAt);
+  } else {
+    await setPendingFirstEntryNudgeAt(userId, null);
+  }
+
+  if (options.recordFired) {
+    await recordFirstEntryNudgeFired(userId, triggerAt);
+    capture("first_entry_nudge_sent", { scheduled_for: triggerAt.toISOString() });
+    if (__DEV__) console.log("First-entry nudge scheduled (due)");
+  } else {
+    capture("first_entry_nudge_scheduled", { scheduled_for: triggerAt.toISOString() });
+    if (__DEV__) console.log("First-entry nudge scheduled");
+  }
+
+  return true;
 }
 
 export async function cancelFirstEntryNudgeNotification(userId?: string) {
@@ -506,7 +631,7 @@ export async function cancelFirstEntryNudgeNotification(userId?: string) {
     await Notifications.cancelScheduledNotificationAsync(FIRST_ENTRY_NUDGE_ID);
     await cancelScheduledByKind(FIRST_ENTRY_NUDGE_KIND);
     if (userId) {
-      await markFirstEntryNudgeSent(userId);
+      await setPendingFirstEntryNudgeAt(userId, null);
     }
     if (__DEV__) console.log("First-entry nudge cancelled");
   } catch (e) {
@@ -523,8 +648,8 @@ export async function scheduleFirstEntryNudgeIfNeeded(userId: string) {
   }
 
   firstEntryNudgeInFlight = (async () => {
-    const sent = await AsyncStorage.getItem(firstEntryNudgeSentKey(userId));
-    if (sent === "1") return;
+    const entitlement = await getEntitlement(userId);
+    if (!entitlement.active) return;
 
     const granted = await requestNotificationPermissions();
     if (!granted) return;
@@ -542,73 +667,47 @@ export async function scheduleFirstEntryNudgeIfNeeded(userId: string) {
       return;
     }
 
-    await recordAppFirstOpenIfNeeded();
-    const firstOpenRaw = await AsyncStorage.getItem(APP_FIRST_OPEN_AT_KEY);
-    if (!firstOpenRaw) return;
+    const firstEntitledAt = await getOrRecordFirstEntitledAt(userId);
+    if (!firstEntitledAt) return;
 
-    const firstOpenAt = new Date(firstOpenRaw);
-    if (Number.isNaN(firstOpenAt.getTime())) return;
-
-    const triggerAt = new Date(firstOpenAt.getTime() + FIRST_ENTRY_NUDGE_DELAY_MS);
     const now = Date.now();
+    const firstEligibleAt = firstEntitledAt.getTime() + FIRST_ENTRY_NUDGE_DELAY_MS;
 
-    const nudgeContent = {
-      title: "Start your prayer journal",
-      body: "Make your first entry — even a short prayer is a great place to begin.",
-      sound: Platform.OS === "ios" ? "default" : undefined,
-      data: { kind: FIRST_ENTRY_NUDGE_KIND, url: PRAY_DEEP_LINK },
-    };
-
-    if (now < triggerAt.getTime()) {
-      if (await isScheduledKind(FIRST_ENTRY_NUDGE_KIND)) return;
-
-      try {
-        await Notifications.cancelScheduledNotificationAsync(FIRST_ENTRY_NUDGE_ID);
-      } catch {
-        // noop
+    let lastNudgeAt = await getFirstEntryNudgeLastAt(userId);
+    const pendingAt = await getPendingFirstEntryNudgeAt(userId);
+    if (pendingAt && now >= pendingAt.getTime()) {
+      if (!lastNudgeAt || lastNudgeAt.getTime() < pendingAt.getTime()) {
+        await recordFirstEntryNudgeFired(userId, pendingAt);
+        lastNudgeAt = pendingAt;
       }
-      await cancelScheduledByKind(FIRST_ENTRY_NUDGE_KIND);
+      await setPendingFirstEntryNudgeAt(userId, null);
+    }
 
-      try {
-        await Notifications.scheduleNotificationAsync({
-          identifier: FIRST_ENTRY_NUDGE_ID,
-          content: nudgeContent,
-          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: triggerAt },
-        } as any);
-      } catch (e) {
-        console.warn("Failed to schedule first-entry nudge", e);
-        return;
-      }
-
-      await markFirstEntryNudgeSent(userId);
-      capture("first_entry_nudge_scheduled", {
-        scheduled_for: triggerAt.toISOString(),
+    if (now < firstEligibleAt) {
+      await scheduleFirstEntryNudgeAt(userId, new Date(firstEligibleAt), {
+        recordFired: false,
+        setPending: true,
       });
-      if (__DEV__) console.log("First-entry nudge scheduled");
       return;
     }
 
-    try {
-      await Notifications.cancelScheduledNotificationAsync(FIRST_ENTRY_NUDGE_ID);
-    } catch {
-      // noop
-    }
-    await cancelScheduledByKind(FIRST_ENTRY_NUDGE_KIND);
+    const nextDueAt = lastNudgeAt
+      ? lastNudgeAt.getTime() + FIRST_ENTRY_NUDGE_INTERVAL_MS
+      : firstEligibleAt;
 
-    try {
-      await Notifications.scheduleNotificationAsync({
-        identifier: FIRST_ENTRY_NUDGE_ID,
-        content: nudgeContent,
-        trigger: null,
-      } as any);
-    } catch (e) {
-      console.warn("Failed to send first-entry nudge immediately", e);
+    if (now < nextDueAt) {
+      await scheduleFirstEntryNudgeAt(userId, new Date(nextDueAt), {
+        recordFired: false,
+        setPending: true,
+      });
       return;
     }
 
-    await markFirstEntryNudgeSent(userId);
-    capture("first_entry_nudge_sent", { hours_since_install: 48 });
-    if (__DEV__) console.log("First-entry nudge sent immediately");
+    const triggerAt = new Date(Math.max(now + FIRST_ENTRY_MIN_TRIGGER_LEAD_MS, nextDueAt));
+    await scheduleFirstEntryNudgeAt(userId, triggerAt, {
+      recordFired: true,
+      setPending: false,
+    });
   })();
 
   try {
