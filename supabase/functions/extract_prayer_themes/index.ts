@@ -2,61 +2,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.43.4";
 import OpenAI from "npm:openai";
-
-const ALLOWED_THEMES = new Set([
-  "anxiety",
-  "peace",
-  "gratitude",
-  "work",
-  "family",
-  "health",
-  "growth",
-  "grief",
-  "hope",
-  "loneliness",
-  "shame",
-  "overwhelmed",
-  "guilt",
-  "fear",
-  "anger",
-  "jealousy",
-  "envy",
-  "pride",
-  "temptation",
-  "relationships",
-  "joy",
-  "comfort",
-  "strength",
-  "courage",
-  "faith",
-  "finances",
-  "career",
-  "education",
-  "marriage",
-  "parenting",
-  "friends",
-  "community",
-  "travel",
-  "leisure",
-  "creativity",
-  "loss",
-  "purpose",
-  "love",
-  "thankfulness",
-  "contentment",
-  "healing",
-  "salvation",
-  "forgiveness",
-  "guidance",
-  "provision",
-  "children",
-  "surrender",
-  "doubt",
-  "worship",
-  "trust",
-  "friendship",
-
-]);
+import {
+  isClassifiedTheme,
+  NOTIFICATION_RESTRICTED_THEMES,
+  NOTIFICATION_SAFE_THEMES,
+} from "../_shared/notificationThemeConfig.ts";
 
 type Body = {
   prayer_id?: string;
@@ -75,7 +25,7 @@ function sanitizeThemes(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const normalized = raw
     .map((value) => (typeof value === "string" ? value.trim().toLowerCase() : ""))
-    .filter((value): value is string => Boolean(value) && ALLOWED_THEMES.has(value));
+    .filter((value): value is string => Boolean(value) && isClassifiedTheme(value));
   return Array.from(new Set(normalized)).slice(0, 3);
 }
 
@@ -130,8 +80,13 @@ serve(async (req: Request): Promise<Response> => {
       apiKey: Deno.env.get("OPENAI_API_KEY")!,
     });
 
-    const prompt = `Given this prayer, return 1-3 single-word themes from this list:
-[anxiety, peace, gratitude, work, family, health, growth, grief, hope, relationships]
+    const safeThemesList = NOTIFICATION_SAFE_THEMES.join(", ");
+    const restrictedThemesList = NOTIFICATION_RESTRICTED_THEMES.join(", ");
+    const prompt = `Given this prayer, return 1-3 single-word themes. Choose only from these two separate lists:
+
+Safe themes: [${safeThemesList}]
+Restricted themes: [${restrictedThemesList}]
+
 Prayer: "${prayerText}"
 Return JSON only: {"themes": ["work", "anxiety"]}`;
 
@@ -143,7 +98,7 @@ Return JSON only: {"themes": ["work", "anxiety"]}`;
         {
           role: "system",
           content:
-            "Return valid JSON only with a single key named themes that contains 1-3 items from the allowed list.",
+            "Return valid JSON only with a single key named themes that contains 1-3 items from the safe or restricted theme lists provided.",
         },
         { role: "user", content: prompt },
       ],
