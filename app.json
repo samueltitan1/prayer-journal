@@ -2,7 +2,7 @@
   "expo": {
     "name": "Prayer Journal",
     "slug": "prayer-journal",
-    "version": "1.15",
+    "version": "1.16",
     "orientation": "portrait",
     "icon": "./assets/appicon.png",
     "userInterfaceStyle": "automatic",
@@ -16,6 +16,10 @@
     ],
     "ios": {
       "usesAppleSignIn": true,
+      "associatedDomains": [
+        "applinks:prayerjournal.app",
+        "applinks:www.prayerjournal.app"
+      ],
       "infoPlist": {
         "UIKeyboardDismissModeOnDrag": "YES",
         "UIKeyboardWillShowNotification": true,
@@ -44,7 +48,7 @@
       },
       "supportsTablet": false,
       "bundleIdentifier": "com.sinaiglobal.prayerjournal",
-      "buildNumber": "1.15"
+      "buildNumber": "1.16"
     },
     "android": {
       "adaptiveIcon": {

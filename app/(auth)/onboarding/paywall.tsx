@@ -7,6 +7,7 @@ import {
   trackOnboardingScreenViewed,
   trackOnboardingStepCompleted,
   trackOnboardingStepViewed,
+  trackPaywallExitedWithoutTrial,
   trackPaywallViewed,
   trackPurchaseResult,
 } from "@/lib/analytics/onboarding";
@@ -25,7 +26,7 @@ import { getSupabase } from "@/lib/supabaseClient";
 import { colors, fonts, spacing } from "@/theme/theme";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Linking, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import RevenueCatUI from "react-native-purchases-ui";
 
@@ -42,6 +43,22 @@ export default function OnboardingPaywall() {
   const [paywallReady, setPaywallReady] = useState(false);
   const [paywallInitError, setPaywallInitError] = useState<string | null>(null);
   const [paywallInitStage, setPaywallInitStage] = useState<"auth" | "revenuecat" | "offerings" | "ready">("auth");
+  const trialStartedRef = useRef(false);
+  const userRef = useRef(user);
+  userRef.current = user;
+
+  useEffect(() => {
+    return () => {
+      if (trialStartedRef.current) return;
+      const currentUser = userRef.current;
+      if (!currentUser?.id) return;
+      trackPaywallExitedWithoutTrial({
+        email: currentUser.email ?? null,
+        first_name:
+          (currentUser.user_metadata?.full_name as string | undefined) ?? null,
+      });
+    };
+  }, []);
 
   const getPaywallInitErrorMessage = (error: unknown) => {
     const raw = error instanceof Error ? error.message : String(error ?? "");
@@ -131,8 +148,14 @@ export default function OnboardingPaywall() {
       return;
     }
     setSyncing(true);
+    trialStartedRef.current = true;
     try {
       await syncRevenueCatSubscription(user.id);
+      await getSupabase()
+        .from("paywall_email_queue")
+        .update({ suppressed: true })
+        .eq("user_id", user.id)
+        .is("sent_at", null);
       trackPurchaseResult("success", source);
       trackOnboardingStepCompleted("paywall", "paywall");
       trackOnboardingScreenViewed("first_prayer", "paywall");

@@ -19,3 +19,13 @@ entrypoint = "./functions/extract_prayer_themes/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/send_reflection_notifications/index.ts"
+
+[functions.paywall-exit]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/paywall-exit/index.ts"
+
+[functions.send-paywall-email]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/send-paywall-email/index.ts"

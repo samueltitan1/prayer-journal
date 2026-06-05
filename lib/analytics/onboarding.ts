@@ -131,6 +131,13 @@ export const trackPaywallViewed = () => {
   capture("paywall_viewed");
 };
 
+export const trackPaywallExitedWithoutTrial = (props: {
+  email: string | null;
+  first_name: string | null;
+}) => {
+  capture("paywall_exited_without_trial", props);
+};
+
 export const trackPurchaseResult = (
   result: "success" | "error" | "cancel",
   productId?: string

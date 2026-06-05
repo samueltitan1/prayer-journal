@@ -361,13 +361,28 @@ export default function RootLayout() {
     (url: string | null) => {
       if (!url) return;
       const parsed = Linking.parse(url);
-      const path = (parsed.path ?? "").replace(/^\/+/, "");
-      if (path !== "pray") return;
+      const path = (parsed.path ?? "").replace(/^\/+/, "").split("/")[0]?.toLowerCase() ?? "";
+      if (path !== "pray" && path !== "trial") return;
 
       void (async () => {
         try {
           const { data } = await getSupabase().auth.getSession();
-          const isSignedIn = Boolean(data.session?.user?.id);
+          const sessionUserId = data.session?.user?.id;
+          const isSignedIn = Boolean(sessionUserId);
+
+          if (path === "trial") {
+            if (!isSignedIn || !sessionUserId) {
+              router.replace("/(auth)/onboarding/welcome");
+              return;
+            }
+            await upsertOnboardingResponses(sessionUserId, {
+              onboarding_step: "paywall",
+              onboarding_last_seen_at: new Date().toISOString(),
+            });
+            router.replace("/(auth)/onboarding/paywall");
+            return;
+          }
+
           router.replace(isSignedIn ? "/(tabs)/pray" : "/(auth)/onboarding/welcome");
         } catch {
           router.replace("/(auth)/onboarding/welcome");
